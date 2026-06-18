@@ -129,6 +129,19 @@ cp .env.example .env
 # Fill in your Stellar keypair and Venice AI key
 ```
 
+### Database migration
+This branch does not include an automated migration runner. To apply the backend index migration, run the SQL script directly against your PostgreSQL database:
+
+```bash
+psql "$DATABASE_URL" -f backend/src/db/migrations/001_add_stats_indexes.sql
+```
+
+If you need an explicit connection, use:
+
+```bash
+psql -h <host> -U <user> -d <database> -f backend/src/db/migrations/001_add_stats_indexes.sql
+```
+
 ### Run (testnet)
 
 ```bash

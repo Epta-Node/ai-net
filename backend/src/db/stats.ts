@@ -48,7 +48,7 @@ async function getTotalXLMTransacted(db: DbClient): Promise<number> {
 
 async function getUptimePercent(db: DbClient, since: Date): Promise<number> {
   const result = await db.query<{ total: string | number; succeeded: string | number }>(
-    "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded FROM tasks WHERE createdAt >= $1",
+    "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded FROM tasks WHERE \"createdAt\" >= $1",
     [since.toISOString()]
   );
 
@@ -63,7 +63,7 @@ async function getUptimePercent(db: DbClient, since: Date): Promise<number> {
 
 async function getTasksHourlyCounts(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
   const result = await db.query<{ hour: string; count: string | number }>(
-    "SELECT DATE_TRUNC('hour', createdAt) AS hour, COUNT(*) AS count FROM tasks WHERE createdAt >= $1 GROUP BY hour ORDER BY hour",
+    "SELECT DATE_TRUNC('hour', \"createdAt\") AS hour, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= $1 GROUP BY hour ORDER BY hour",
     [since.toISOString()]
   );
 
@@ -72,7 +72,7 @@ async function getTasksHourlyCounts(db: DbClient, since: Date): Promise<Array<{ 
 
 async function getXLMHourlyTotals(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
   const result = await db.query<{ hour: string; sum: string | number }>(
-    "SELECT DATE_TRUNC('hour', createdAt) AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND createdAt >= $1 GROUP BY hour ORDER BY hour",
+    "SELECT DATE_TRUNC('hour', \"createdAt\") AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= $1 GROUP BY hour ORDER BY hour",
     [since.toISOString()]
   );
 
