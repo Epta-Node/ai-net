@@ -5,7 +5,7 @@ import { randomUUID } from 'crypto';
 
 import { decompose } from '../coordinator/decompose';
 import { executeDAG, type DispatchFn, type PaymentReleaseFn } from '../coordinator/coordinator';
-import { createTask, getTask } from '../coordinator/taskStore';
+import { createTask, getTask, setAbortController, abortTask, cancelPendingNodes } from '../coordinator/taskStore';
 import { eventBus } from '../coordinator/eventBus';
 import type { DAGEvent } from '../coordinator/types';
 
@@ -49,9 +49,13 @@ export function createApp(opts: AppOptions = {}): { httpServer: HttpServer; clos
       updatedAt: now,
     });
 
+    // Register an AbortController so DELETE can cancel this task
+    const abortController = new AbortController();
+    setAbortController(taskId, abortController);
+
     // Run the DAG asynchronously — do not await
     setImmediate(() => {
-      executeDAG(getTask(taskId)!, dispatch, releasePayment).catch(err => {
+      executeDAG(getTask(taskId)!, dispatch, releasePayment, abortController.signal).catch(err => {
         console.error('[coordinator] DAG execution error:', err);
       });
     });
@@ -64,6 +68,41 @@ export function createApp(opts: AppOptions = {}): { httpServer: HttpServer; clos
     const task = getTask(req.params.id!);
     if (!task) return res.status(404).json({ error: 'Task not found' });
     return res.json(task);
+  });
+
+  // ── DELETE /api/tasks/:id ──────────────────────────────────────────────────
+  app.delete('/api/tasks/:id', (req: Request, res: Response) => {
+    const taskId = req.params.id!;
+    const task = getTask(taskId);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    switch (task.status) {
+      case 'queued': {
+        // Queued task: cancel immediately — no nodes are running yet
+        cancelPendingNodes(taskId);
+        const now = new Date().toISOString();
+        eventBus.emit(taskId, {
+          type: 'task_cancelled',
+          taskId,
+          timestamp: now,
+        });
+        return res.json({ status: 'cancelled' });
+      }
+
+      case 'running': {
+        // Running task: signal the abort controller (async cancellation)
+        const aborted = abortTask(taskId);
+        if (!aborted) {
+          return res.status(409).json({ error: 'Task is already completing' });
+        }
+        return res.status(200).json({ status: 'cancelling' });
+      }
+
+      case 'completed':
+      case 'failed':
+      case 'cancelled':
+        return res.status(409).json({ error: `Task already ${task.status}` });
+    }
   });
 
   // ── HTTP server ────────────────────────────────────────────────────────────
@@ -117,6 +156,8 @@ export function createApp(opts: AppOptions = {}): { httpServer: HttpServer; clos
       ws.send(JSON.stringify({ type: 'task_completed', taskId, timestamp: task.updatedAt }));
     } else if (task.status === 'failed') {
       ws.send(JSON.stringify({ type: 'task_failed', taskId, timestamp: task.updatedAt }));
+    } else if (task.status === 'cancelled') {
+      ws.send(JSON.stringify({ type: 'task_cancelled', taskId, timestamp: task.updatedAt }));
     }
 
     ws.on('close', unsub);

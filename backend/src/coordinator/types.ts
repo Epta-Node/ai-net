@@ -1,5 +1,5 @@
 /** DAG node statuses */
-export type NodeStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type NodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 /** A single node in the execution DAG */
 export interface DAGNode {
@@ -20,7 +20,7 @@ export interface Task {
   taskId: string;
   prompt: string;
   walletPublicKey: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   dag: DAGNode[];
   createdAt: string;
   updatedAt: string;
@@ -34,7 +34,8 @@ export type DAGEventType =
   | 'payment_locked'
   | 'payment_released'
   | 'task_completed'
-  | 'task_failed';
+  | 'task_failed'
+  | 'task_cancelled';
 
 export interface DAGEvent {
   type: DAGEventType;

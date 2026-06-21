@@ -1,7 +1,7 @@
 import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
-import { updateNode, updateTask } from './taskStore';
+import { updateNode, updateTask, deleteAbortController } from './taskStore';
 import type { DAGNode, Task } from './types';
 
 const DEFAULT_CONCURRENCY = 3;
@@ -27,6 +27,13 @@ export interface CoordinatorOptions {
   timeoutMs?: number;
   fetch?: typeof fetch;
   dispatch?: DispatchFn;
+}
+
+class TaskCancelledError extends Error {
+  constructor() {
+    super('Task was cancelled');
+    this.name = 'TaskCancelledError';
+  }
 }
 
 class ConcurrencyLimiter {
@@ -94,26 +101,51 @@ export class Coordinator {
     this.paymentService = options.paymentService ?? { release: async () => 'mock-hash' };
   }
 
-  async executeDAG(taskId: string, dag: DAGNode[]): Promise<void> {
+  async executeDAG(taskId: string, dag: DAGNode[], signal?: AbortSignal): Promise<void> {
     const completed = new Set<string>();
     const failed = new Set<string>();
+    const cancelled = new Set<string>();
     const scheduled = new Set<string>();
     const nodeById = new Map(dag.map(node => [node.nodeId, node]));
     let inFlight = 0;
 
     updateTaskIfPresent(taskId, { status: 'running' });
 
+    // When cancellation signal fires, immediately mark all pending nodes as cancelled
+    const onCancel = (): void => {
+      for (const node of dag) {
+        if (node.status === 'pending') {
+          node.status = 'cancelled';
+          cancelled.add(node.nodeId);
+          updateNode(taskId, node.nodeId, { status: 'cancelled' });
+        }
+      }
+    };
+    signal?.addEventListener('abort', onCancel, { once: true });
+
     await new Promise<void>(resolve => {
       const finishIfSettled = (): void => {
-        if (completed.size + failed.size !== dag.length) return;
+        if (completed.size + failed.size + cancelled.size !== dag.length) return;
 
-        const status = failed.size === 0 ? 'completed' : 'failed';
-        updateTaskIfPresent(taskId, { status, dag });
-        this.bus.emit(taskId, {
-          type: status === 'completed' ? 'task_completed' : 'task_failed',
-          taskId,
-          timestamp: now(),
-        });
+        deleteAbortController(taskId);
+        signal?.removeEventListener('abort', onCancel);
+
+        if (cancelled.size > 0) {
+          updateTaskIfPresent(taskId, { status: 'cancelled', dag });
+          this.bus.emit(taskId, {
+            type: 'task_cancelled',
+            taskId,
+            timestamp: now(),
+          });
+        } else {
+          const status = failed.size === 0 ? 'completed' : 'failed';
+          updateTaskIfPresent(taskId, { status, dag });
+          this.bus.emit(taskId, {
+            type: status === 'completed' ? 'task_completed' : 'task_failed',
+            taskId,
+            timestamp: now(),
+          });
+        }
         resolve();
       };
 
@@ -149,6 +181,15 @@ export class Coordinator {
       };
 
       const scheduleReadyNodes = (): void => {
+        // If task has been cancelled, do not schedule any new nodes
+        if (signal?.aborted) {
+          onCancel();
+          if (inFlight === 0) {
+            finishIfSettled();
+          }
+          return;
+        }
+
         let scheduledAny = false;
 
         for (const node of dag) {
@@ -163,9 +204,10 @@ export class Coordinator {
           scheduledAny = true;
           scheduled.add(node.nodeId);
           inFlight += 1;
-          this.limiter.run(() => this.runNode(taskId, node, nodeById))
+          this.limiter.run(() => this.runNode(taskId, node, nodeById, signal))
             .then(status => {
               if (status === 'completed') completed.add(node.nodeId);
+              else if (status === 'cancelled') cancelled.add(node.nodeId);
               else failed.add(node.nodeId);
             })
             .finally(() => {
@@ -186,10 +228,23 @@ export class Coordinator {
     });
   }
 
-  async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration): Promise<unknown> {
+  async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration, cancelSignal?: AbortSignal): Promise<unknown> {
     const target = agent ?? await this.cheapestAgentFor(node.agentType);
+
+    // Short-circuit if already cancelled before starting the request
+    if (cancelSignal?.aborted) {
+      throw new TaskCancelledError();
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    // Forward cancellation signal to abort the in-flight HTTP request
+    const onCancel = (): void => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
+    cancelSignal?.addEventListener('abort', onCancel, { once: true });
 
     try {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
@@ -209,6 +264,10 @@ export class Coordinator {
       const text = await response.text();
       return text ? JSON.parse(text) : {};
     } catch (err) {
+      // If cancellation fired during the request, surface it as TaskCancelledError
+      if (cancelSignal?.aborted) {
+        throw new TaskCancelledError();
+      }
       if (err instanceof NonRetryableAgentError || err instanceof RetryableAgentError) {
         throw err;
       }
@@ -218,14 +277,23 @@ export class Coordinator {
       throw new RetryableAgentError(asErrorMessage(err));
     } finally {
       clearTimeout(timeout);
+      cancelSignal?.removeEventListener('abort', onCancel);
     }
   }
 
   private async runNode(
     taskId: string,
     node: DAGNode,
-    nodeById: Map<string, DAGNode>
-  ): Promise<'completed' | 'failed'> {
+    nodeById: Map<string, DAGNode>,
+    cancelSignal?: AbortSignal
+  ): Promise<'completed' | 'failed' | 'cancelled'> {
+    // If already cancelled before starting, bail out immediately
+    if (cancelSignal?.aborted) {
+      node.status = 'cancelled';
+      updateNode(taskId, node.nodeId, { status: 'cancelled' });
+      return 'cancelled';
+    }
+
     node.status = 'running';
     updateNode(taskId, node.nodeId, { status: 'running' });
     this.bus.emit(taskId, {
@@ -236,7 +304,14 @@ export class Coordinator {
     });
 
     try {
-      const result = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
+      const result = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById), cancelSignal);
+
+      // Node dispatched successfully — check if cancellation came in during dispatch
+      if (cancelSignal?.aborted) {
+        node.status = 'cancelled';
+        updateNode(taskId, node.nodeId, { status: 'cancelled' });
+        return 'cancelled';
+      }
 
       node.status = 'completed';
       node.result = result;
@@ -260,6 +335,13 @@ export class Coordinator {
 
       return 'completed';
     } catch (err) {
+      // If cancellation caused the dispatch to fail, mark the node as cancelled
+      if (err instanceof TaskCancelledError || cancelSignal?.aborted) {
+        node.status = 'cancelled';
+        updateNode(taskId, node.nodeId, { status: 'cancelled' });
+        return 'cancelled';
+      }
+
       node.status = 'failed';
       node.error = asErrorMessage(err);
       updateNode(taskId, node.nodeId, { status: 'failed', error: node.error });
@@ -282,7 +364,7 @@ export class Coordinator {
       .join('\n');
   }
 
-  private async dispatchWithRetry(taskId: string, node: DAGNode, context: string): Promise<unknown> {
+  private async dispatchWithRetry(taskId: string, node: DAGNode, context: string, cancelSignal?: AbortSignal): Promise<unknown> {
     if (this.dispatchOverride) {
       return this.dispatchOverride(taskId, node, context);
     }
@@ -293,8 +375,9 @@ export class Coordinator {
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
-        return await this.dispatchNode(node, context, primary);
+        return await this.dispatchNode(node, context, primary, cancelSignal);
       } catch (err) {
+        if (err instanceof TaskCancelledError) throw err;
         lastError = err;
         if (!isRetryable(err)) throw err;
       }
@@ -303,8 +386,9 @@ export class Coordinator {
     const fallback = agents.find(agent => agent.id !== primary.id);
     if (fallback) {
       try {
-        return await this.dispatchNode(node, context, fallback);
+        return await this.dispatchNode(node, context, fallback, cancelSignal);
       } catch (err) {
+        if (err instanceof TaskCancelledError) throw err;
         lastError = err;
       }
     }
@@ -332,14 +416,15 @@ export class Coordinator {
 export async function executeDAG(
   task: Task,
   dispatch: DispatchFn,
-  releasePayment: PaymentReleaseFn
+  releasePayment: PaymentReleaseFn,
+  signal?: AbortSignal
 ): Promise<void> {
   const coordinator = new Coordinator({
     dispatch,
     paymentService: { release: releasePayment },
   });
 
-  await coordinator.executeDAG(task.taskId, task.dag);
+  await coordinator.executeDAG(task.taskId, task.dag, signal);
 }
 
 function updateTaskIfPresent(taskId: string, patch: Partial<Task>): void {
