@@ -8,20 +8,23 @@ import { createApp } from "./api/app";
 import { initializeAgents } from "./agents";
 import { startAgentSync } from "./registry/sync";
 import { loadConfig, getConfig } from "./config";
+import { createLogger } from "./utils/logger";
+
+const log = createLogger({ module: 'server' });
 
 async function main() {
   // ── Validate env config at startup ──────────────────────────────────────────
   loadConfig();
   const config = getConfig();
 
-  console.log("[ai-net-backend] Starting server...");
+  log.info("Starting server...");
 
   try {
     // Start agent sync
     startAgentSync();
 
     // Initialize all agents and register them
-    console.log("[ai-net-backend] Initializing agents...");
+    log.info("Initializing agents...");
     await initializeAgents();
 
     // Create and start the server
@@ -30,29 +33,37 @@ async function main() {
     const port = config.PORT;
 
     httpServer.listen(port, () => {
-      console.log(`[ai-net-backend] Server running on http://localhost:${port}`);
-      console.log("[ai-net-backend] Available endpoints:");
-      console.log("  - GET  /health                    - Health check");
-      console.log("  - GET  /health/deep               - Deep health check");
-      console.log("  - POST /api/tasks                 - Submit new tasks");
-      console.log("  - GET  /api/tasks/:id              - Get task status");
-      console.log("  - WS   /tasks/:id/stream           - Stream task events");
-      console.log("  - POST /api/agents/register        - Register new agents");
-      console.log("  - GET  /api/agents                 - List all agents");
-      console.log("  - GET  /api/agents/capability/:type - Find agents by capability");
+      log.info(
+        {
+          port,
+          url: `http://localhost:${port}`,
+          endpoints: [
+            "GET  /health                     - Health check",
+            "GET  /health/deep                - Deep health check",
+            "POST /api/tasks                  - Submit new tasks",
+            "GET  /api/tasks/:id              - Get task status",
+            "WS   /tasks/:id/stream            - Stream task events",
+            "POST /api/agents/register        - Register new agents",
+            "GET  /api/agents                 - List all agents",
+            "GET  /api/agents/capability/:type - Find agents by capability"
+          ]
+        },
+        "Server running"
+      );
     });
 
     // ── Graceful shutdown ──────────────────────────────────────────────────────
     const shutdown = (signal: string) => {
-      console.log(`[ai-net-backend] Received ${signal}, shutting down gracefully...`);
+      log.info({ signal }, "Received shutdown signal, shutting down gracefully...");
+      
       const timeout = setTimeout(() => {
-        console.error("[ai-net-backend] Forced shutdown after 10s timeout");
+        log.error("Forced shutdown after 10s timeout");
         process.exit(1);
       }, 10_000);
 
       httpServer.close(() => {
         clearTimeout(timeout);
-        console.log("[ai-net-backend] Server closed.");
+        log.info("Server closed successfully.");
         process.exit(0);
       });
     };
@@ -61,7 +72,7 @@ async function main() {
     process.on("SIGINT", () => shutdown("SIGINT"));
 
   } catch (error) {
-    console.error("[ai-net-backend] Failed to start server:", error);
+    log.error({ error }, "Failed to start server");
     process.exit(1);
   }
 }

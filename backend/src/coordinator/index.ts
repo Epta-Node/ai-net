@@ -1,4 +1,7 @@
 import type { DagNode } from "../types/task";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger({ module: 'coordinator' });
 
 /**
  * Deterministically decomposes a prompt into a DAG of agent nodes.
@@ -56,6 +59,15 @@ export function decompose(prompt: string): DagNode[] {
     status: "queued",
     dependencies: deps.length ? deps : ["node_research"],
   });
+
+  log.debug(
+    { 
+      promptLength: prompt.length, 
+      nodeIds: nodes.map(n => n.id),
+      agentTypes: nodes.map(n => n.agentType)
+    }, 
+    "Prompt decomposed into task DAG"
+  );
 
   return nodes;
 }

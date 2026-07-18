@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { VeniceClient, type AgentType } from '../../venice/index.js';
+import { createLogger } from '../../utils/logger.js';
+import type { Logger } from 'pino';
 
 export interface BaseAgentConfig {
   veniceClient?: VeniceClient;
@@ -23,22 +25,31 @@ export abstract class BaseAgent {
   protected readonly venice: VeniceClient;
   protected readonly apiBaseUrl: string;
   protected readonly agentId: string;
+  protected readonly log: Logger;
 
   constructor(config: BaseAgentConfig = {}) {
+    this.apiBaseUrl = config.apiBaseUrl ?? 'http://127.0.0.1:3001';
+    this.agentId = config.agentId ?? `${this.getCapability()}-agent-1`;
+    
+    // Create a context-aware child logger for this agent instance
+    this.log = createLogger({
+      module: 'agent',
+      agentClass: this.constructor.name,
+      agentId: this.agentId,
+      capability: this.getCapability(),
+    });
+
     if (config.veniceClient) {
       this.venice = config.veniceClient;
     } else {
       const apiKey = process.env['VENICE_API_KEY'];
       if (!apiKey) {
-        console.warn(
-          `[${this.constructor.name}] WARNING: VENICE_API_KEY is not set. ` +
-            'Venice calls will fail. Set this env var before running in production.'
+        this.log.warn(
+          'VENICE_API_KEY is not set. Venice calls will fail. Set this env var before running in production.'
         );
       }
       this.venice = new VeniceClient({ apiKey: apiKey ?? '' });
     }
-    this.apiBaseUrl = config.apiBaseUrl ?? 'http://127.0.0.1:3001';
-    this.agentId = config.agentId ?? `${this.getCapability()}-agent-1`;
   }
 
   abstract execute(task: AgentTask): Promise<unknown | AgentError>;
@@ -53,7 +64,8 @@ export abstract class BaseAgent {
     try {
       await this.venice.complete('Hello', this.getAgentType());
       return true;
-    } catch {
+    } catch (error) {
+      this.log.error({ error }, 'Health check failed');
       return false;
     }
   }
@@ -74,19 +86,23 @@ export abstract class BaseAgent {
         body,
       });
       if (!response.ok) {
-        console.warn(
-          `[${this.constructor.name}] Registration returned non-2xx status: ${response.status}`
-        );
+        this.log.warn({ statusCode: response.status }, 'Registration returned non-2xx status');
       } else {
-        console.info(`[${this.constructor.name}] Successfully registered with capability "${this.getCapability()}".`);
+        this.log.info('Successfully registered agent capability');
       }
     } catch (err) {
-      console.warn(`[${this.constructor.name}] Could not reach registry to self-register:`, err instanceof Error ? err.message : 'unknown');
+      this.log.warn(
+        { error: err instanceof Error ? err.message : 'unknown' },
+        'Could not reach registry to self-register'
+      );
     }
   }
 
   protected validateOutput(raw: unknown): unknown | null {
     const result = this.getOutputSchema().safeParse(raw);
+    if (!result.success) {
+      this.log.debug({ errors: result.error.errors }, 'Output schema validation failed');
+    }
     return result.success ? result.data : null;
   }
 
@@ -98,6 +114,7 @@ export abstract class BaseAgent {
     try {
       return JSON.parse(trimmed);
     } catch {
+      this.log.debug({ rawText: raw }, 'Failed to parse raw text as JSON');
       return null;
     }
   }
@@ -111,8 +128,10 @@ export abstract class BaseAgent {
 
     let rawText: string;
     try {
+      this.log.debug('Executing primary Venice completion call');
       rawText = await this.venice.complete(fullPrompt, this.getAgentType());
-    } catch {
+    } catch (error) {
+      this.log.error({ error }, 'Primary Venice connection unavailable');
       return { error: 'VENICE_UNAVAILABLE' };
     }
 
@@ -125,6 +144,7 @@ export abstract class BaseAgent {
     }
 
     try {
+      this.log.warn('Primary response failed validation. Executing JSON-mode fallback retry...');
       const retryPrompt = `${systemPrompt}\n\n${userContent}${jsonModeAddendum}`;
       const retryText = await this.venice.complete(retryPrompt, this.getAgentType());
 
@@ -135,10 +155,12 @@ export abstract class BaseAgent {
           return retryValidated;
         }
       }
-    } catch {
+    } catch (error) {
+      this.log.error({ error }, 'Venice retry completion call unavailable');
       return { error: 'VENICE_UNAVAILABLE' };
     }
 
+    this.log.error('Venice returned a malformed response across both primary and retry attempts');
     return { error: 'VENICE_MALFORMED_RESPONSE' };
   }
 }
