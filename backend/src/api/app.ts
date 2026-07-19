@@ -23,6 +23,12 @@ import { authMiddleware } from "./middleware/auth";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
 import { errorHandler } from "./middleware/errorHandler";
+import { validate } from "./middleware/validate";
+import {
+  CreateTaskSchema,
+  TaskQuerySchema,
+  TaskIdParamSchema,
+} from "./schemas/task.schema";
 import { createLogger } from "../utils/logger";
 import { createTaskDb, getTaskDb } from "../db/tasks";
 
@@ -78,20 +84,12 @@ export function createApp(opts: AppOptions = {}): {
     "/api/tasks",
     authMiddleware,
     rateLimitMiddleware,
+    validate({ body: CreateTaskSchema }),
     (req: Request, res: Response) => {
-      const { prompt, walletPublicKey, maxBudgetXLM } = req.body as {
-        prompt?: string;
+      const { prompt, walletPublicKey } = req.body as {
+        prompt: string;
         walletPublicKey?: string;
-        maxBudgetXLM?: number;
       };
-
-      if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
-        return res.status(400).json({ error: "prompt is required" });
-      }
-
-      if (maxBudgetXLM !== undefined && maxBudgetXLM < 0.1) {
-        return res.status(400).json({ error: "maxBudgetXLM must be >= 0.1" });
-      }
 
       const taskId = `task_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
       const dag = decompose(taskId, prompt);
@@ -130,47 +128,58 @@ export function createApp(opts: AppOptions = {}): {
   );
 
   // ── GET /api/tasks ─────────────────────────────────────────────────────────
-  app.get("/api/tasks", authMiddleware, (req: Request, res: Response) => {
-    const walletPublicKey = req.headers["walletpublickey"] as
-      string | undefined;
-    if (!walletPublicKey)
-      return res.status(401).json({ error: "walletpublickey header required" });
-    const page = Math.max(1, parseInt((req.query.page as string) ?? "1", 10));
-    const pageSize = Math.min(
-      100,
-      Math.max(1, parseInt((req.query.pageSize as string) ?? "20", 10)),
-    );
-    const taskDb = createTaskDb(getTaskDb());
-    const status = req.query.status as string | undefined;
-    const q = req.query.q as string | undefined;
-    const sort = req.query.sort as
-      "createdAt:asc" | "createdAt:desc" | undefined;
-    const { tasks, total } = taskDb.list(walletPublicKey, page, pageSize, {
-      status,
-      q,
-      sort,
-    });
-    return res.json({ tasks, total, page, pageSize });
-  });
+  app.get(
+    "/api/tasks",
+    authMiddleware,
+    validate({ query: TaskQuerySchema }),
+    (req: Request, res: Response) => {
+      const walletPublicKey = req.headers["walletpublickey"] as
+        string | undefined;
+      if (!walletPublicKey)
+        return res.status(401).json({ error: "walletpublickey header required" });
+      const { page, pageSize, status, sort, q } = req.query as unknown as {
+        page: number;
+        pageSize: number;
+        status?: string;
+        sort: "createdAt:asc" | "createdAt:desc";
+        q?: string;
+      };
+      const taskDb = createTaskDb(getTaskDb());
+      const { tasks, total } = taskDb.list(walletPublicKey, page, pageSize, {
+        status,
+        q,
+        sort,
+      });
+      return res.json({ tasks, total, page, pageSize });
+    },
+  );
 
   // ── GET /api/tasks/:id ─────────────────────────────────────────────────────
-  app.get("/api/tasks/:id", (req: Request, res: Response) => {
-    const task = getTask(req.params.id!);
-    if (!task) return res.status(404).json({ error: "Task not found" });
-    return res.json({ ...task, id: task.taskId, dag: task.dag });
-  });
+  app.get(
+    "/api/tasks/:id",
+    validate({ params: TaskIdParamSchema }),
+    (req: Request, res: Response) => {
+      const task = getTask(req.params.id!);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      return res.json({ ...task, id: task.taskId, dag: task.dag });
+    },
+  );
 
   // ── DELETE /api/tasks/:id ──────────────────────────────────────────────────
-  app.delete("/api/tasks/:id", (req: Request, res: Response) => {
-    const task = getTask(req.params.id!);
-    if (!task) return res.status(404).json({ error: "Task not found" });
-    if (task.status === "running") {
-      return res.status(409).json({ error: "Cannot cancel a running task" });
-    }
-    const taskDb = createTaskDb(getTaskDb());
-    taskDb.updateStatus(req.params.id!, "cancelled");
-    return res.json({ ...task, id: task.taskId, status: "cancelled" });
-  });
+  app.delete(
+    "/api/tasks/:id",
+    validate({ params: TaskIdParamSchema }),
+    (req: Request, res: Response) => {
+      const task = getTask(req.params.id!);
+      if (!task) return res.status(404).json({ error: "Task not found" });
+      if (task.status === "running") {
+        return res.status(409).json({ error: "Cannot cancel a running task" });
+      }
+      const taskDb = createTaskDb(getTaskDb());
+      taskDb.updateStatus(req.params.id!, "cancelled");
+      return res.json({ ...task, id: task.taskId, status: "cancelled" });
+    },
+  );
 
   // ── HTTP server ────────────────────────────────────────────────────────────
   const httpServer = createServer(app);
