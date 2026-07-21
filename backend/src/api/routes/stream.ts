@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { eventBus as defaultEventBus } from '../../coordinator/eventBus';
 import { getTask as defaultGetTask } from '../../coordinator/taskStore';
 import type { EventStore } from '../../coordinator/eventStore';
-import type { Task } from '../../coordinator/types';
+import type { Task } from '../../types/task';
 import { WS_CLOSE } from '../../types/stream';
 
 const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;

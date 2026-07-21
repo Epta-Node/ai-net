@@ -22,6 +22,41 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
 
   const getDb = () => options.db ?? createAgentDb(getAgentDb());
 
+  /**
+   * @openapi
+   * /api/agents:
+   *   get:
+   *     summary: List registered agents
+   *     operationId: listAgents
+   *     tags: [Agents]
+   *     security: []
+   *     parameters:
+   *       - in: query
+   *         name: capability
+   *         schema: { type: string }
+   *         description: Filter agents that support this capability
+   *       - in: query
+   *         name: minReputation
+   *         schema: { type: number }
+   *       - in: query
+   *         name: maxPriceXLM
+   *         schema: { type: number }
+   *     responses:
+   *       200:
+   *         description: List of agents
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Agent'
+   *       500:
+   *         description: Internal server error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
   // GET /api/agents
   router.get(
     "/",
@@ -49,6 +84,33 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     },
   );
 
+  /**
+   * @openapi
+   * /api/agents/{id}:
+   *   get:
+   *     summary: Get an agent by ID
+   *     operationId: getAgent
+   *     tags: [Agents]
+   *     security: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Agent found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Agent'
+   *       404:
+   *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
   // GET /api/agents/:id
   router.get(
     "/:id",
@@ -64,6 +126,44 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     },
   );
 
+  /**
+   * @openapi
+   * /api/agents/{id}/health:
+   *   get:
+   *     summary: Check an agent's live health/reachability
+   *     description: >
+   *       Sends a GET request to the agent's registered endpoint and reports
+   *       whether it responded within the configured timeout. Always
+   *       returns 200 — reachability failures are reported in the body,
+   *       not via HTTP status.
+   *     tags: [Agents]
+   *     security: []
+   *     operationId: checkAgentHealth
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Health check result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 status:
+   *                   type: string
+   *                   enum: [healthy, unreachable]
+   *                 latencyMs:
+   *                   type: number
+   *       404:
+   *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
   // GET /api/agents/:id/health
   router.get(
     "/:id/health",
@@ -101,6 +201,54 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     },
   );
 
+  /**
+   * @openapi
+   * /api/agents/register:
+   *   post:
+   *     summary: Register a new agent
+   *     description: >
+   *       Verifies that the provided Stellar public key corresponds to an
+   *       existing funded account on Horizon testnet before registering the
+   *       agent. Registration fails with 400 if the account cannot be found
+   *       or verified.
+   *     tags: [Agents]
+   *     security: []
+   *     operationId: registerAgent
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [agentId, capabilities, pricingXLM, endpoint, stellarPublicKey]
+   *             properties:
+   *               agentId:
+   *                 type: string
+   *               capabilities:
+   *                 type: array
+   *                 items:
+   *                   type: string
+   *               pricingXLM:
+   *                 type: number
+   *               endpoint:
+   *                 type: string
+   *                 format: uri
+   *               stellarPublicKey:
+   *                 type: string
+   *     responses:
+   *       201:
+   *         description: Agent registered
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Agent'
+   *       400:
+   *         description: Validation error or Stellar account not found/unverifiable
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
   // POST /api/agents/register
   router.post(
     "/register",
@@ -161,6 +309,59 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     },
   );
 
+  /**
+   * @openapi
+   * /api/agents/{id}:
+   *   delete:
+   *     summary: Delete an agent
+   *     operationId: deleteAgent
+   *     description: >
+   *       Requires a valid Stellar signature proving ownership of the
+   *       agent's registered keypair. The caller must sign the value of
+   *       the `x-challenge` header and pass the base64-encoded signature
+   *       in `x-signature`.
+   *     tags: [Agents]
+   *     security:
+   *       - AgentSignatureAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *       - in: header
+   *         name: x-challenge
+   *         required: true
+   *         schema: { type: string }
+   *         description: The challenge string the caller must sign
+   *       - in: header
+   *         name: x-signature
+   *         required: true
+   *         schema: { type: string }
+   *         description: Base64-encoded signature of the challenge, signed with the agent's Stellar keypair
+   *     responses:
+   *       200:
+   *         description: Agent deleted
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message:
+   *                   type: string
+   *                   example: Agent deleted successfully
+   *       401:
+   *         description: Missing, invalid, or malformed signature
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   *       404:
+   *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
   // DELETE /api/agents/:id
   router.delete(
     "/:id",

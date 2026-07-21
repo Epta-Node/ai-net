@@ -1,23 +1,33 @@
 import express from 'express';
 import type { AddressInfo } from 'net';
+import Database from 'better-sqlite3';
 import { createStatsRouter } from './stats';
 import type { DbClient } from '../../db/stats';
 
+function createTestDb() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE agents (id TEXT PRIMARY KEY);
+    CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT NOT NULL, "createdAt" TEXT NOT NULL);
+    CREATE TABLE payments (id TEXT PRIMARY KEY, amount REAL NOT NULL, status TEXT NOT NULL, "createdAt" TEXT NOT NULL);
+  `);
+  return db;
+}
+
 describe('Stats API route', () => {
   it('returns 200 and reuses cached stats for two requests within TTL', async () => {
-    const queryMock = jest.fn(async (text: string) => {
-      if (text.includes('FROM agents')) return { rows: [{ count: 1 }] };
-      if (text.includes('FROM tasks') && text.includes('SUM(CASE WHEN status =')) return { rows: [{ total: 2, succeeded: 2 }] };
-      if (text.includes('DATE_TRUNC') && text.includes('FROM tasks')) return { rows: [] };
-      if (text.includes('COUNT(*) AS count FROM tasks')) return { rows: [{ count: 2 }] };
-      if (text.includes('COALESCE(SUM(amount)') && text.includes('GROUP BY hour')) return { rows: [] };
-      if (text.includes('COALESCE(SUM(amount)')) return { rows: [{ amount: 10_000_000 }] };
-      return { rows: [] };
-    });
+    const db = createTestDb();
+    
+    // Add mock data
+    db.prepare('INSERT INTO agents (id) VALUES (?)').run('agent_1');
+    db.prepare('INSERT INTO tasks (id, status, "createdAt") VALUES (?, ?, ?)').run('task_1', 'completed', new Date().toISOString());
+    db.prepare('INSERT INTO payments (id, amount, status, "createdAt") VALUES (?, ?, ?, ?)').run('p1', 10000000, 'released', new Date().toISOString());
 
-    const db: DbClient = { query: queryMock as any };
+    // Spy on db.prepare to count invocations (6 queries in getStats)
+    const prepareSpy = jest.spyOn(db, 'prepare');
+
     const app = express();
-    app.use('/api', createStatsRouter(db));
+    app.use('/api/stats', createStatsRouter(db));
 
     const server = app.listen(0);
     const address = server.address() as AddressInfo;
@@ -30,10 +40,13 @@ describe('Stats API route', () => {
     const secondJson = await secondResponse.json();
 
     server.close();
+    db.close();
 
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);
     expect(firstJson).toEqual(secondJson);
-    expect(queryMock).toHaveBeenCalledTimes(6);
+    
+    // getStats executes 6 queries. If cached, it should still be 6.
+    expect(prepareSpy).toHaveBeenCalledTimes(6);
   });
 });

@@ -1,8 +1,8 @@
 import type { StatsResponse, TimePoint } from '../types/stats';
 
-export interface DbClient {
-  query<T>(text: string, params?: unknown[]): Promise<{ rows: T[] }>;
-}
+import Database from 'better-sqlite3';
+
+export type DbClient = Database.Database;
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 const STROOP_FACTOR = 1e7;
@@ -26,8 +26,8 @@ function buildHourlySeries(start: Date, end: Date, rows: Array<{ hour: string; v
 }
 
 async function queryCount(db: DbClient, queryText: string, params: unknown[] = []): Promise<number> {
-  const result = await db.query<{ count: number }>(queryText, params);
-  return Number(result.rows[0]?.count ?? 0);
+  const result = db.prepare(queryText).get(...params) as { count: number } | undefined;
+  return Number(result?.count ?? 0);
 }
 
 async function getTotalAgents(db: DbClient): Promise<number> {
@@ -39,44 +39,41 @@ async function getTotalTasks(db: DbClient): Promise<number> {
 }
 
 async function getTotalXLMTransacted(db: DbClient): Promise<number> {
-  const result = await db.query<{ amount: string | number }>(
+  const result = db.prepare(
     "SELECT COALESCE(SUM(amount), 0) AS amount FROM payments WHERE status = 'released'"
-  );
-  const rawAmount = Number(result.rows[0]?.amount ?? 0);
+  ).get() as { amount: string | number } | undefined;
+  const rawAmount = Number(result?.amount ?? 0);
   return normalizeDecimal(rawAmount / STROOP_FACTOR);
 }
 
 async function getUptimePercent(db: DbClient, since: Date): Promise<number> {
-  const result = await db.query<{ total: string | number; succeeded: string | number }>(
-    "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded FROM tasks WHERE \"createdAt\" >= $1",
-    [since.toISOString()]
-  );
+  const result = db.prepare(
+    "SELECT COUNT(*) AS total, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed FROM tasks WHERE \"createdAt\" >= ?"
+  ).get(since.toISOString()) as { total: string | number; completed: string | number } | undefined;
 
-  const total = Number(result.rows[0]?.total ?? 0);
-  const succeeded = Number(result.rows[0]?.succeeded ?? 0);
+  const total = Number(result?.total ?? 0);
+  const completed = Number(result?.completed ?? 0);
   if (total === 0) {
     return 100;
   }
 
-  return normalizeDecimal((succeeded / total) * 100);
+  return normalizeDecimal((completed / total) * 100);
 }
 
 async function getTasksHourlyCounts(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
-  const result = await db.query<{ hour: string; count: string | number }>(
-    "SELECT DATE_TRUNC('hour', \"createdAt\") AS hour, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= $1 GROUP BY hour ORDER BY hour",
-    [since.toISOString()]
-  );
+  const rows = db.prepare(
+    "SELECT strftime('%Y-%m-%d %H:00:00', \"createdAt\") AS hour, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
+  ).all(since.toISOString()) as Array<{ hour: string; count: string | number }>;
 
-  return result.rows.map((row) => ({ hour: row.hour, value: Number(row.count ?? 0) }));
+  return rows.map((row) => ({ hour: row.hour, value: Number(row.count ?? 0) }));
 }
 
 async function getXLMHourlyTotals(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
-  const result = await db.query<{ hour: string; sum: string | number }>(
-    "SELECT DATE_TRUNC('hour', \"createdAt\") AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= $1 GROUP BY hour ORDER BY hour",
-    [since.toISOString()]
-  );
+  const rows = db.prepare(
+    "SELECT strftime('%Y-%m-%d %H:00:00', \"createdAt\") AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
+  ).all(since.toISOString()) as Array<{ hour: string; sum: string | number }>;
 
-  return result.rows.map((row) => ({ hour: row.hour, value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));
+  return rows.map((row) => ({ hour: row.hour, value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));
 }
 
 export async function getStats(db: DbClient, now: Date = new Date()): Promise<StatsResponse> {

@@ -1,59 +1,64 @@
-import type { DagNode } from "../types/task";
+import type { DAGNode } from "../types/task";
 
 /**
  * Deterministically decomposes a prompt into a DAG of agent nodes.
  * No external calls — pure heuristic for now.
  */
-export function decompose(prompt: string): DagNode[] {
+export function decompose(taskId: string, prompt: string): DAGNode[] {
   const lower = prompt.toLowerCase();
 
-  const nodes: DagNode[] = [];
+  const nodes: DAGNode[] = [];
 
-  const research: DagNode = {
-    id: "node_research",
-    agentType: "research",
+  const research: DAGNode = {
+    nodeId: "node_research",
+    type: "research",
+    prompt: `Research background information for: ${prompt}`,
     description: `Research background information for: ${prompt}`,
-    status: "queued",
+    status: "pending",
     dependencies: [],
   };
   nodes.push(research);
 
   if (lower.includes("risk") || lower.includes("market") || lower.includes("financial")) {
     nodes.push({
-      id: "node_risk",
-      agentType: "risk",
+      nodeId: "node_risk",
+      type: "risk",
+      prompt: "Analyse risks and regulatory landscape",
       description: "Analyse risks and regulatory landscape",
-      status: "queued",
+      status: "pending",
       dependencies: ["node_research"],
     });
   }
 
   if (lower.includes("code") || lower.includes("software") || lower.includes("implement")) {
     nodes.push({
-      id: "node_coding",
-      agentType: "coding",
+      nodeId: "node_coding",
+      type: "coding",
+      prompt: "Implement required code components",
       description: "Implement required code components",
-      status: "queued",
+      status: "pending",
       dependencies: ["node_research"],
     });
   }
 
   if (lower.includes("design") || lower.includes("ui") || lower.includes("visual")) {
     nodes.push({
-      id: "node_design",
-      agentType: "design",
+      nodeId: "node_design",
+      type: "design",
+      prompt: "Create design assets",
       description: "Create design assets",
-      status: "queued",
+      status: "pending",
       dependencies: ["node_research"],
     });
   }
 
-  const deps = nodes.filter(n => n.id !== "node_research").map(n => n.id);
+  const deps = nodes.filter(n => n.nodeId !== "node_research").map(n => n.nodeId);
   nodes.push({
-    id: "node_report",
-    agentType: "report",
+    nodeId: "node_report",
+    type: "report",
+    prompt: "Compile and format the final report",
     description: "Compile and format the final report",
-    status: "queued",
+    status: "pending",
     dependencies: deps.length ? deps : ["node_research"],
   });
 

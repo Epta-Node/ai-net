@@ -1,46 +1,16 @@
-import type { Task, DAGNode } from './types';
+import type { Task, DAGNode } from '../types/task';
 import { getTaskDb, createTaskDb } from '../db/tasks';
 
 function db() {
   return createTaskDb(getTaskDb());
 }
 
-/** Convert coordinator Task → DB row shape */
-function toRow(task: Task): {
-  id: string; prompt: string; walletPublicKey: string;
-  status: string; dagJson: string; createdAt: string; updatedAt: string;
-} {
-  return {
-    id: task.taskId,
-    prompt: task.prompt,
-    walletPublicKey: task.walletPublicKey,
-    status: task.status,
-    dagJson: JSON.stringify(task.dag),
-    createdAt: task.createdAt,
-    updatedAt: task.updatedAt,
-  };
-}
-
-/** Convert DB row → coordinator Task */
-function fromRow(row: { id: string; prompt: string; walletPublicKey: string; status: string; dagJson: string; createdAt: string; updatedAt: string }): Task {
-  return {
-    taskId: row.id,
-    prompt: row.prompt,
-    walletPublicKey: row.walletPublicKey,
-    status: row.status as Task['status'],
-    dag: JSON.parse(row.dagJson) as DAGNode[],
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
 export function createTask(task: Task): void {
-  db().insert(toRow(task) as Parameters<ReturnType<typeof createTaskDb>['insert']>[0]);
+  db().insert(task);
 }
 
 export function getTask(taskId: string): Task | undefined {
-  const row = db().findById(taskId);
-  return row ? fromRow(row) : undefined;
+  return db().findById(taskId);
 }
 
 export function updateTask(taskId: string, patch: Partial<Task>): Task {
@@ -48,7 +18,7 @@ export function updateTask(taskId: string, patch: Partial<Task>): Task {
   if (!existing) throw new Error(`Task ${taskId} not found`);
   const updated: Task = { ...existing, ...patch, updatedAt: new Date().toISOString() };
   const store = db();
-  if (patch.status) store.updateStatus(taskId, patch.status as Parameters<typeof store.updateStatus>[1]);
+  if (patch.status) store.updateStatus(taskId, patch.status);
   if (patch.dag) store.updateDagJson(taskId, JSON.stringify(updated.dag));
   return updated;
 }

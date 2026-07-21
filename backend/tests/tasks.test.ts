@@ -238,7 +238,7 @@ describe("GET /api/tasks (filtering, sorting, search)", () => {
         prompt: t.prompt,
         walletPublicKey: wallet,
         status: t.status,
-        dagJson: "[]",
+        dag: [],
         createdAt: new Date(now - t.minutesAgo * 60_000).toISOString(),
         updatedAt: new Date().toISOString(),
       });

@@ -99,7 +99,9 @@ export const useTaskMonitor = (taskId: string | undefined) => {
       }
 
       setWsStatus('connecting');
-      const wsUrl = `ws://localhost:3001/tasks/${taskId}/stream`;
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = import.meta.env.VITE_WS_HOST || window.location.host;
+      const wsUrl = `${protocol}//${host}/tasks/${taskId}/stream`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

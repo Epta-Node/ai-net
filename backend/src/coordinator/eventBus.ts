@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { DAGEvent } from './types';
+import type { DAGEvent } from '../types/task';
 
 /**
  * In-process pub/sub bus.  Coordinator emits events; WebSocket handlers

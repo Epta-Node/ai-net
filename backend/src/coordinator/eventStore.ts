@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import type { DAGEvent, DAGEventType } from './types';
+import type { DAGEvent, DAGEventType } from '../types/task';
 
 /**
  * A persisted event with its per-task sequence id.  The `seq` is assigned by

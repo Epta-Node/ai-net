@@ -199,8 +199,8 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Test
-        run: npm test
+      - name: Unit tests (fast, always run)
+        run: npm run test:unit
 
       - name: Cargo lint
         if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
@@ -210,10 +210,53 @@ jobs:
         if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
         run: cargo clippy -p error-resolver --all-targets -- -D warnings
 
-      - name: Cargo test
+      - name: Cargo test (unit)
         if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
         run: cargo test -p error-resolver
+
+      # NOTE: cargo test -p agent-registry is intentionally omitted.
+      # soroban-sdk =22.0.11 is incompatible with latest stable Rust
+      # (ed25519-dalek 3.0.0 breaks soroban-env-host) and also with
+      # Rust 1.84.0 (error-resolver deps now require edition2024).
+      # The wasm32 cross-build below validates compilation.
 
       - name: Cargo build
         if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
         run: cargo build -p agent-registry --target wasm32v1-none --release
+
+  smart-contracts-integration:
+    name: Smart Contracts (Integration)
+    needs: detect_projects
+    if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: smart-contracts
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: smart-contracts/node_modules
+          key: ${{ runner.os }}-node-20-smart-contracts-${{ hashFiles('smart-contracts/package-lock.json', 'smart-contracts/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-20-smart-contracts-
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Integration tests
+        run: npm run test:integration
+        env:
+          STELLAR_COORDINATOR_SECRET: ${{ secrets.STELLAR_COORDINATOR_SECRET }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}

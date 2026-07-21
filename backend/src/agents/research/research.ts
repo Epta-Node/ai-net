@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VeniceClient } from '../../venice/index.js';
+import { VeniceClient, type VeniceClientLike } from '../../services/venice/index.js';
 import type { AgentTask, AgentResult, AgentError, Source } from './types';
 
 const SourceSchema = z.object({
@@ -47,13 +47,13 @@ no explanation, no markdown, no code blocks:
 }`;
 
 export interface ResearchAgentConfig {
-  veniceClient?: VeniceClient;
+  veniceClient?: VeniceClientLike;
   apiBaseUrl?: string;
   agentId?: string;
 }
 
 export class ResearchAgent {
-  private readonly venice: VeniceClient;
+  private readonly venice: VeniceClientLike;
   private readonly apiBaseUrl: string;
   private readonly agentId: string;
 

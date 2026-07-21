@@ -30,6 +30,11 @@ export function getAgentDb(dbPath?: string): Database.Database {
         status           TEXT NOT NULL DEFAULT 'online'
       )
     `);
+    try {
+      _agentDb.exec("ALTER TABLE agents ADD COLUMN status TEXT NOT NULL DEFAULT 'offline'");
+    } catch (e) {
+      // Ignored if column already exists
+    }
   }
   return _agentDb;
 }
@@ -63,7 +68,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
           status = excluded.status
       `).run({
         ...agent,
-        capabilities: JSON.stringify(agent.capabilities)
+        capabilities: JSON.stringify(agent.capabilities),
+        status: agent.status ?? 'offline'
       });
     },
 
@@ -72,7 +78,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
       if (!row) return undefined;
       return {
         ...row,
-        capabilities: JSON.parse(row.capabilities)
+        capabilities: JSON.parse(row.capabilities),
+        status: row.status ?? 'offline'
       };
     },
 
@@ -100,7 +107,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
       const rows = db.prepare(query).all(...params) as any[];
       return rows.map(row => ({
         ...row,
-        capabilities: JSON.parse(row.capabilities)
+        capabilities: JSON.parse(row.capabilities),
+        status: row.status ?? 'offline'
       }));
     },
 

@@ -3,7 +3,7 @@ import { VeniceClient, type AgentType } from '../../venice/index.js';
 import { HeartbeatClient } from '../heartbeat.js';
 
 export interface BaseAgentConfig {
-  veniceClient?: VeniceClient;
+  veniceClient?: VeniceClientLike;
   apiBaseUrl?: string;
   agentId?: string;
 }
@@ -21,7 +21,7 @@ export interface AgentError {
 }
 
 export abstract class BaseAgent {
-  protected readonly venice: VeniceClient;
+  protected readonly venice: VeniceClientLike;
   protected readonly apiBaseUrl: string;
   protected readonly agentId: string;
   private readonly heartbeatClient: HeartbeatClient | null = null;

@@ -3,7 +3,7 @@ import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
 import { updateNode, updateTask } from './taskStore';
-import type { DAGNode, Task } from './types';
+import type { DAGNode, Task } from '../types/task';
 import { createLogger } from '../utils/logger';
 
 const DEFAULT_CONCURRENCY = 3;
@@ -139,12 +139,12 @@ export class Coordinator {
             continue;
           }
 
-          const hasFailedDependency = node.dependsOn.some(dep => failed.has(dep));
-          const hasUnresolvedDependency = node.dependsOn.some(dep => !nodeById.has(dep));
+          const hasFailedDependency = node.dependencies.some(dep => failed.has(dep));
+          const hasUnresolvedDependency = node.dependencies.some(dep => !nodeById.has(dep));
           const isDeadlocked =
             includeDeadlocked &&
             inFlight === 0 &&
-            !node.dependsOn.every(dep => completed.has(dep));
+            !node.dependencies.every(dep => completed.has(dep));
 
           if (!hasFailedDependency && !hasUnresolvedDependency && !isDeadlocked) {
             continue;
@@ -176,7 +176,7 @@ export class Coordinator {
           if (
             node.status !== 'pending' ||
             scheduled.has(node.nodeId) ||
-            !node.dependsOn.every(dep => completed.has(dep))
+            !node.dependencies.every(dep => completed.has(dep))
           ) {
             continue;
           }
@@ -212,11 +212,11 @@ export class Coordinator {
   }
 
   async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration): Promise<unknown> {
-    const target = agent ?? await this.cheapestAgentFor(node.agentType);
+    const target = agent ?? await this.cheapestAgentFor(node.type);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    this.log.debug({ nodeId: node.nodeId, agentId: target.id, agentType: node.agentType }, 'dispatching node to agent');
+    this.log.debug({ nodeId: node.nodeId, agentId: target.id, agentType: node.type }, 'dispatching node to agent');
 
     try {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
@@ -264,7 +264,7 @@ export class Coordinator {
     });
 
     this.log.info(
-      { taskId, nodeId: node.nodeId, agentType: node.agentType },
+      { taskId, nodeId: node.nodeId, agentType: node.type },
       'node execution started'
     );
 
@@ -283,7 +283,7 @@ export class Coordinator {
       });
 
       this.log.info(
-        { taskId, nodeId: node.nodeId, agentType: node.agentType },
+        { taskId, nodeId: node.nodeId, agentType: node.type },
         'node completed'
       );
 
@@ -315,7 +315,7 @@ export class Coordinator {
       });
 
       this.log.error(
-        { taskId, nodeId: node.nodeId, agentType: node.agentType, err },
+        { taskId, nodeId: node.nodeId, agentType: node.type, err },
         'node failed'
       );
 
@@ -324,7 +324,7 @@ export class Coordinator {
   }
 
   private contextFor(node: DAGNode, nodeById: Map<string, DAGNode>): string {
-    return node.dependsOn
+    return node.dependencies
       .map(dep => nodeById.get(dep)?.result)
       .filter(result => result !== undefined)
       .map(result => JSON.stringify(result))
@@ -336,9 +336,9 @@ export class Coordinator {
       return this.dispatchOverride(taskId, node, context);
     }
 
-    const agents = await this.agentsFor(node.agentType);
+    const agents = await this.agentsFor(node.type);
     const primary = agents[0];
-    let lastError: unknown = new Error(`No agent registered for type: ${node.agentType}`);
+    let lastError: unknown = new Error(`No agent registered for type: ${node.type}`);
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
@@ -393,7 +393,7 @@ export async function executeDAG(
   dispatch: DispatchFn,
   releasePayment: PaymentReleaseFn
 ): Promise<void> {
-  const log = createLogger({ taskId: task.taskId, requestId: task.requestId });
+  const log = createLogger({ taskId: task.id, requestId: task.requestId });
 
   const coordinator = new Coordinator({
     dispatch,
@@ -401,7 +401,7 @@ export async function executeDAG(
     logger: log,
   });
 
-  await coordinator.executeDAG(task.taskId, task.dag);
+  await coordinator.executeDAG(task.id, task.dag);
 }
 
 function updateTaskIfPresent(taskId: string, patch: Partial<Task>): void {

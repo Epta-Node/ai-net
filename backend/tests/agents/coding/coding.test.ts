@@ -1,12 +1,13 @@
 import { CodingAgent, UnsafeCodeRequestError } from '../../../src/agents/coding/coding';
-import { VeniceClient } from '../../../src/venice/index';
+import type { VeniceClientLike } from '../../../src/services/venice/index';
 
 describe('CodingAgent', () => {
-  let mockVeniceClient: jest.Mocked<VeniceClient>;
+  let mockVeniceClient: jest.Mocked<VeniceClientLike>;
   let agent: CodingAgent;
 
   beforeEach(() => {
     mockVeniceClient = {
+      chat: jest.fn(),
       complete: jest.fn(),
       stream: jest.fn(),
       getModelFor: jest.fn().mockReturnValue('venice-code'),

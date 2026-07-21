@@ -9,7 +9,7 @@
 
 import { eventBus } from '../src/coordinator/eventBus';
 import { createEventStore } from '../src/coordinator/eventStore';
-import type { DAGEvent } from '../src/coordinator/types';
+import type { DAGEvent } from '../src/types/task';
 
 function makeEvent(taskId: string, seq?: number): DAGEvent {
   return {

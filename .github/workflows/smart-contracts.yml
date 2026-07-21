@@ -1,0 +1,337 @@
+name: Smart Contract Build and Verification
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'smart-contracts/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'smart-contracts/**'
+  release:
+    types: [published]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: stable
+
+jobs:
+  build-contracts:
+    name: Build Smart Contracts
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+        targets: wasm32v1-none
+        
+    - name: Cache cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          smart-contracts/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+          
+    - name: Format check
+      working-directory: smart-contracts
+      run: cargo fmt --all -- --check
+      
+    - name: Lint with clippy
+      working-directory: smart-contracts
+      run: cargo clippy -p error-resolver --all-targets -- -D warnings
+      
+    - name: Run unit tests
+      working-directory: smart-contracts
+      run: cargo test -p error-resolver
+      
+    - name: Build optimized Wasm binaries
+      working-directory: smart-contracts
+      run: |
+        cargo build -p agent-registry --target wasm32v1-none --release
+        ls -la target/wasm32v1-none/release/*.wasm
+        
+    - name: Calculate Wasm hashes
+      id: wasm-hashes
+      working-directory: smart-contracts
+      run: |
+        echo "Creating reproducible build report..."
+        
+        # Create build report
+        BUILD_REPORT="build-report-$(date +%Y%m%d-%H%M%S).json"
+        
+        cat > "$BUILD_REPORT" << EOF
+        {
+          "build_info": {
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")",
+            "rust_version": "${{ env.RUST_VERSION }}",
+            "git_commit": "${{ github.sha }}",
+            "git_ref": "${{ github.ref }}",
+            "runner_os": "${{ runner.os }}"
+          },
+          "contracts": {}
+        }
+        EOF
+        
+        # Calculate hashes for each contract
+        for wasm in target/wasm32v1-none/release/*.wasm; do
+          if [[ -f "$wasm" ]]; then
+            contract_name=$(basename "$wasm" .wasm)
+            hash=$(sha256sum "$wasm" | cut -d' ' -f1)
+            size=$(stat -c%s "$wasm")
+            
+            echo "Contract: $contract_name"
+            echo "  Hash: $hash"
+            echo "  Size: $size bytes"
+            
+            # Update build report
+            tmp_report=$(mktemp)
+            jq --arg name "$contract_name" --arg hash "$hash" --arg size "$size" --arg file "$wasm" '
+              .contracts[$name] = {
+                wasm_hash: $hash,
+                file_size: ($size | tonumber),
+                file_path: $file
+              }
+            ' "$BUILD_REPORT" > "$tmp_report"
+            mv "$tmp_report" "$BUILD_REPORT"
+          fi
+        done
+        
+        echo "build_report=$BUILD_REPORT" >> $GITHUB_OUTPUT
+        cat "$BUILD_REPORT"
+        
+    - name: Verify deterministic builds
+      working-directory: smart-contracts
+      run: |
+        echo "Verifying builds are deterministic..."
+        
+        # Save current hashes
+        mkdir -p /tmp/build1
+        cp target/wasm32v1-none/release/*.wasm /tmp/build1/
+        
+        # Clean and rebuild
+        cargo clean
+        cargo build -p agent-registry --target wasm32v1-none --release
+        
+        # Compare hashes
+        for wasm in target/wasm32v1-none/release/*.wasm; do
+          if [[ -f "$wasm" ]]; then
+            contract_name=$(basename "$wasm")
+            hash1=$(sha256sum "/tmp/build1/$contract_name" | cut -d' ' -f1)
+            hash2=$(sha256sum "$wasm" | cut -d' ' -f1)
+            
+            if [[ "$hash1" == "$hash2" ]]; then
+              echo "✓ $contract_name: deterministic build verified"
+            else
+              echo "✗ $contract_name: non-deterministic build detected!"
+              echo "  First build:  $hash1"
+              echo "  Second build: $hash2"
+              exit 1
+            fi
+          fi
+        done
+        
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: smart-contracts-${{ github.sha }}
+        path: |
+          smart-contracts/target/wasm32v1-none/release/*.wasm
+          smart-contracts/build-report-*.json
+        retention-days: 30
+        
+    - name: Upload build report to release
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: smart-contracts/${{ steps.wasm-hashes.outputs.build_report }}
+        asset_name: build-report.json
+        asset_content_type: application/json
+
+  test-contracts:
+    name: Test Smart Contracts
+    runs-on: ubuntu-latest
+    needs: build-contracts
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: smart-contracts/package-lock.json
+        
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: wasm32v1-none
+        
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: smart-contracts-${{ github.sha }}
+        path: smart-contracts/
+        
+    - name: Install dependencies
+      working-directory: smart-contracts
+      run: npm ci
+      
+    - name: Run TypeScript tests
+      working-directory: smart-contracts
+      run: npm test
+      
+    - name: Run integration tests
+      working-directory: smart-contracts
+      env:
+        STELLAR_NETWORK: testnet
+        RUN_STELLAR_E2E_TESTS: true
+        STELLAR_COORDINATOR_SECRET: ${{ secrets.STELLAR_TESTNET_SECRET }}
+        VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+      run: npm run test:e2e
+      if: env.STELLAR_COORDINATOR_SECRET && env.VENICE_API_KEY
+
+  security-audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    needs: build-contracts
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+      
+    - name: Run security audit
+      working-directory: smart-contracts
+      run: cargo audit
+      
+    - name: Check for known vulnerabilities
+      working-directory: smart-contracts
+      run: |
+        echo "Checking for common Soroban security issues..."
+        
+        # Check for potential issues in contracts
+        if grep -r "unwrap()" contracts/ --include="*.rs"; then
+          echo "Warning: Found unwrap() calls that could panic"
+        fi
+        
+        if grep -r "expect(" contracts/ --include="*.rs"; then
+          echo "Warning: Found expect() calls that could panic"
+        fi
+        
+        # Check for proper error handling
+        if ! grep -r "Result<" contracts/ --include="*.rs"; then
+          echo "Warning: Consider using Result types for better error handling"
+        fi
+
+  deployment-readiness:
+    name: Check Deployment Readiness
+    runs-on: ubuntu-latest
+    needs: [build-contracts, test-contracts]
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: smart-contracts-${{ github.sha }}
+        path: smart-contracts/
+        
+    - name: Validate deployment scripts
+      working-directory: smart-contracts
+      run: |
+        # Check that all required scripts exist and are executable
+        for script in scripts/*.sh; do
+          if [[ -f "$script" ]]; then
+            if [[ ! -x "$script" ]]; then
+              echo "Error: $script is not executable"
+              exit 1
+            fi
+            
+            # Basic syntax check
+            bash -n "$script"
+            echo "✓ $script syntax is valid"
+          fi
+        done
+        
+    - name: Validate deployment templates
+      working-directory: smart-contracts
+      run: |
+        # Check that deployment templates are valid JSON
+        for template in deployments/*.template; do
+          if [[ -f "$template" ]]; then
+            if ! jq empty "$template"; then
+              echo "Error: $template is not valid JSON"
+              exit 1
+            fi
+            echo "✓ $template is valid JSON"
+          fi
+        done
+        
+    - name: Generate deployment summary
+      working-directory: smart-contracts
+      run: |
+        echo "=== Deployment Readiness Report ===" > deployment-summary.md
+        echo "" >> deployment-summary.md
+        echo "**Build Information:**" >> deployment-summary.md
+        echo "- Commit: ${{ github.sha }}" >> deployment-summary.md
+        echo "- Rust Version: ${{ env.RUST_VERSION }}" >> deployment-summary.md
+        echo "" >> deployment-summary.md
+        
+        echo "**Available Contracts:**" >> deployment-summary.md
+        for wasm in target/wasm32v1-none/release/*.wasm; do
+          if [[ -f "$wasm" ]]; then
+            contract_name=$(basename "$wasm" .wasm)
+            hash=$(sha256sum "$wasm" | cut -d' ' -f1)
+            size=$(stat -c%s "$wasm")
+            echo "- $contract_name (Hash: \`${hash:0:16}...\`, Size: $size bytes)" >> deployment-summary.md
+          fi
+        done
+        
+        echo "" >> deployment-summary.md
+        echo "**Deployment Scripts:**" >> deployment-summary.md
+        echo "- \`scripts/deploy.sh\` - Initial deployment" >> deployment-summary.md
+        echo "- \`scripts/upgrade.sh\` - Contract upgrades" >> deployment-summary.md
+        echo "- \`scripts/verify.sh\` - Deployment verification" >> deployment-summary.md
+        
+        cat deployment-summary.md
+        
+    - name: Comment on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const summary = fs.readFileSync('smart-contracts/deployment-summary.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## Smart Contract Deployment Readiness\n\n${summary}`
+          });

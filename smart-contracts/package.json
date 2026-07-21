@@ -7,7 +7,9 @@
     "build": "tsc",
     "dev": "ts-node src/index.ts",
     "test": "jest --runInBand",
-    "test:e2e": "jest --runInBand tests/e2e/market-report.test.ts",
+    "test:unit": "jest --runInBand --testPathIgnorePatterns=tests/e2e/ --testPathIgnorePatterns=tests/integration/",
+    "test:integration": "RUN_INTEGRATION_TESTS=true jest --runInBand --testPathPattern='tests/e2e|tests/integration'",
+    "test:e2e": "RUN_STELLAR_E2E_TESTS=true jest --runInBand tests/e2e/market-report.test.ts",
     "lint": "eslint src --ext .ts"
   },
   "keywords": [

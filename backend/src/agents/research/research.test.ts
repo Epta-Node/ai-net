@@ -1,5 +1,5 @@
 import { ResearchAgent, deriveConfidence } from './research';
-import { VeniceClient } from '../../venice/index';
+import type { VeniceClientLike } from '../../services/venice/index';
 import type { AgentResult, AgentError } from './types';
 
 function makeVeniceJson(sourceCount: number): string {
@@ -25,8 +25,9 @@ function asError(r: AgentResult | AgentError): AgentError {
   return r;
 }
 
-function createMockClient(): jest.Mocked<VeniceClient> {
+function createMockClient(): jest.Mocked<VeniceClientLike> {
   return {
+    chat: jest.fn(),
     complete: jest.fn(),
     stream: jest.fn(),
     getModelFor: jest.fn().mockReturnValue('venice-xl'),

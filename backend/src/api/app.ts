@@ -1,25 +1,28 @@
 import express, { Request, Response, NextFunction } from "express";
 import { createServer, Server as HttpServer } from "http";
 import { randomUUID } from "crypto";
+import swaggerUi from "swagger-ui-express";
 
-import { decompose } from "../coordinator/decompose";
 import {
-  executeDAG,
   type DispatchFn,
   type PaymentReleaseFn,
 } from "../coordinator/coordinator";
-import { createTask, getTask } from "../coordinator/taskStore";
+import { getTask } from "../coordinator/taskStore";
 import { eventBus } from "../coordinator/eventBus";
 import { createEventStore, type EventStore } from "../coordinator/eventStore";
 import { attachTaskStream, type TaskStreamOptions } from "./routes/stream";
+import type { DAGNode } from "../types/task";
 import {
   createPaymentReleaseFn,
   type StellarReleasePaymentFn,
 } from "../payment";
 import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
+import { createStatsRouter } from "./routes/stats";
+import { createTasksRouter } from "./routes/tasks";
 import { rateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
+import { createCorsMiddleware } from "./middleware/cors";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
 import { errorHandler } from "./middleware/errorHandler";
@@ -31,6 +34,7 @@ import {
 } from "./schemas/task.schema";
 import { createLogger } from "../utils/logger";
 import { createTaskDb, getTaskDb } from "../db/tasks";
+import { openapiSpec } from "./docs/openapi";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch */
@@ -61,11 +65,18 @@ function tryLoadStellarRelease(): StellarReleasePaymentFn | undefined {
 
 export function createApp(opts: AppOptions = {}): {
   httpServer: HttpServer;
-  close: () => void;
+  close: (callback?: () => void) => void;
 } {
   const app = express();
   app.use(express.json());
   // ── Global middleware ────────────────────────────────────────────────────────
+  app.use((_req, res, next) => {
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    }
+    next();
+  });
+  app.use(createCorsMiddleware());
   app.use(requestId);
   app.use(requestLogger);
 
@@ -75,6 +86,9 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", healthRouter);
+
+  // ── Stats routes ───────────────────────────────────────────────────────────
+  app.use("/api/stats", createStatsRouter(getTaskDb()));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
   app.use("/api/agents", agentsRouter);
@@ -205,11 +219,11 @@ export function createApp(opts: AppOptions = {}): {
   // ── Error handler (must be last) ───────────────────────────────────────────
   app.use(errorHandler);
 
-  function close(): void {
+  function close(callback?: () => void): void {
     detachStream();
     stopRecording();
     eventStore.close();
-    httpServer.close();
+    httpServer.close(callback);
   }
 
   return { httpServer, close };
@@ -217,10 +231,10 @@ export function createApp(opts: AppOptions = {}): {
 
 async function defaultDispatch(
   taskId: string,
-  node: { nodeId: string; agentType: string; prompt: string },
+  node: DAGNode,
   context: string,
 ): Promise<unknown> {
   // In production this POSTs to the agent's HTTP endpoint.
   // The e2e test replaces this via opts.dispatch.
-  throw new Error(`No agent registered for type: ${node.agentType}`);
+  throw new Error(`No agent registered for type: ${node.type}`);
 }

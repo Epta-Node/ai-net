@@ -10,13 +10,15 @@ export type TaskStatus = "queued" | "running" | "completed" | "cancelled" | "fai
 /** Node-level statuses used by the coordinator during DAG execution. */
 export type NodeStatus = "pending" | "running" | "completed" | "failed";
 
-export interface DagNode {
-  id: string;
-  agentType: string;
-  description: string;
-  status: TaskStatus;
-  result?: string;
+export interface DAGNode {
+  nodeId: string;
+  type: string;
   dependencies: string[];
+  status: NodeStatus;
+  result?: any;
+  error?: string;
+  prompt?: string;
+  description?: string;
 }
 
 export interface Task {
@@ -24,9 +26,10 @@ export interface Task {
   prompt: string;
   walletPublicKey: string;
   status: TaskStatus;
-  dagJson: string; // JSON-serialised DagNode[]
+  dag: DAGNode[];
   createdAt: string;
   updatedAt: string;
+  requestId?: string;
 }
 
 /** Events emitted by the coordinator */

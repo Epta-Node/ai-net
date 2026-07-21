@@ -1,12 +1,13 @@
 import { DesignAgent } from '../../../src/agents/design/design';
-import { VeniceClient } from '../../../src/venice/index';
+import type { VeniceClientLike } from '../../../src/services/venice/index';
 
 describe('DesignAgent', () => {
-  let mockVeniceClient: jest.Mocked<VeniceClient>;
+  let mockVeniceClient: jest.Mocked<VeniceClientLike>;
   let agent: DesignAgent;
 
   beforeEach(() => {
     mockVeniceClient = {
+      chat: jest.fn(),
       complete: jest.fn(),
       stream: jest.fn(),
       getModelFor: jest.fn().mockReturnValue('venice-xl'),
