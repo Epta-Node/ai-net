@@ -7,6 +7,7 @@ import type { Task } from "../../types/task";
 import { executeDAG, type DispatchFn, type PaymentReleaseFn } from "../../coordinator/coordinator";
 import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
+import { rateLimitMiddleware } from "../middleware/rateLimit";
 
 export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentReleaseFn): Router {
   const tasksRouter = Router();
@@ -80,8 +81,8 @@ const TaskListSchema = z.object({
  *             schema:
  *               $ref: '#/components/schemas/Error'
  */
-// POST /api/tasks
-tasksRouter.post("/", (req: Request, res: Response): void => {
+// POST /api/tasks — rate-limited
+tasksRouter.post("/", rateLimitMiddleware, (req: Request, res: Response): void => {
   const parse = CreateTaskSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.flatten() });

@@ -22,7 +22,7 @@ import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
-import { rateLimitMiddleware } from "./middleware/rateLimit";
+import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { requestId } from "./middleware/requestId";
@@ -92,6 +92,9 @@ export function createApp(opts: AppOptions = {}): {
   app.use("/api/stats", createStatsRouter(getTaskDb()));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
+  // Apply a stricter rate limit specifically to the register endpoint to
+  // prevent registration floods (the full agentsRouter handles GET/DELETE etc.).
+  app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
   // ── API docs ─────────────────────────────────────────────────────────────────

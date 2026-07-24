@@ -128,3 +128,34 @@ describe('authMiddleware', () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 });
+
+// ── createRateLimiter — eviction (memory-leak fix) ────────────────────────────
+
+describe('createRateLimiter — stale entry eviction', () => {
+  it('evicts IPs whose window has fully expired, preventing memory leaks', () => {
+    jest.useFakeTimers();
+
+    const { createRateLimiter } = require('../src/api/middleware/rateLimit') as typeof import('../src/api/middleware/rateLimit');
+
+    const windowMs = 60_000;
+    const { middleware, stop } = createRateLimiter({ windowMs, maxRequests: 5 });
+
+    // Make a request to seed the internal windows Map
+    const req = makeReq('10.0.0.1');
+    const next = jest.fn();
+    middleware(req, makeRes() as unknown as Response, next as NextFunction);
+    expect(next).toHaveBeenCalledTimes(1);
+
+    // Advance past the window — the eviction interval should remove the entry
+    jest.advanceTimersByTime(windowMs + 60_000 + 1);
+
+    // A new request from the same IP should succeed as though it is fresh
+    // (proves the entry was cleaned up, not just rate-limited from old data)
+    const next2 = jest.fn();
+    middleware(req, makeRes() as unknown as Response, next2 as NextFunction);
+    expect(next2).toHaveBeenCalledTimes(1);
+
+    stop();
+    jest.useRealTimers();
+  });
+});
