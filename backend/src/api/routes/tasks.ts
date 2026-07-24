@@ -215,6 +215,12 @@ tasksRouter.get("/", (req: Request, res: Response): void => {
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Task'
+ *       403:
+ *         description: Access denied — walletpublickey header is missing or does not match the task owner
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
  *       404:
  *         description: Task not found
  *         content:
