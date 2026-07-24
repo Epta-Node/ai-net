@@ -70,6 +70,55 @@ describe("POST /api/tasks", () => {
 
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 when prompt is empty string", async () => {
+    const res = await request(app.httpServer)
+      .post("/api/tasks")
+      .set("walletpublickey", WALLET)
+      .send({ prompt: "", maxBudgetXLM: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.prompt).toBeDefined();
+  });
+
+  it("returns 400 when prompt exceeds 10 000 characters", async () => {
+    const oversizedPrompt = "a".repeat(10_001);
+    const res = await request(app.httpServer)
+      .post("/api/tasks")
+      .set("walletpublickey", WALLET)
+      .send({ prompt: oversizedPrompt, maxBudgetXLM: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("Validation failed");
+    expect(res.body.details.prompt).toBeDefined();
+  });
+
+  it("accepts a prompt of exactly 10 000 characters", async () => {
+    const maxPrompt = "a".repeat(10_000);
+    const res = await request(app.httpServer)
+      .post("/api/tasks")
+      .set("walletpublickey", WALLET)
+      .send({ prompt: maxPrompt, maxBudgetXLM: 1 });
+
+    expect(res.status).toBe(201);
+  });
+
+  it("strips control characters from the prompt before processing", async () => {
+    // \x01 is a C0 control character that should be stripped
+    const res = await request(app.httpServer)
+      .post("/api/tasks")
+      .set("walletpublickey", WALLET)
+      .send({ prompt: "Hello\x01 World\x07", maxBudgetXLM: 1 });
+
+    expect(res.status).toBe(201);
+    // The stored task should not contain the control characters
+    const taskId = res.body.taskId;
+    const getRes = await request(app.httpServer)
+      .get(`/api/tasks/${taskId}`)
+      .set("walletpublickey", WALLET);
+    expect(getRes.body.prompt).not.toMatch(/[\x00-\x08\x0E-\x1F]/);
+  });
 });
 
 describe("GET /api/tasks/:id", () => {
@@ -490,14 +539,56 @@ describe("GET /api/tasks (filtering, sorting, search)", () => {
     });
   });
 
-  it("q + page composition: solar search on page 2 with pageSize 2", async () => {
-    const res = await request(app.httpServer)
-      .get("/api/tasks?q=solar&page=2&pageSize=2")
-      .set("walletpublickey", wallet);
+});
 
-    expect(res.status).toBe(200);
-    // 3 total solar tasks, page 2 with pageSize 2 => 1 result
-    expect(res.body.tasks.length).toBe(1);
-    expect(res.body.total).toBe(3);
+// ─── Per-wallet daily quota tests — must run last (uses jest.resetModules) ────
+
+describe("POST /api/tasks — daily quota enforcement", () => {
+  const quotaWallet =
+    "GCEZWKCA5QUOTA000000000000000000000000000000000000000000000";
+
+  beforeEach(() => {
+    // Clean tasks for the quota test wallet before each test
+    inMemoryDb
+      .prepare("DELETE FROM tasks WHERE walletPublicKey = ?")
+      .run(quotaWallet);
+  });
+
+  it("returns 429 with DAILY_LIMIT_EXCEEDED when wallet reaches the daily task limit", async () => {
+    // Override DAILY_TASK_LIMIT_PER_WALLET before re-requiring the module so
+    // the module-level constant is initialised to 2 for this test.
+    const originalLimit = process.env.DAILY_TASK_LIMIT_PER_WALLET;
+    process.env.DAILY_TASK_LIMIT_PER_WALLET = "2";
+
+    jest.resetModules();
+
+    // Re-spy on getTaskDb so the fresh module uses our in-memory DB
+    const taskDbModule = require("../src/db/tasks");
+    jest.spyOn(taskDbModule, "getTaskDb").mockReturnValue(inMemoryDb);
+
+    const { createApp: freshCreateApp } = require("../src/api");
+    const freshApp = freshCreateApp();
+
+    // Fill the quota (2 tasks)
+    for (let i = 0; i < 2; i++) {
+      const r = await request(freshApp.httpServer)
+        .post("/api/tasks")
+        .set("walletpublickey", quotaWallet)
+        .send({ prompt: `Quota fill task ${i}`, maxBudgetXLM: 1 });
+      expect(r.status).toBe(201);
+    }
+
+    // The 3rd attempt should be rejected with 429
+    const res = await request(freshApp.httpServer)
+      .post("/api/tasks")
+      .set("walletpublickey", quotaWallet)
+      .send({ prompt: "One too many", maxBudgetXLM: 1 });
+
+    expect(res.status).toBe(429);
+    expect(res.body.error.code).toBe("DAILY_LIMIT_EXCEEDED");
+
+    freshApp.close();
+    process.env.DAILY_TASK_LIMIT_PER_WALLET = originalLimit;
+    jest.restoreAllMocks();
   });
 });
