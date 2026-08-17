@@ -62,7 +62,7 @@ async function getUptimePercent(db: DbClient, since: Date): Promise<number> {
 
 async function getTasksHourlyCounts(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
   const rows = db.prepare(
-    "SELECT strftime('%Y-%m-%d %H:00:00', \"createdAt\") AS hour, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
+    "SELECT strftime('%Y-%m-%d %H:00:00Z', \"createdAt\") AS hour, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
   ).all(since.toISOString()) as Array<{ hour: string; count: string | number }>;
 
   return rows.map((row) => ({ hour: row.hour, value: Number(row.count ?? 0) }));
@@ -70,7 +70,7 @@ async function getTasksHourlyCounts(db: DbClient, since: Date): Promise<Array<{ 
 
 async function getXLMHourlyTotals(db: DbClient, since: Date): Promise<Array<{ hour: string; value: number }>> {
   const rows = db.prepare(
-    "SELECT strftime('%Y-%m-%d %H:00:00', \"createdAt\") AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
+    "SELECT strftime('%Y-%m-%d %H:00:00Z', \"createdAt\") AS hour, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= ? GROUP BY hour ORDER BY hour"
   ).all(since.toISOString()) as Array<{ hour: string; sum: string | number }>;
 
   return rows.map((row) => ({ hour: row.hour, value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));

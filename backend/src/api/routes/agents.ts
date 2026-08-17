@@ -14,7 +14,8 @@ export interface AgentsRouterOptions {
 }
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
-const horizon = new HorizonServer("https://horizon-testnet.stellar.org");
+const HORIZON_URL = process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
+const horizon = new Horizon.Server(HORIZON_URL);
 
 export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   const router = Router();
@@ -203,6 +204,59 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
 
   /**
    * @openapi
+   * /api/agents/{id}/heartbeat:
+   *   post:
+   *     summary: Agent heartbeat ping
+   *     description: Updates the agent's lastSeenAt timestamp and sets status to online.
+   *     tags: [Agents]
+   *     security: []
+   *     operationId: agentHeartbeat
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *     responses:
+   *       200:
+   *         description: Heartbeat recorded
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 status:
+   *                   type: string
+   *                   example: ok
+   *                 lastSeenAt:
+   *                   type: string
+   *       404:
+   *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/Error'
+   */
+  // POST /api/agents/:id/heartbeat
+  router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, (req: Request, res: Response): void => {
+    const db = getDb();
+    const agent = db.findById(req.params.id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    db.updateLastSeen(req.params.id);
+    const updatedAgent = db.findById(req.params.id);
+
+    res.json({
+      status: "ok",
+      lastSeenAt: updatedAgent?.lastSeenAt ?? new Date().toISOString(),
+    });
+  });
+
+
+  /**
+   * @openapi
    * /api/agents/register:
    *   post:
    *     summary: Register a new agent
@@ -309,59 +363,19 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     },
   );
 
-  /**
-   * @openapi
-   * /api/agents/{id}:
-   *   delete:
-   *     summary: Delete an agent
-   *     operationId: deleteAgent
-   *     description: >
-   *       Requires a valid Stellar signature proving ownership of the
-   *       agent's registered keypair. The caller must sign the value of
-   *       the `x-challenge` header and pass the base64-encoded signature
-   *       in `x-signature`.
-   *     tags: [Agents]
-   *     security:
-   *       - AgentSignatureAuth: []
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema: { type: string }
-   *       - in: header
-   *         name: x-challenge
-   *         required: true
-   *         schema: { type: string }
-   *         description: The challenge string the caller must sign
-   *       - in: header
-   *         name: x-signature
-   *         required: true
-   *         schema: { type: string }
-   *         description: Base64-encoded signature of the challenge, signed with the agent's Stellar keypair
-   *     responses:
-   *       200:
-   *         description: Agent deleted
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 message:
-   *                   type: string
-   *                   example: Agent deleted successfully
-   *       401:
-   *         description: Missing, invalid, or malformed signature
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/Error'
-   *       404:
-   *         description: Agent not found
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/Error'
-   */
+  // POST /api/agents/:id/heartbeat
+  router.post("/:id/heartbeat", (req: Request, res: Response): void => {
+    const db = getDb();
+    const agent = db.findById(req.params.id);
+    if (!agent) {
+      res.status(404).json({ error: "Agent not found" });
+      return;
+    }
+
+    db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: 'online' });
+    res.status(204).send();
+  });
+
   // DELETE /api/agents/:id
   router.delete(
     "/:id",

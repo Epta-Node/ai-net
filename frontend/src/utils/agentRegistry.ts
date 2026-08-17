@@ -48,6 +48,8 @@ export function normalizeAgent(raw: unknown): AgentRecord {
 
   const reputation = typeof r.reputation === 'number' ? r.reputation : 0
   const id = String(r.id ?? '')
+  const rawStatus = typeof r.status === 'string' ? r.status : 'unknown'
+  const status = rawStatus === 'online' ? 'active' : rawStatus === 'offline' ? 'inactive' : rawStatus
 
   return {
     id,
@@ -55,13 +57,14 @@ export function normalizeAgent(raw: unknown): AgentRecord {
     capabilities,
     price,
     reputation,
-    status: typeof r.status === 'string' ? r.status : 'unknown',
+    status,
     endpoint: typeof r.endpoint === 'string' ? r.endpoint : undefined,
     registrationTxHash:
       (typeof r.registrationTxHash === 'string' && r.registrationTxHash) ||
       (typeof r.txHash === 'string' && r.txHash) ||
       undefined,
   }
+
 }
 
 /** Distinct capabilities present across the dataset, sorted alphabetically. */

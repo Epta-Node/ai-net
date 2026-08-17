@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ToastProvider } from '../../context/ToastContext';
 import { TaskSubmissionForm } from './TaskSubmissionForm';
 
 vi.mock('./DAGPreview', () => ({
@@ -18,20 +19,22 @@ function LocationProbe() {
 
 function renderForm() {
   return render(
-    <MemoryRouter initialEntries={['/tasks/new']}>
-      <Routes>
-        <Route path="/tasks/new" element={<TaskSubmissionForm />} />
-        <Route
-          path="/tasks/:taskId"
-          element={
-            <>
-              <LocationProbe />
-              <div>Task detail</div>
-            </>
-          }
-        />
-      </Routes>
-    </MemoryRouter>,
+    <ToastProvider>
+      <MemoryRouter initialEntries={['/tasks/new']}>
+        <Routes>
+          <Route path="/tasks/new" element={<TaskSubmissionForm />} />
+          <Route
+            path="/tasks/:taskId"
+            element={
+              <>
+                <LocationProbe />
+                <div>Task detail</div>
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </ToastProvider>,
   );
 }
 

@@ -6,13 +6,28 @@ import WalletPage from './WalletPage'
 
 const mockConnect = vi.fn()
 const mockDisconnect = vi.fn()
+const mockConnectFreighter = vi.fn()
 
 // Mock wallet state - will be overridden per test via mutable object
-let mockWalletState = {
+let mockWalletState: {
+  publicKey: string | null
+  keypair: any
+  connected: boolean
+  ready: boolean
+  connectionMethod: string | null
+  freighterAvailable: boolean
+  connect: typeof mockConnect
+  connectFreighter: typeof mockConnectFreighter
+  disconnect: typeof mockDisconnect
+} = {
   publicKey: null as string | null,
   keypair: null as any,
   connected: false as boolean,
+  ready: false as boolean,
+  connectionMethod: null as string | null,
+  freighterAvailable: false,
   connect: mockConnect,
+  connectFreighter: mockConnectFreighter,
   disconnect: mockDisconnect,
 }
 
@@ -59,7 +74,11 @@ beforeEach(() => {
     publicKey: null,
     keypair: null,
     connected: false,
+    ready: false,
+    connectionMethod: null,
+    freighterAvailable: false,
     connect: mockConnect,
+    connectFreighter: mockConnectFreighter,
     disconnect: mockDisconnect,
   }
 })
@@ -68,7 +87,7 @@ describe('WalletPage - Disconnected State', () => {
   it('shows the connect form when no wallet is connected', () => {
     renderPage()
     expect(screen.getByPlaceholderText('SABCD...5678')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /connect wallet/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /connect with secret key/i })).toBeInTheDocument()
   })
 
   it('calls connect when the form is submitted with a secret key', async () => {
@@ -77,7 +96,7 @@ describe('WalletPage - Disconnected State', () => {
 
     const input = screen.getByPlaceholderText('SABCD...5678')
     fireEvent.change(input, { target: { value: 'SABCD1234' } })
-    fireEvent.click(screen.getByRole('button', { name: /connect wallet/i }))
+    fireEvent.click(screen.getByRole('button', { name: /connect with secret key/i }))
 
     await waitFor(() => {
       expect(mockConnect).toHaveBeenCalledWith('SABCD1234')
@@ -90,7 +109,7 @@ describe('WalletPage - Disconnected State', () => {
 
     const input = screen.getByPlaceholderText('SABCD...5678')
     fireEvent.change(input, { target: { value: 'bad-key' } })
-    fireEvent.click(screen.getByRole('button', { name: /connect wallet/i }))
+    fireEvent.click(screen.getByRole('button', { name: /connect with secret key/i }))
 
     expect(await screen.findByText('Invalid secret key')).toBeInTheDocument()
   })
@@ -102,7 +121,11 @@ describe('WalletPage - Connected State', () => {
       publicKey: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
       keypair: {} as any,
       connected: true,
+      ready: true,
+      connectionMethod: 'secret-key',
+      freighterAvailable: false,
       connect: mockConnect,
+      connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
     }
   })
@@ -169,7 +192,11 @@ describe('SendXLMForm Validation', () => {
       publicKey: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
       keypair: {} as any,
       connected: true,
+      ready: true,
+      connectionMethod: 'secret-key',
+      freighterAvailable: false,
       connect: mockConnect,
+      connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
     }
   })

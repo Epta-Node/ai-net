@@ -2,7 +2,32 @@
 name = "error-resolver"
 version = "0.1.0"
 edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std", "contract"]
+# Off-chain Tier 1 Soroban host-error lookup table (TOML-backed).
+std = ["dep:serde", "dep:toml"]
+# On-chain per-agent error ledger, callable cross-contract by agent-registry.
+contract = ["dep:soroban-sdk"]
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
+serde = { version = "1.0", features = ["derive"], optional = true }
+toml = { version = "0.8", optional = true }
+soroban-sdk = { version = "=22.0.11", optional = true }
+
+[dev-dependencies]
+soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

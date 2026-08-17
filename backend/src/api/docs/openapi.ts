@@ -154,12 +154,14 @@ Close codes are defined in \`src/types/stream.ts\` (\`WS_CLOSE\`), covering: tas
     },
     security: [{ WalletAuth: [] }],
   },
-  // NOTE: annotations live in app.ts (inline task routes) and
-  // routes/agents.ts, routes/health.ts, routes/stats.ts. routes/tasks.ts is NOT included —
-  // it is not wired into the running app (app.ts defines /api/tasks routes
-  // inline instead) and documenting it would describe endpoints that don't
-  // actually run.
-  apis: ["./src/api/app.ts", "./src/api/routes/agents.ts", "./src/api/routes/health.ts", "./src/api/routes/stats.ts"],
+  // NOTE: annotations live in routes/tasks.ts, routes/agents.ts, routes/health.ts, routes/stats.ts.
+  apis: [
+    "./src/api/app.ts",
+    "./src/api/routes/agents.ts",
+    "./src/api/routes/health.ts",
+    "./src/api/routes/stats.ts",
+    "./src/api/routes/tasks.ts"
+  ],
 };
 
 export const openapiSpec = swaggerJsdoc(options);

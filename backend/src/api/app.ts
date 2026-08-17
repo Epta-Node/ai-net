@@ -7,6 +7,8 @@ import {
   type DispatchFn,
   type PaymentReleaseFn,
 } from "../coordinator/coordinator";
+import { httpDispatch } from "../coordinator/dispatch";
+import type { AgentRegistry } from "../types/agent";
 import { getTask } from "../coordinator/taskStore";
 import { eventBus } from "../coordinator/eventBus";
 import { createEventStore, type EventStore } from "../coordinator/eventStore";
@@ -20,7 +22,7 @@ import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
-import { rateLimitMiddleware } from "./middleware/rateLimit";
+import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { requestId } from "./middleware/requestId";
@@ -34,10 +36,11 @@ import {
 } from "./schemas/task.schema";
 import { createLogger } from "../utils/logger";
 import { createTaskDb, getTaskDb } from "../db/tasks";
+import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
 import { openapiSpec } from "./docs/openapi";
 
 export interface AppOptions {
-  /** Called to execute a single DAG node; defaults to HTTP dispatch */
+  /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
   dispatch?: DispatchFn;
   /** Called after each node completes; defaults to no-op (returns 'mock-hash') */
   releasePayment?: PaymentReleaseFn;
@@ -45,6 +48,15 @@ export interface AppOptions {
   eventStore?: EventStore;
   /** Heartbeat / auth timing for the WebSocket stream */
   stream?: TaskStreamOptions;
+  /**
+   * Agent registry used to resolve endpoint URLs for HTTP dispatch.
+   * Required when `dispatch` is not provided; ignored when `dispatch` is set.
+   */
+  agentRegistry?: AgentRegistry;
+  /** Enable background heartbeat cleanup service (defaults to true in non-test envs) */
+  enableHeartbeatCleanup?: boolean;
+  /** Custom options for heartbeat cleanup service */
+  heartbeatOptions?: HeartbeatServiceOptions;
 }
 
 /**
@@ -80,9 +92,15 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestId);
   app.use(requestLogger);
 
-  const dispatch: DispatchFn = opts.dispatch ?? defaultDispatch;
+  const dispatch: DispatchFn = opts.dispatch ?? makeHttpDispatch(opts.agentRegistry);
   const releasePayment: PaymentReleaseFn =
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
+
+  // ── Heartbeat Background Cleanup Service ────────────────────────────────────
+  const heartbeatService = createHeartbeatService(opts.heartbeatOptions);
+  if (opts.enableHeartbeatCleanup || (opts.enableHeartbeatCleanup !== false && process.env.NODE_ENV !== "test")) {
+    heartbeatService.start();
+  }
 
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", healthRouter);
@@ -91,6 +109,9 @@ export function createApp(opts: AppOptions = {}): {
   app.use("/api/stats", createStatsRouter(getTaskDb()));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
+  // Apply a stricter rate limit specifically to the register endpoint to
+  // prevent registration floods (the full agentsRouter handles GET/DELETE etc.).
+  app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
   // ── POST /api/tasks ────────────────────────────────────────────────────────
@@ -220,6 +241,7 @@ export function createApp(opts: AppOptions = {}): {
   app.use(errorHandler);
 
   function close(callback?: () => void): void {
+    heartbeatService.stop();
     detachStream();
     stopRecording();
     eventStore.close();
@@ -229,12 +251,30 @@ export function createApp(opts: AppOptions = {}): {
   return { httpServer, close };
 }
 
-async function defaultDispatch(
-  taskId: string,
-  node: DAGNode,
-  context: string,
-): Promise<unknown> {
-  // In production this POSTs to the agent's HTTP endpoint.
-  // The e2e test replaces this via opts.dispatch.
-  throw new Error(`No agent registered for type: ${node.type}`);
+
+/**
+ * Build a DispatchFn that looks up the cheapest agent for a node's type in the
+ * provided registry and forwards the call to that agent via HTTP.
+ *
+ * If no registry is provided (e.g. during tests that supply their own dispatch)
+ * the returned function throws a clear error so misconfiguration is obvious at
+ * runtime rather than producing a silent no-op.
+ */
+function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
+  return async (taskId: string, node: DAGNode, context: string): Promise<unknown> => {
+    if (!registry) {
+      throw new Error(
+        `No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.`,
+      );
+    }
+
+    const agents = await registry.getAgents(node.type);
+    if (!agents || agents.length === 0) {
+      throw new Error(`No agent registered for type: ${node.type}`);
+    }
+
+    // Pick cheapest available agent.
+    const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];
+    return httpDispatch(agent, node.nodeId, node, context);
+  };
 }

@@ -2,6 +2,7 @@ import express from "express";
 import type { AddressInfo } from "net";
 import request from "supertest";
 import { createAgentsRouter } from "../src/api/routes/agents";
+import { createTasksRouter } from "../src/api/routes/tasks";
 import { AgentRecord, createAgentDb } from "../src/db/agents";
 import Database from "better-sqlite3";
 

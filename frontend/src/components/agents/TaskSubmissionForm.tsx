@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
+import { useToast } from '../../context/ToastContext';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 const agentPreferences = [
@@ -33,9 +34,9 @@ type TaskFormValues = z.infer<typeof taskSchema>;
 
 export function TaskSubmissionForm() {
   const navigate = useNavigate();
-  const [toast, setToast] = useState<string | null>(null);
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
+  const { showToast } = useToast();
 
   const {
     register,
@@ -55,14 +56,13 @@ export function TaskSubmissionForm() {
     try {
       const result = await submitTask(values);
       setPreview(result.dagPreview);
-      setToast(null);
 
       window.setTimeout(() => {
         navigate(`/tasks/${result.taskId}`);
       }, 300);
     } catch (submitError) {
       const message = submitError instanceof Error ? submitError.message : 'Unable to submit task';
-      setToast(message);
+      showToast(message, 'error');
     }
   };
 
@@ -90,7 +90,7 @@ export function TaskSubmissionForm() {
             {...register('prompt')}
             rows={6}
             maxLength={1000}
-            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #cbd5e1' }}
+            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.prompt)}
             aria-describedby="prompt-error"
           />
@@ -109,7 +109,7 @@ export function TaskSubmissionForm() {
             step="0.1"
             min="0.1"
             {...register('maxBudgetXLM', { valueAsNumber: true })}
-            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid #cbd5e1' }}
+            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
@@ -143,7 +143,7 @@ export function TaskSubmissionForm() {
                       gap: 10,
                       padding: 12,
                       borderRadius: 10,
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--border-color)',
                       cursor: 'pointer',
                     }}
                   >
@@ -198,50 +198,16 @@ export function TaskSubmissionForm() {
       <section style={{ marginBottom: 24 }}>
         <h2>Execution DAG preview</h2>
         {isLoading && (
-          <div aria-busy="true" style={{ padding: 24, background: '#f8fafc', borderRadius: 12 }}>
-            <div style={{ height: 18, width: '45%', background: '#e2e8f0', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '70%', background: '#e2e8f0', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '55%', background: '#e2e8f0', borderRadius: 8 }} />
+          <div aria-busy="true" style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 12 }}>
+            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
+            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
+            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 8 }} />
           </div>
         )}
         {!isLoading && <DAGPreview dagPreview={previewData ?? undefined} />}
       </section>
 
-      {toast && (
-        <div
-          role="alert"
-          aria-live="assertive"
-          style={{
-            position: 'fixed',
-            right: 24,
-            bottom: 24,
-            maxWidth: 360,
-            padding: 16,
-            background: '#fef2f2',
-            border: '1px solid #fca5a5',
-            borderRadius: 12,
-            boxShadow: '0 12px 40px rgba(15, 23, 42, 0.15)',
-          }}
-        >
-          <div style={{ color: '#991b1b', marginBottom: 12 }}>{toast}</div>
-          <button
-            type="button"
-            onClick={() => setToast(null)}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: 'none',
-              background: '#ef4444',
-              color: '#ffffff',
-              cursor: 'pointer',
-            }}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {error && !toast && (
+      {error && (
         <div
           role="status"
           style={{

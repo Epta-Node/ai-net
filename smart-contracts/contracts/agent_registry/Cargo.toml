@@ -12,6 +12,9 @@ soroban-sdk = { version = "=22.0.11" }
 
 [dev-dependencies]
 soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+# Test-only: the real resolver contract is registered in the test Env. Kept out
+# of [dependencies] so its exported symbols never link into this contract's wasm.
+error-resolver = { path = "../error-resolver", default-features = false, features = ["contract"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [profile.release]

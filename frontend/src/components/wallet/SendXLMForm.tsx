@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react'
-import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon } from '@stellar/stellar-sdk'
+import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
+import { signTransactionWithFreighter } from '../../services/freighter'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
@@ -22,7 +23,7 @@ interface ConfirmationData {
 }
 
 export function SendXLMForm() {
-  const { publicKey, keypair, connected } = useWallet()
+  const { publicKey, keypair, connected, connectionMethod } = useWallet()
   const { balance } = useWalletBalance(publicKey)
 
   const [destination, setDestination] = useState('')
@@ -76,49 +77,65 @@ export function SendXLMForm() {
     }
   }
 
+  const buildTransaction = async (): Promise<Transaction> => {
+    const server = new Horizon.Server(HORIZON_URL)
+    const account = await server.loadAccount(publicKey!)
+
+    let txBuilder = new TransactionBuilder(account, {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.TESTNET,
+    })
+      .addOperation(
+        Operation.payment({
+          destination: confirmation!.destination,
+          asset: Asset.native(),
+          amount: confirmation!.amount,
+        })
+      )
+
+    if (confirmation!.memo) {
+      const memoText = confirmation!.memo
+      if (memoText.length <= 28) {
+        txBuilder = txBuilder.addMemo(Memo.text(memoText))
+      } else {
+        txBuilder = txBuilder.addMemo(Memo.text(memoText.substring(0, 28)))
+      }
+    }
+
+    return txBuilder.setTimeout(30).build()
+  }
+
   const handleConfirm = async () => {
-    if (!keypair || !confirmation) return
+    if (!confirmation) return
+
+    if (connectionMethod === 'freighter') {
+      if (!publicKey) return
+    } else {
+      if (!keypair) return
+    }
 
     setSubmitting(true)
     setSubmitError(null)
 
     try {
-      const server = new Horizon.Server(HORIZON_URL)
-      const account = await server.loadAccount(publicKey!)
-      
-      // Build the payment transaction
-      let txBuilder = new TransactionBuilder(account, {
-        fee: BASE_FEE,
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(
-          Operation.payment({
-            destination: confirmation.destination,
-            asset: Asset.native(),
-            amount: confirmation.amount,
-          })
-        )
+      const transaction = await buildTransaction()
 
-      // Add memo if provided
-      if (confirmation.memo) {
-        const memoText = confirmation.memo
-        if (memoText.length <= 28) {
-          txBuilder = txBuilder.addMemo(Memo.text(memoText))
-        } else {
-          txBuilder = txBuilder.addMemo(Memo.text(memoText.substring(0, 28)))
-        }
+      let signedXdr: string
+      if (connectionMethod === 'freighter') {
+        const signedResult = await signTransactionWithFreighter(
+          transaction.toEnvelope().toXDR('base64'),
+          publicKey!
+        )
+        signedXdr = signedResult
+      } else {
+        transaction.sign(keypair!)
+        signedXdr = transaction.toEnvelope().toXDR('base64')
       }
 
-      const transaction = txBuilder.setTimeout(30).build()
-
-      // Sign the transaction
-      transaction.sign(keypair)
-
-      // Submit to Horizon
       const submitRes = await fetch(`${HORIZON_URL}/transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ tx: transaction.toEnvelope().toXDR('base64') }),
+        body: new URLSearchParams({ tx: signedXdr }),
       })
 
       const submitData = await submitRes.json()
@@ -127,7 +144,6 @@ export function SendXLMForm() {
         throw new Error(submitData.extras?.result_codes?.transaction || 'Transaction submission failed')
       }
 
-      // Success
       const txHash = submitData.hash
       setSuccessTx(txHash)
       setDestination('')
@@ -297,7 +313,11 @@ export function SendXLMForm() {
                 onClick={handleConfirm}
                 disabled={submitting}
               >
-                {submitting ? 'Signing & Sending...' : 'Confirm & Send'}
+                {submitting
+                  ? connectionMethod === 'freighter'
+                    ? 'Signing with Freighter...'
+                    : 'Signing & Sending...'
+                  : 'Confirm & Send'}
               </button>
             </div>
           </div>

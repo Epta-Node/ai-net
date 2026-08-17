@@ -61,6 +61,8 @@ export interface TaskListOptions {
   status?: string;
   q?: string;
   sort?: "createdAt:asc" | "createdAt:desc";
+  /** ISO timestamp — only return tasks created after this point. */
+  createdAfter?: string;
 }
 
 export interface TaskDb {
@@ -120,6 +122,11 @@ export function createTaskDb(db: Database.Database): TaskDb {
       if (options.q) {
         conditions.push("prompt LIKE ?");
         params.push(`%${options.q}%`);
+      }
+
+      if (options.createdAfter) {
+        conditions.push("createdAt > ?");
+        params.push(options.createdAfter);
       }
 
       const whereClause = conditions.join(" AND ");

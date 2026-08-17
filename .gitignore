@@ -4,6 +4,9 @@ target/
 .env
 *.js.map
 *.db
+*.db-shm
+*.db-wal
+
 coverage/
 .DS_Store
 playwright-report/

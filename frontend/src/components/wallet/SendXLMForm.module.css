@@ -1,6 +1,6 @@
 .container {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 24px;
   margin-bottom: 24px;
@@ -10,11 +10,11 @@
   font-size: 1.125rem;
   font-weight: 600;
   margin: 0 0 16px;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .disconnected {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.875rem;
   margin: 0;
 }
@@ -27,18 +27,18 @@
   display: block;
   font-size: 0.875rem;
   font-weight: 500;
-  color: #334155;
+  color: var(--text-secondary);
   margin-bottom: 6px;
 }
 
 .input {
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #cbd5e1;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 0.875rem;
-  color: #0f172a;
-  background: #f8fafc;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
   transition: border-color 0.15s, box-shadow 0.15s;
   box-sizing: border-box;
 }
@@ -70,7 +70,7 @@
 }
 
 .helper {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 0.75rem;
   margin: 4px 0 0;
 }
@@ -141,7 +141,7 @@
 }
 
 .modal {
-  background: #ffffff;
+  background: var(--bg-primary);
   border-radius: 16px;
   padding: 24px;
   max-width: 440px;
@@ -153,7 +153,7 @@
   font-size: 1.125rem;
   font-weight: 600;
   margin: 0 0 16px;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 
 .modalBody {
@@ -165,7 +165,7 @@
   justify-content: space-between;
   align-items: flex-start;
   padding: 8px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .confirmRow:last-child {
@@ -174,7 +174,7 @@
 
 .confirmLabel {
   font-size: 0.875rem;
-  color: #64748b;
+  color: var(--text-secondary);
   font-weight: 500;
   flex-shrink: 0;
   margin-right: 12px;
@@ -182,7 +182,7 @@
 
 .confirmValue {
   font-size: 0.875rem;
-  color: #0f172a;
+  color: var(--text-primary);
   font-weight: 500;
   text-align: right;
   word-break: break-all;
@@ -196,9 +196,9 @@
 
 .cancelButton {
   padding: 8px 16px;
-  background: #f1f5f9;
-  color: #334155;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   font-size: 0.875rem;
   cursor: pointer;
@@ -206,7 +206,7 @@
 }
 
 .cancelButton:hover:not(:disabled) {
-  background: #e2e8f0;
+  background: var(--border-color);
 }
 
 .confirmButton {

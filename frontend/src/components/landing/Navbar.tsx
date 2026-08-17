@@ -18,7 +18,7 @@ const navItems = [
 ]
 
 const Navbar: React.FC = () => {
-  const { publicKey, connected, disconnect } = useWallet()
+  const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
@@ -147,7 +147,7 @@ const Navbar: React.FC = () => {
             <Search size={15} />
           </motion.button>
 
-          {connected && publicKey ? (
+          {connected && publicKey && ready ? (
             <div className="flex items-center gap-0.5 bg-background-surface/40 border border-border-subtle/60 rounded-md pl-2 pr-1 py-0.5">
               <span className="relative flex w-1.5 h-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
@@ -156,6 +156,11 @@ const Navbar: React.FC = () => {
               <span className="text-[11px] font-medium text-text-primary font-mono tracking-wide mx-1">
                 {truncateKey(publicKey)}
               </span>
+              {connectionMethod && (
+                <span className="text-[9px] font-medium text-text-secondary/50 tracking-wide mx-1 hidden sm:inline">
+                  {connectionMethod === 'freighter' ? 'Freighter' : 'Secret Key'}
+                </span>
+              )}
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={copyToClipboard}
@@ -177,6 +182,7 @@ const Navbar: React.FC = () => {
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
+              onClick={() => navigate('/wallet')}
               className="group flex items-center gap-1.5 bg-background-surface/40 border border-border-subtle/60 rounded-md px-2.5 py-1 cursor-pointer hover:border-accent-cyan/30 hover:bg-background-surface/70 hover:shadow-[0_0_12px_rgba(56,189,248,0.04)] transition-all"
             >
               <Wallet size={12} className="text-accent-cyan/80 group-hover:text-accent-cyan group-hover:scale-110 transition-all" />

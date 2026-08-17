@@ -27,7 +27,8 @@
       "@hooks/*": ["src/hooks/*"],
       "@services/*": ["src/services/*"],
       "@types/*": ["src/types/*"],
-      "@context/*": ["src/context/*"]
+      "@context/*": ["src/context/*"],
+      "@utils/*": ["src/utils/*"]
     }
   },
   "include": ["src", "vitest.setup.ts"],

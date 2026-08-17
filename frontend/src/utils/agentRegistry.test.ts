@@ -8,7 +8,7 @@ import {
   priceDomain,
   DEFAULT_FILTERS,
   type AgentFilters,
-} from './agentRegistry'
+} from '@utils/agentRegistry'
 import type { AgentRecord } from '../types/api'
 
 const agents: AgentRecord[] = [

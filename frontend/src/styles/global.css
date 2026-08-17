@@ -1,3 +1,5 @@
+@tailwind base;
+@tailwind components;
 @tailwind utilities;
 
 :root {
@@ -5,6 +7,8 @@
   --bg-primary: #0A0E14;
   --bg-surface: #11151D;
   --bg-surface-alt: #161B24;
+  --bg-secondary: #1A1F2E;
+  --border-color: #2A3040;
   --border-subtle: #1F2630;
   --text-primary: #F5F7FA;
   --text-secondary: #8A93A3;

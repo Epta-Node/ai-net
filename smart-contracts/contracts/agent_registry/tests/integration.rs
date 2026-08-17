@@ -25,7 +25,7 @@ fn require_e2e() -> bool {
 
 fn wasm_path() -> String {
     let manifest = env!("CARGO_MANIFEST_DIR");
-    format!("{manifest}/target/wasm32v1-none/release/agent_registry.wasm")
+    format!("{manifest}/target/wasm32-unknown-unknown/release/agent_registry.wasm")
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn e2e_deploy_register_lookup_deregister() {
         "register_agent",
         "--record",
         &format!(
-            r#"{{"id":"e2e_agent","capability":"test","price_stroops":1000,"endpoint":"https://e2e.example.com","owner":"{owner_addr}"}}"#
+            r#"{{"id":"e2e_agent","capability":"test","price_stroops":1000,"endpoint":"https://e2e.example.com","owner":"{owner_addr}","metadata":{{}}}}"#
         ),
     ]);
     assert!(

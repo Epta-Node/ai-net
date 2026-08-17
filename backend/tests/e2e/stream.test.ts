@@ -29,7 +29,11 @@ import {
 } from '../fixtures/agentResults';
 import type { AgentResult } from '../../src/agents/research/types';
 
-const PROMPT = 'Generate a market-entry report for solar energy in Southeast Asia';
+// Exercises every branch of `decompose`: "market" -> risk, "software"/"implementation"
+// -> coding, "UI design" -> design. research and report are unconditional, so this
+// yields the full 5-node DAG this suite is built around.
+const PROMPT =
+  'Generate a market-entry report for solar energy in Southeast Asia, including software implementation and UI design';
 const OWNER = 'GOWNERWALLETPUBLICKEY';
 const NODE_IDS = ['node_research', 'node_risk', 'node_coding', 'node_design', 'node_report'];
 

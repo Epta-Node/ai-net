@@ -2,6 +2,7 @@
 import React from 'react';
 import { useWallet } from '../hooks/useWallet';
 import { useNetworkStats } from '../hooks/useNetworkStats';
+import { useToast } from '../context/ToastContext';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
@@ -10,7 +11,15 @@ import styles from './dashboard.module.css';
 
 export const DashboardPage: React.FC = () => {
   const { address } = useWallet();
-  const { data, loading } = useNetworkStats();
+  const { data, loading, error } = useNetworkStats();
+  const { showToast } = useToast();
+
+  // Show error toast when network stats fetch fails
+  React.useEffect(() => {
+    if (error) {
+      showToast(`Failed to load network stats: ${error}`, 'error');
+    }
+  }, [error, showToast]);
 
   // Redirect unauthenticated users
   React.useEffect(() => {

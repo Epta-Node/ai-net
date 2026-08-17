@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "3.9.1",
+    "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "12.3.0",
     "@vitejs/plugin-react": "4.3.4",
     "framer-motion": "^12.40.0",

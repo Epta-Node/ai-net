@@ -10,8 +10,12 @@ import {
   TaskIdParamSchema,
 } from "../schemas/task.schema";
 
-export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentReleaseFn): Router {
-  const tasksRouter = Router();
+// ── Validation config ────────────────────────────────────────────────────────
+// Read at module load time so the value is stable for the lifetime of the
+// process. Tests that need a different value should set process.env before
+// importing (or use jest.resetModules() + re-require).
+const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH ?? 10_000);
+const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 
 // POST /api/tasks
 tasksRouter.post(

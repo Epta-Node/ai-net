@@ -19,6 +19,8 @@ const Server = jest.fn().mockImplementation(() => ({
   submitTransaction: jest.fn().mockResolvedValue({ hash: "txhash-001" }),
 }));
 
+const Horizon = { Server };
+
 const TransactionBuilder = jest.fn().mockImplementation(() => ({
   addOperation: jest.fn().mockReturnThis(),
   setTimeout: jest.fn().mockReturnThis(),
@@ -40,4 +42,4 @@ const Claimant = Object.assign(
 const BASE_FEE = "100";
 const Networks = { TESTNET: "Test SDF Network ; September 2015" };
 
-module.exports = { Keypair, Server, TransactionBuilder, Operation, Asset, Claimant, BASE_FEE, Networks };
+module.exports = { Keypair, Server, Horizon, TransactionBuilder, Operation, Asset, Claimant, BASE_FEE, Networks };

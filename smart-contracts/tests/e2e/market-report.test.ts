@@ -263,6 +263,10 @@ describeE2E('Market report pipeline on Stellar testnet', () => {
 
     clearRegistry();
     registerTestAgents(agentKeypair.publicKey());
+
+    expect(discoverAgents('research')).toHaveLength(1);
+    expect(discoverAgents('research')[0].priceXLM).toBe(0.1);
+    expect(discoverAgents('report')).toHaveLength(1);
   });
 
   afterAll(() => {
@@ -290,6 +294,8 @@ describeE2E('Market report pipeline on Stellar testnet', () => {
         PAYMENT_XLM,
         taskId,
       );
+      expect(lockTxHash).toBeTruthy();
+      expect(typeof lockTxHash).toBe('string');
 
       node.result = await executeNode(node, upstreamResults, reportAgent);
       node.status = 'completed';
@@ -301,6 +307,8 @@ describeE2E('Market report pipeline on Stellar testnet', () => {
         agentKeypair.publicKey(),
         taskId,
       );
+      expect(releaseTxHash).toBeTruthy();
+      expect(typeof releaseTxHash).toBe('string');
       payments.push({ nodeId: node.id, lockTxHash, releaseTxHash });
     }
 

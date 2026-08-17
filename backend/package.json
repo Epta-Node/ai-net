@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
-    "test": "jest --testPathPattern=tests/ --runInBand"
+    "test": "jest --testPathPattern=tests --runInBand --forceExit",
+    "test:e2e": "jest --config ../tests/e2e/jest.config.js --runInBand --forceExit"
   },
   "license": "MIT",
   "dependencies": {
@@ -15,6 +16,7 @@
     "better-sqlite3": "^11.3.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "lru-cache": "^10.4.3",
     "nanoid": "^3.3.7",
     "pino": "^10.3.1",
     "swagger-jsdoc": "^6.3.0",
@@ -37,6 +39,6 @@
     "supertest": "^7.0.0",
     "ts-jest": "29.1.4",
     "ts-node": "10.9.2",
-    "typescript": "5.4.5"
+    "typescript": "^5.4.5"
   }
 }

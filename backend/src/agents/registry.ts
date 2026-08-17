@@ -1,7 +1,10 @@
 /**
  * Agent startup and registration manager.
- * 
+ *
  * Instantiates all agents and handles their self-registration on startup.
+ * This class is distinct from the {@link AgentRegistry} interface in
+ * `types/agent.ts`, which is the look-up interface used by the coordinator
+ * to resolve agents by type.
  */
 
 import { ResearchAgent } from './research/research';
@@ -13,9 +16,10 @@ import { ReportAgent } from './report';
 export interface AgentRegistryConfig {
   apiBaseUrl?: string;
   autoRegister?: boolean;
+
 }
 
-export class AgentRegistry {
+export class AgentStartupRegistry {
   private readonly agents: Array<{
     instance: any;
     capability: string;
@@ -118,12 +122,12 @@ export class AgentRegistry {
 }
 
 // Default singleton instance for easy usage
-export const globalAgentRegistry = new AgentRegistry();
+export const globalAgentRegistry = new AgentStartupRegistry();
 
 /**
  * Initialize all agents - call this on app startup.
  */
 export async function initializeAgents(config?: AgentRegistryConfig): Promise<void> {
-  const registry = config ? new AgentRegistry(config) : globalAgentRegistry;
+  const registry = config ? new AgentStartupRegistry(config) : globalAgentRegistry;
   await registry.initialize();
 }

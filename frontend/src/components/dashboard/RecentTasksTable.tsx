@@ -3,6 +3,7 @@ import React from 'react';
 import { Skeleton } from '../common/Skeleton';
 import styles from './RecentTasksTable.module.css';
 import { getRecentTasks } from '@services/api';
+import { useToast } from '../../context/ToastContext';
 import type { TaskResponse } from '../../types/api';
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
 
 export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) => {
   const [tasks, setTasks] = React.useState<TaskResponse[]>([]);
+  const { showToast } = useToast();
 
   React.useEffect(() => {
     if (!walletAddress) return;
@@ -24,12 +26,12 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
         }));
         setTasks(mappedTasks);
       } catch (e) {
-        console.error(e);
+        showToast('Failed to fetch recent tasks', 'error');
         setTasks([]);
       }
     };
     fetchTasks();
-  }, [walletAddress]);
+  }, [walletAddress, showToast]);
 
   if (loading) {
     return (

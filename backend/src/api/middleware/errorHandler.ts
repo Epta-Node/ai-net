@@ -3,22 +3,43 @@ import { createLogger } from "../../utils/logger";
 
 const log = createLogger();
 
-export function errorHandler(err: Error, req: Request, res: Response, _next: NextFunction): void {
+const isDevelopment = process.env.NODE_ENV === "development";
+
+export function errorHandler(
+  err: any,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): void {
+  const statusCode: number = err.statusCode || 500;
+
+  // Always log the full error server-side for observability
   log.error(
     {
-      error: err.message,
-      stack: err.stack,
-      method: req.method,
-      path: req.path,
+      err,
       requestId: res.locals.requestId,
+      path: req.path,
+      method: req.method,
     },
     "unhandled error",
   );
 
-  res.status(500).json({
-    error: {
-      message: err.message || "Internal server error",
-      code: "INTERNAL_ERROR",
-    },
-  });
+  // Build the sanitized response sent to the client
+  const response: Record<string, unknown> = {
+    statusCode,
+    path: req.path,
+    requestId: res.locals.requestId,
+  };
+
+  if (isDevelopment) {
+    // Development: include full details to aid debugging
+    response.error = err.message;
+    response.stack = err.stack;
+  } else {
+    // Production: generic message — never expose internals
+    response.error = err.code || "INTERNAL_SERVER_ERROR";
+    response.message = "An unexpected error occurred. Please try again later.";
+  }
+
+  res.status(statusCode).json(response);
 }
