@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "node16",
+    "moduleResolution": "node16",
     "strict": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
@@ -12,9 +12,7 @@
     "resolveJsonModule": true,
     "sourceMap": true,
     "typeRoots": ["./node_modules/@types"],
-    "paths": {
-      "@stellar/stellar-sdk": ["./src/@types/@stellar/stellar-sdk.d.ts"]
-    },
+    "types": ["jest", "node"],
     "baseUrl": "."
   },
   "include": ["src", "tests"],

@@ -1,8 +1,10 @@
 declare module "@stellar/stellar-sdk" {
   export class Keypair {
     static fromSecret(secret: string): Keypair;
+    static fromPublicKey(publicKey: string): Keypair;
     static random(): Keypair;
     publicKey(): string;
+    verify(data: Buffer, signature: Buffer): boolean;
     sign(data: Buffer): Buffer;
   }
 
@@ -10,6 +12,14 @@ declare module "@stellar/stellar-sdk" {
     constructor(serverURL: string);
     loadAccount(publicKey: string): Promise<AccountResponse>;
     submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+  }
+
+  export namespace Horizon {
+    export class Server {
+      constructor(serverURL: string);
+      loadAccount(publicKey: string): Promise<AccountResponse>;
+      submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+    }
   }
 
   export interface AccountResponse {

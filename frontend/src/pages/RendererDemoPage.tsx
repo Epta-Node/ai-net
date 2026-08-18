@@ -96,7 +96,7 @@ const RendererDemoPage: React.FC = () => {
       <h1 style={{ fontSize: '2rem', marginBottom: '10px' }}>Agent Output Renderer Demo</h1>
       <p style={{ color: 'var(--text-secondary)' }}>This page renders all 5 output types simultaneously to verify styling, tooltips, copy buttons, and performance.</p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '30px' }}>
         {/* Research */}
         <div className="glass-panel" style={{ padding: '24px' }}>
           <h2 style={{ fontSize: '1.25rem', marginBottom: '16px', color: 'var(--primary)' }}>Research Output</h2>

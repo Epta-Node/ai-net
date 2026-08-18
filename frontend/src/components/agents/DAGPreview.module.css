@@ -1,0 +1,19 @@
+.container {
+  width: 100%;
+  min-height: 240px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+}
+
+@media (min-width: 768px) {
+  .container {
+    min-height: 320px;
+  }
+}
+
+@media (min-width: 1024px) {
+  .container {
+    min-height: 400px;
+  }
+}

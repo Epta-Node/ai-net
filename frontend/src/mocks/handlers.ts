@@ -36,4 +36,21 @@ export const handlers = [
       status: 'pending',
     })
   }),
+
+  http.get('/api/tasks/:id', ({ params }) => {
+    const { id } = params
+    return HttpResponse.json({
+      taskId: id,
+      prompt: 'Build a decentralized agent network testing suite.',
+      walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
+      status: 'running',
+      dag: [
+        { nodeId: 'node-research', agentType: 'research', prompt: 'Research Agent', dependsOn: [], status: 'running' },
+        { nodeId: 'node-coding', agentType: 'coding', prompt: 'Code Generator', dependsOn: ['node-research'], status: 'pending' },
+        { nodeId: 'node-report', agentType: 'report', prompt: 'Report Writer', dependsOn: ['node-coding'], status: 'pending' },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+  }),
 ]

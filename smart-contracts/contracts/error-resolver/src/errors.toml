@@ -1,0 +1,36 @@
+# Tier 1 Host Error mapping database for Soroban / Stellar contracts
+
+[[errors]]
+category = "budget"
+error_code = "ExceededLimit"
+fix_suggestion = "The transaction has exceeded the allocated CPU or memory instructions budget. Optimize loops, avoid excessive memory allocation, or configure a higher resource limit fee when submitting the transaction."
+
+[[errors]]
+category = "storage"
+error_code = "MissingValue"
+fix_suggestion = "The requested ledger entry (e.g., persistent data, contract instance, or Wasm bytecode) does not exist or has been archived. Verify that the entry was created, or submit a RestoreFootprintOp transaction to restore the archived entry."
+
+[[errors]]
+category = "storage"
+error_code = "ExceededLimit"
+fix_suggestion = "The transaction attempted to access a ledger entry that was not declared in the read/write footprint, or exceeded size limits. Run a transaction simulation (simulateTransaction) first to obtain the correct footprint and declare all accessed entries."
+
+[[errors]]
+category = "storage"
+error_code = "ExistingValue"
+fix_suggestion = "The ledger entry or storage key already exists and cannot be overwritten as a new entry. Check if you should perform an update/put operation instead of creating a new entry, or verify key initialization logic."
+
+[[errors]]
+category = "auth"
+error_code = "InvalidAction"
+fix_suggestion = "The authorization check failed. Verify that all required addresses (e.g. signer keypairs) have signed the authorization payloads, check that arguments are deterministic, and ensure nonces are not expired or reused."
+
+[[errors]]
+category = "contract"
+error_code = "InvalidAction"
+fix_suggestion = "The smart contract encountered an invalid operation in its current state. Check contract state constraints, invariant checks, and ensure conditions for this state transition are met."
+
+[[errors]]
+category = "contract"
+error_code = "InvalidInput"
+fix_suggestion = "The inputs passed to the contract function are invalid or out of bounds. Verify the arguments passed to the function call match the expected types and validate constraints."

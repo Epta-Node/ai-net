@@ -43,7 +43,7 @@ describe('Stellar payment integration (STELLAR_E2E=1)', () => {
 
     // Register a dummy task so createPaymentReleaseFn can look it up
     createTask({
-      taskId,
+      id: taskId,
       prompt: 'e2e payment integration test',
       // The agent public key is derived from the same test keypair for simplicity
       walletPublicKey: require('@stellar/stellar-sdk').Keypair.fromSecret(secret).publicKey(),

@@ -1,6 +1,6 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { DAGPreview } from './DAGPreview';
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { DAGPreview } from "./DAGPreview";
 
 type FlowNode = {
   id: string;
@@ -14,8 +14,8 @@ type FlowEdge = {
   target: string;
 };
 
-vi.mock('@reactflow/core', () => ({
-  ReactFlow: ({ nodes, edges }: { nodes: FlowNode[]; edges: FlowEdge[] }) => (
+vi.mock("reactflow", () => ({
+  default: ({ nodes, edges }: { nodes: FlowNode[]; edges: FlowEdge[] }) => (
     <div data-testid="dag-flow">
       {nodes.map((node) => (
         <div key={node.id}>{node.data.label}</div>
@@ -28,47 +28,42 @@ vi.mock('@reactflow/core', () => ({
     </div>
   ),
   ConnectionLineType: {
-    SmoothStep: 'smoothstep',
+    SmoothStep: "smoothstep",
   },
   MarkerType: {
-    ArrowClosed: 'arrowclosed',
+    ArrowClosed: "arrowclosed",
   },
   Position: {
-    Left: 'left',
-    Right: 'right',
+    Left: "left",
+    Right: "right",
   },
-}));
-
-vi.mock('@reactflow/background', () => ({
-  Background: () => null,
-}));
-
-vi.mock('@reactflow/controls', () => ({
   Controls: () => null,
+  Background: () => null,
+  Handle: () => null,
 }));
 
-describe('DAGPreview', () => {
-  it('renders nodes with agent labels and dependency edges', () => {
+describe("DAGPreview", () => {
+  it("renders nodes with agent labels and dependency edges", () => {
     render(
       <DAGPreview
         dagPreview={{
           nodes: [
-            { id: 'research', label: 'Research Agent' },
-            { id: 'risk', label: 'Risk Agent' },
-            { id: 'report', label: 'Report Agent' },
+            { id: "research", label: "Research Agent" },
+            { id: "risk", label: "Risk Agent" },
+            { id: "report", label: "Report Agent" },
           ],
           edges: [
-            { source: 'research', target: 'risk' },
-            { source: 'risk', target: 'report' },
+            { source: "research", target: "risk" },
+            { source: "risk", target: "report" },
           ],
         }}
       />,
     );
 
-    expect(screen.getByText('Research Agent')).toBeInTheDocument();
-    expect(screen.getByText('Risk Agent')).toBeInTheDocument();
-    expect(screen.getByText('Report Agent')).toBeInTheDocument();
-    expect(screen.getByText('research depends on risk')).toBeInTheDocument();
-    expect(screen.getByText('risk depends on report')).toBeInTheDocument();
+    expect(screen.getByText("Research Agent")).toBeInTheDocument();
+    expect(screen.getByText("Risk Agent")).toBeInTheDocument();
+    expect(screen.getByText("Report Agent")).toBeInTheDocument();
+    expect(screen.getByText("research depends on risk")).toBeInTheDocument();
+    expect(screen.getByText("risk depends on report")).toBeInTheDocument();
   });
 });

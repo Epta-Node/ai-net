@@ -17,7 +17,7 @@ const TopNav: React.FC<TopNavProps> = ({
   isMobile,
   isDrawerOpen = false,
 }) => {
-  const { publicKey, connected, disconnect } = useWallet()
+  const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
 
   const getTitle = () => {
     const path = window.location.pathname
@@ -75,18 +75,34 @@ const TopNav: React.FC<TopNavProps> = ({
 
       <div className="nav-right">
         {connected && publicKey ? (
-          <>
-            <span className="wallet-chip connected" id="wallet-pubkey-display">
-              {truncateKey(publicKey)}
-            </span>
-            <button 
-              className="disconnect-btn"
-              onClick={disconnect}
-              id="btn-disconnect"
-            >
-              Disconnect
-            </button>
-          </>
+          ready ? (
+            <>
+              <span className="wallet-chip connected" id="wallet-pubkey-display">
+                {truncateKey(publicKey)}
+              </span>
+              {connectionMethod && (
+                <span className="wallet-chip connected" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                  {connectionMethod === 'freighter' ? 'Freighter' : 'Secret Key'}
+                </span>
+              )}
+              <button
+                className="disconnect-btn"
+                onClick={disconnect}
+                id="btn-disconnect"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="wallet-chip connected" id="wallet-pubkey-display" style={{ opacity: 0.6 }}>
+                {truncateKey(publicKey)}
+              </span>
+              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: '#fef3c7', color: '#92400e' }}>
+                Reconnect Required
+              </span>
+            </>
+          )
         ) : (
           <span className="wallet-chip disconnected" id="wallet-pubkey-display">
             Not Connected

@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { Capability, AgentResult } from '../../types/agent';
+import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
 import DesignRenderer from './DesignRenderer';
 
@@ -51,19 +51,19 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
     case 'report':
       return (
         <Suspense fallback={<LoadingFallback />}>
-          <ResearchReportRenderer result={result as any} />
+          <ResearchReportRenderer result={result as ResearchReportResult} />
         </Suspense>
       );
     case 'coding':
       return (
         <Suspense fallback={<LoadingFallback />}>
-          <CodingRenderer result={result as any} />
+          <CodingRenderer result={result as CodingResult} />
         </Suspense>
       );
     case 'risk':
-      return <RiskMatrix result={result as any} />;
+      return <RiskMatrix result={result as RiskResult} />;
     case 'design':
-      return <DesignRenderer result={result as any} />;
+      return <DesignRenderer result={result as DesignResult} />;
     default:
       return (
         <div style={{ color: 'var(--danger)', padding: '12px' }}>

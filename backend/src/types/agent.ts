@@ -3,6 +3,7 @@ export interface AgentRegistration {
   type: string;
   endpoint: string;
   cost: number;
+  status: 'online' | 'offline';
 }
 
 export interface AgentRegistry {

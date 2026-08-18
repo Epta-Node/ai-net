@@ -1,75 +1,108 @@
-import React, { useState, useEffect } from 'react'
-import { getAgents } from '@services/api'
+import { useCallback, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useAgentRegistry } from '../hooks/useAgentRegistry'
+import { AgentTable } from '../components/agents/AgentTable'
+import { AgentFilterBar } from '../components/agents/AgentFilterBar'
+import { AgentDetailModal } from '../components/agents/AgentDetailModal'
 import type { AgentRecord } from '../types/api'
+import {
+  allCapabilities,
+  filterAndSortAgents,
+  filtersFromSearchParams,
+  filtersToSearchParams,
+  priceDomain,
+  type AgentFilters,
+  type SortKey,
+} from '../utils/agentRegistry'
+import styles from './AgentsPage.module.css'
 
-const AgentsPage: React.FC = () => {
-  const [agents, setAgents] = useState<AgentRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+function AgentsPage() {
+  const { agents, loading, error, refetch } = useAgentRegistry()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [selected, setSelected] = useState<AgentRecord | null>(null)
 
-  useEffect(() => {
-    getAgents()
-      .then((data) => {
-        setAgents(data)
-        setLoading(false)
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : 'Error loading agents')
-        setLoading(false)
-      })
-  }, [])
+  // Filter/sort state is derived from the URL so views are shareable.
+  const filters = useMemo(
+    () => filtersFromSearchParams(searchParams),
+    [searchParams]
+  )
+
+  const updateFilters = useCallback(
+    (next: Partial<AgentFilters>) => {
+      const merged = { ...filters, ...next }
+      setSearchParams(filtersToSearchParams(merged), { replace: true })
+    },
+    [filters, setSearchParams]
+  )
+
+  const resetFilters = useCallback(() => {
+    setSearchParams({}, { replace: true })
+  }, [setSearchParams])
+
+  const handleSort = useCallback(
+    (key: SortKey) => {
+      if (filters.sortKey !== key) {
+        // Reputation defaults to high-to-low; price to low-to-high.
+        updateFilters({ sortKey: key, sortDir: key === 'price' ? 'asc' : 'desc' })
+      } else {
+        updateFilters({ sortDir: filters.sortDir === 'asc' ? 'desc' : 'asc' })
+      }
+    },
+    [filters, updateFilters]
+  )
+
+  const capabilities = useMemo(() => allCapabilities(agents), [agents])
+  const domain = useMemo(() => priceDomain(agents), [agents])
+  const visibleAgents = useMemo(
+    () => filterAndSortAgents(agents, filters),
+    [agents, filters]
+  )
 
   return (
-    <div className="glass-panel">
-      <h1 style={{ marginBottom: '20px', fontSize: '1.8rem' }}>Agent Registry</h1>
-      
-      {loading ? (
-        <div id="loading-spinner">Loading registry...</div>
-      ) : error ? (
-        <div className="error-msg" id="registry-error">{error}</div>
-      ) : (
-        <div style={{ overflowX: 'auto' }}>
-          <table id="agent-table">
-            <thead>
-              <tr>
-                <th>Agent ID</th>
-                <th>Name</th>
-                <th>Capabilities</th>
-                <th>Price (XLM)</th>
-                <th>Reputation</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {agents.map((agent) => (
-                <tr key={agent.id} className="agent-row" data-testid={`agent-row-${agent.id}`}>
-                  <td style={{ fontFamily: 'monospace' }}>{agent.id}</td>
-                  <td>{agent.name}</td>
-                  <td>
-                    {agent.capabilities.map((cap) => (
-                      <span key={cap} className="chip" style={{ marginRight: '6px', fontSize: '0.75rem' }}>
-                        {cap}
-                      </span>
-                    ))}
-                  </td>
-                  <td>{agent.price}</td>
-                  <td>{agent.reputation}/5</td>
-                  <td>
-                    <span
-                      style={{
-                        color: agent.status === 'active' ? 'var(--success)' : 'var(--danger)',
-                        fontWeight: 'bold',
-                      }}
-                    >
-                      {agent.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div>
+          <h1 className={styles.title}>Agent Registry</h1>
+          <p className={styles.subtitle}>
+            {loading
+              ? 'Loading registered agents…'
+              : `${visibleAgents.length} of ${agents.length} agent${
+                  agents.length === 1 ? '' : 's'
+                }`}
+          </p>
         </div>
+      </div>
+
+      {error && !loading ? (
+        <div className={styles.errorBox} id="registry-error" role="alert">
+          <p>Failed to load the agent registry: {error}</p>
+          <button type="button" className={styles.retryButton} onClick={refetch}>
+            Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          <AgentFilterBar
+            filters={filters}
+            availableCapabilities={capabilities}
+            priceDomain={domain}
+            onChange={updateFilters}
+            onReset={resetFilters}
+            onRefresh={refetch}
+          />
+
+          <AgentTable
+            agents={visibleAgents}
+            loading={loading}
+            sortKey={filters.sortKey}
+            sortDir={filters.sortDir}
+            onSort={handleSort}
+            onRowClick={setSelected}
+          />
+        </>
       )}
+
+      <AgentDetailModal agent={selected} onClose={() => setSelected(null)} />
     </div>
   )
 }
