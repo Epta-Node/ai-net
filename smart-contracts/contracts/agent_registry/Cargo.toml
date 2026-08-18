@@ -2,12 +2,27 @@
 name = "agent_registry"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = "27.0.6"
 
 [dev-dependencies]
 soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+# Test-only: the real resolver contract is registered in the test Env. Kept out
+# of [dependencies] so its exported symbols never link into this contract's wasm.
+error-resolver = { path = "../error-resolver", default-features = false, features = ["contract"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
