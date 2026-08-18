@@ -4,3 +4,6 @@ dist/
 *.js.map
 coverage/
 .DS_Store
+
+# Rust build artifacts
+**/target/
