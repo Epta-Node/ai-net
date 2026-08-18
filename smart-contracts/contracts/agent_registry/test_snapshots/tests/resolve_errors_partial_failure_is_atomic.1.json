@@ -1,11 +1,37 @@
 {
   "generators": {
-    "address": 2,
+    "address": 3,
     "nonce": 0,
     "mux_id": 0
   },
   "auth": [
     [],
+    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "report_error",
+              "args": [
+                {
+                  "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "string": "real"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -13,57 +39,22 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "register_agent",
+              "function_name": "resolve_errors",
               "args": [
                 {
-                  "map": [
+                  "vec": [
                     {
-                      "key": {
-                        "symbol": "capability"
-                      },
-                      "val": {
-                        "symbol": "test"
-                      }
+                      "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
                     },
                     {
-                      "key": {
-                        "symbol": "endpoint"
-                      },
-                      "val": {
-                        "string": "https://agent.example.com"
-                      }
-                    },
+                      "bytes": "6300000000000000000000000000000000000000000000000000000000000000"
+                    }
+                  ]
+                },
+                {
+                  "vec": [
                     {
-                      "key": {
-                        "symbol": "id"
-                      },
-                      "val": {
-                        "symbol": "agent_update_negative"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "metadata"
-                      },
-                      "val": {
-                        "map": []
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "owner"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "price_stroops"
-                      },
-                      "val": {
-                        "i128": "1000"
-                      }
+                      "symbol": "Ignored"
                     }
                   ]
                 }
@@ -96,10 +87,10 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "Agent"
+                    "symbol": "ErrorRecord"
                   },
                   {
-                    "symbol": "agent_update_negative"
+                    "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
                   }
                 ]
               },
@@ -108,82 +99,47 @@
                 "map": [
                   {
                     "key": {
-                      "symbol": "capability"
-                    },
-                    "val": {
-                      "symbol": "test"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "endpoint"
-                    },
-                    "val": {
-                      "string": "https://agent.example.com"
-                    }
-                  },
-                  {
-                    "key": {
                       "symbol": "id"
                     },
                     "val": {
-                      "symbol": "agent_update_negative"
+                      "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
                     }
                   },
                   {
                     "key": {
-                      "symbol": "metadata"
+                      "symbol": "message"
                     },
                     "val": {
-                      "map": []
+                      "string": "real"
                     }
                   },
                   {
                     "key": {
-                      "symbol": "owner"
+                      "symbol": "reporter"
                     },
                     "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                     }
                   },
                   {
                     "key": {
-                      "symbol": "price_stroops"
+                      "symbol": "resolution"
                     },
                     "val": {
-                      "i128": "1000"
+                      "vec": [
+                        {
+                          "symbol": "Fixed"
+                        }
+                      ]
                     }
-                  }
-                ]
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 535680
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "CapabilityIndex"
                   },
                   {
-                    "symbol": "test"
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "vec": [
-                  {
-                    "symbol": "agent_update_negative"
+                    "key": {
+                      "symbol": "resolved"
+                    },
+                    "val": {
+                      "bool": false
+                    }
                   }
                 ]
               }
@@ -207,7 +163,32 @@
                   "executable": {
                     "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                   },
-                  "storage": null
+                  "storage": [
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Admin"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Paused"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": false
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -223,6 +204,26 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "5541220902715666415"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "801925984706572462"

@@ -1,12 +1,79 @@
 {
   "generators": {
-    "address": 1,
+    "address": 2,
     "nonce": 0,
     "mux_id": 0
   },
   "auth": [
     [],
-    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "register_agent",
+              "args": [
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "capability"
+                      },
+                      "val": {
+                        "symbol": "test"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "endpoint"
+                      },
+                      "val": {
+                        "string": "https://agent.example.com"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "id"
+                      },
+                      "val": {
+                        "symbol": "agent_update_zero"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "metadata"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "owner"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "price_stroops"
+                      },
+                      "val": {
+                        "i128": "1000"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     []
   ],
   "ledger": {
@@ -27,38 +94,65 @@
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
               "key": {
-                "symbol": "agent"
+                "vec": [
+                  {
+                    "symbol": "Agent"
+                  },
+                  {
+                    "symbol": "agent_update_zero"
+                  }
+                ]
               },
               "durability": "persistent",
               "val": {
-                "vec": [
+                "map": [
                   {
-                    "map": [
-                      {
-                        "key": {
-                          "symbol": "agent_id"
-                        },
-                        "val": {
-                          "symbol": "agnt_upd"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "name"
-                        },
-                        "val": {
-                          "symbol": "update"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "price_stroops"
-                        },
-                        "val": {
-                          "i128": "100"
-                        }
-                      }
-                    ]
+                    "key": {
+                      "symbol": "capability"
+                    },
+                    "val": {
+                      "symbol": "test"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "endpoint"
+                    },
+                    "val": {
+                      "string": "https://agent.example.com"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "id"
+                    },
+                    "val": {
+                      "symbol": "agent_update_zero"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "metadata"
+                    },
+                    "val": {
+                      "map": []
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "owner"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "price_stroops"
+                    },
+                    "val": {
+                      "i128": "1000"
+                    }
                   }
                 ]
               }
@@ -66,7 +160,38 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 535680
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "CapabilityIndex"
+                  },
+                  {
+                    "symbol": "test"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "vec": [
+                  {
+                    "symbol": "agent_update_zero"
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 535680
       },
       {
         "entry": {
@@ -90,6 +215,26 @@
           "ext": "v0"
         },
         "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "801925984706572462"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
       },
       {
         "entry": {
