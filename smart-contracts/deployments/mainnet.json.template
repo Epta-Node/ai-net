@@ -1,0 +1,8 @@
+{
+  "network": "mainnet",
+  "rpc_url": "https://soroban-rpc.stellar.org",
+  "horizon_url": "https://horizon.stellar.org",
+  "deployed_at": null,
+  "contracts": {},
+  "deployment_history": []
+}

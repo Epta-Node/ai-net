@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  stellar-standalone:
+    image: stellar/quickstart:testing
+    container_name: stellar-standalone
+    ports:
+      - "8000:8000"
+      - "11626:11626"
+    command: --standalone --enable-soroban-rpc
+    environment:
+      - STELLAR_NETWORK=standalone
+      - ENABLE_SOROBAN_RPC=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000/ | grep -q 'Stellar' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ai-net-backend:
+    build:
+      context: ../../
+      dockerfile: backend/Dockerfile
+    container_name: ai-net-backend-test
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=test
+      - PORT=3000
+      - SOROBAN_RPC_URL=http://stellar-standalone:8000/soroban/rpc
+      - STELLAR_HORIZON_URL=http://stellar-standalone:8000
+      - REGISTRY_CONTRACT_ID=CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM
+      - ERROR_RESOLVER_CONTRACT_ID=CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB2KM
+      - SKIP_STELLAR_ACCOUNT_VERIFY=true
+    depends_on:
+      stellar-standalone:
+        condition: service_healthy

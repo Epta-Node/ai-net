@@ -12,6 +12,7 @@ soroban-sdk = "27.0.6"
 
 [dev-dependencies]
 soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+
 # Test-only: the real resolver contract is registered in the test Env. Kept out
 # of [dependencies] so its exported symbols never link into this contract's wasm.
 error-resolver = { path = "../error-resolver", default-features = false, features = ["contract"] }

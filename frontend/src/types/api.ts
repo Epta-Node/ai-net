@@ -81,3 +81,36 @@ export interface PaymentEvent {
   timestamp: string;
   txHash: string;
 }
+
+export type DAGEventType =
+  | 'node_started'
+  | 'node_completed'
+  | 'node_failed'
+  | 'payment_locked'
+  | 'payment_released'
+  | 'task_completed'
+  | 'task_failed';
+
+// Covers all known shapes of DAG event payloads
+// Each event type may carry different fields, so we allow additional properties
+// while still providing type safety for the common fields.
+export interface DAGEventPayload {
+  status?: string;
+  message?: string;
+  error?: string;
+  txHash?: string;
+  summary?: string;
+  content?: string;
+  markdown?: string;
+  output?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface DAGEvent {
+  type: DAGEventType;
+  taskId: string;
+  nodeId?: string;
+  timestamp: string;
+  payload?: DAGEventPayload | string;
+}
+

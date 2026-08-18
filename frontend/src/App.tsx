@@ -2,6 +2,7 @@ import React from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
+import { NotFoundPage } from './pages/NotFoundPage';
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
 import AgentsPage from './pages/AgentsPage'
@@ -12,6 +13,7 @@ import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/common/ProtectedRoute'
+import './components/common/Toast.css'
 
 const AppContent: React.FC = () => {
   return (
@@ -27,9 +29,26 @@ const AppContent: React.FC = () => {
           <Route path="/renderer-demo" element={<RendererDemoPage />} />
         </Routes>
       </AppShell>
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/*" element={
+          <AppShell>
+            <Routes>
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/wallet" element={<WalletPage />} />
+              <Route path="/agents" element={<AgentsPage />} />
+              <Route path="/tasks/new" element={<NewTaskPage />} />
+              <Route path="/tasks/:id" element={<TaskDetailPage />} />
+              <Route path="/renderer-demo" element={<RendererDemoPage />} />
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </AppShell>
+        } />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
     </Router>
-  )
-}
+  );
+};
 
 const App: React.FC = () => {
   return (

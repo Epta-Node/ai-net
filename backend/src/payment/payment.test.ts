@@ -1,7 +1,7 @@
 import { Keypair } from '@stellar/stellar-sdk';
 import { createPaymentReleaseFn, type StellarReleasePaymentFn } from './index';
 import * as taskStore from '../coordinator/taskStore';
-import type { Task } from '../coordinator/types';
+import type { Task } from '../types/task';
 
 jest.mock('@stellar/stellar-sdk', () => ({
   Keypair: {
@@ -10,7 +10,7 @@ jest.mock('@stellar/stellar-sdk', () => ({
 }));
 
 const mockTask: Task = {
-  taskId: 'task_abc123',
+  id: 'task_abc123',
   prompt: 'test prompt',
   walletPublicKey: 'GAGENT_WALLET_PUBLIC_KEY',
   status: 'running',

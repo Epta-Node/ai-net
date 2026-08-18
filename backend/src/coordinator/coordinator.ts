@@ -1,8 +1,10 @@
+import type pino from 'pino';
 import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
 import { updateNode, updateTask } from './taskStore';
-import type { DAGNode, Task } from './types';
+import type { DAGNode, Task } from '../types/task';
+import { createLogger } from '../utils/logger';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -27,6 +29,8 @@ export interface CoordinatorOptions {
   timeoutMs?: number;
   fetch?: typeof fetch;
   dispatch?: DispatchFn;
+  /** Structured logger bound with correlation context (e.g. { taskId, requestId }) */
+  logger?: pino.Logger;
 }
 
 class ConcurrencyLimiter {
@@ -83,6 +87,7 @@ export class Coordinator {
   private readonly dispatchOverride?: DispatchFn;
   private readonly agentRegistry?: AgentRegistry;
   private readonly paymentService: PaymentService;
+  private readonly log: pino.Logger;
 
   constructor(options: CoordinatorOptions = {}) {
     this.bus = options.eventBus ?? eventBus;
@@ -92,6 +97,7 @@ export class Coordinator {
     this.dispatchOverride = options.dispatch;
     this.agentRegistry = options.agentRegistry;
     this.paymentService = options.paymentService ?? { release: async () => 'mock-hash' };
+    this.log = options.logger ?? createLogger();
   }
 
   async executeDAG(taskId: string, dag: DAGNode[]): Promise<void> {
@@ -100,12 +106,16 @@ export class Coordinator {
     const scheduled = new Set<string>();
     const nodeById = new Map(dag.map(node => [node.nodeId, node]));
     let inFlight = 0;
+    let settled = false;
+
+    this.log.info({ taskId, totalNodes: dag.length }, 'DAG execution started');
 
     updateTaskIfPresent(taskId, { status: 'running' });
 
     await new Promise<void>(resolve => {
       const finishIfSettled = (): void => {
-        if (completed.size + failed.size !== dag.length) return;
+        if (settled || completed.size + failed.size !== dag.length) return;
+        settled = true;
 
         const status = failed.size === 0 ? 'completed' : 'failed';
         updateTaskIfPresent(taskId, { status, dag });
@@ -114,6 +124,12 @@ export class Coordinator {
           taskId,
           timestamp: now(),
         });
+
+        this.log.info(
+          { taskId, status, completedCount: completed.size, failedCount: failed.size },
+          'DAG execution finished'
+        );
+
         resolve();
       };
 
@@ -123,12 +139,12 @@ export class Coordinator {
             continue;
           }
 
-          const hasFailedDependency = node.dependsOn.some(dep => failed.has(dep));
-          const hasUnresolvedDependency = node.dependsOn.some(dep => !nodeById.has(dep));
+          const hasFailedDependency = node.dependencies.some(dep => failed.has(dep));
+          const hasUnresolvedDependency = node.dependencies.some(dep => !nodeById.has(dep));
           const isDeadlocked =
             includeDeadlocked &&
             inFlight === 0 &&
-            !node.dependsOn.every(dep => completed.has(dep));
+            !node.dependencies.every(dep => completed.has(dep));
 
           if (!hasFailedDependency && !hasUnresolvedDependency && !isDeadlocked) {
             continue;
@@ -145,6 +161,11 @@ export class Coordinator {
             timestamp: now(),
             payload: { error: node.error },
           });
+
+          this.log.warn(
+            { taskId, nodeId: node.nodeId, error: node.error },
+            'node blocked by upstream failure'
+          );
         }
       };
 
@@ -155,7 +176,7 @@ export class Coordinator {
           if (
             node.status !== 'pending' ||
             scheduled.has(node.nodeId) ||
-            !node.dependsOn.every(dep => completed.has(dep))
+            !node.dependencies.every(dep => completed.has(dep))
           ) {
             continue;
           }
@@ -167,6 +188,10 @@ export class Coordinator {
             .then(status => {
               if (status === 'completed') completed.add(node.nodeId);
               else failed.add(node.nodeId);
+            })
+            .catch(err => {
+              console.error('[coordinator] runNode threw unexpectedly:', err);
+              failed.add(node.nodeId);
             })
             .finally(() => {
               inFlight -= 1;
@@ -187,9 +212,11 @@ export class Coordinator {
   }
 
   async dispatchNode(node: DAGNode, context: string, agent?: AgentRegistration): Promise<unknown> {
-    const target = agent ?? await this.cheapestAgentFor(node.agentType);
+    const target = agent ?? await this.cheapestAgentFor(node.type);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    this.log.debug({ nodeId: node.nodeId, agentId: target.id, agentType: node.type }, 'dispatching node to agent');
 
     try {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
@@ -213,6 +240,7 @@ export class Coordinator {
         throw err;
       }
       if (err instanceof Error && err.name === 'AbortError') {
+        this.log.warn({ nodeId: node.nodeId, agentId: target.id, timeoutMs: this.timeoutMs }, 'agent dispatch timed out');
         throw new RetryableAgentError(`Agent ${target.id} timed out after ${this.timeoutMs}ms`);
       }
       throw new RetryableAgentError(asErrorMessage(err));
@@ -235,6 +263,11 @@ export class Coordinator {
       timestamp: now(),
     });
 
+    this.log.info(
+      { taskId, nodeId: node.nodeId, agentType: node.type },
+      'node execution started'
+    );
+
     try {
       const result = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
 
@@ -249,6 +282,11 @@ export class Coordinator {
         payload: result,
       });
 
+      this.log.info(
+        { taskId, nodeId: node.nodeId, agentType: node.type },
+        'node completed'
+      );
+
       const txHash = await this.paymentService.release(taskId, node.nodeId);
       this.bus.emit(taskId, {
         type: 'payment_released',
@@ -257,6 +295,11 @@ export class Coordinator {
         timestamp: now(),
         payload: { txHash },
       });
+
+      this.log.info(
+        { taskId, nodeId: node.nodeId, txHash },
+        'payment released'
+      );
 
       return 'completed';
     } catch (err) {
@@ -270,12 +313,18 @@ export class Coordinator {
         timestamp: now(),
         payload: { error: node.error },
       });
+
+      this.log.error(
+        { taskId, nodeId: node.nodeId, agentType: node.type, err },
+        'node failed'
+      );
+
       return 'failed';
     }
   }
 
   private contextFor(node: DAGNode, nodeById: Map<string, DAGNode>): string {
-    return node.dependsOn
+    return node.dependencies
       .map(dep => nodeById.get(dep)?.result)
       .filter(result => result !== undefined)
       .map(result => JSON.stringify(result))
@@ -287,9 +336,9 @@ export class Coordinator {
       return this.dispatchOverride(taskId, node, context);
     }
 
-    const agents = await this.agentsFor(node.agentType);
+    const agents = await this.agentsFor(node.type);
     const primary = agents[0];
-    let lastError: unknown = new Error(`No agent registered for type: ${node.agentType}`);
+    let lastError: unknown = new Error(`No agent registered for type: ${node.type}`);
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
@@ -297,11 +346,19 @@ export class Coordinator {
       } catch (err) {
         lastError = err;
         if (!isRetryable(err)) throw err;
+        this.log.warn(
+          { taskId, nodeId: node.nodeId, attempt, agentId: primary.id },
+          'retrying dispatch after failure'
+        );
       }
     }
 
     const fallback = agents.find(agent => agent.id !== primary.id);
     if (fallback) {
+      this.log.warn(
+        { taskId, nodeId: node.nodeId, primaryId: primary.id, fallbackId: fallback.id },
+        'falling back to alternative agent'
+      );
       try {
         return await this.dispatchNode(node, context, fallback);
       } catch (err) {
@@ -321,7 +378,9 @@ export class Coordinator {
       throw new Error(`No agent registry configured for type: ${agentType}`);
     }
 
-    const agents = sortByCost(await this.agentRegistry.getAgents(agentType));
+    const agents = sortByCost(await this.agentRegistry.getAgents(agentType)).filter(
+      (agent) => agent.status === 'online'
+    );
     if (agents.length === 0) {
       throw new Error(`No agent registered for type: ${agentType}`);
     }
@@ -334,12 +393,15 @@ export async function executeDAG(
   dispatch: DispatchFn,
   releasePayment: PaymentReleaseFn
 ): Promise<void> {
+  const log = createLogger({ taskId: task.id, requestId: task.requestId });
+
   const coordinator = new Coordinator({
     dispatch,
     paymentService: { release: releasePayment },
+    logger: log,
   });
 
-  await coordinator.executeDAG(task.taskId, task.dag);
+  await coordinator.executeDAG(task.id, task.dag);
 }
 
 function updateTaskIfPresent(taskId: string, patch: Partial<Task>): void {

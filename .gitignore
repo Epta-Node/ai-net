@@ -1,9 +1,16 @@
 node_modules/
 dist/
+target/
 .env
 *.js.map
+*.db
+*.db-shm
+*.db-wal
+
 coverage/
 .DS_Store
 
 # Rust build artifacts
 **/target/
+playwright-report/
+test-results/

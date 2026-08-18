@@ -1,29 +1,37 @@
-import type { Task, DAGNode } from './types';
+import type { Task, DAGNode } from '../types/task';
+import { getTaskDb, createTaskDb } from '../db/tasks';
 
-/** Volatile in-memory task store.  Swap for SQLite/Postgres in production. */
-const store = new Map<string, Task>();
+function db() {
+  return createTaskDb(getTaskDb());
+}
 
 export function createTask(task: Task): void {
-  store.set(task.taskId, task);
+  db().insert(task);
 }
 
 export function getTask(taskId: string): Task | undefined {
-  return store.get(taskId);
+  return db().findById(taskId);
 }
 
 export function updateTask(taskId: string, patch: Partial<Task>): Task {
-  const existing = store.get(taskId);
+  const existing = getTask(taskId);
   if (!existing) throw new Error(`Task ${taskId} not found`);
   const updated: Task = { ...existing, ...patch, updatedAt: new Date().toISOString() };
-  store.set(taskId, updated);
+  const store = db();
+  if (patch.status) store.updateStatus(taskId, patch.status);
+  if (patch.dag) store.updateDagJson(taskId, JSON.stringify(updated.dag));
   return updated;
 }
 
 export function updateNode(taskId: string, nodeId: string, patch: Partial<DAGNode>): void {
-  const task = store.get(taskId);
+  const task = getTask(taskId);
   if (!task) return;
   const idx = task.dag.findIndex(n => n.nodeId === nodeId);
   if (idx === -1) return;
   task.dag[idx] = { ...task.dag[idx], ...patch };
-  task.updatedAt = new Date().toISOString();
+  db().updateDagJson(taskId, JSON.stringify(task.dag));
+}
+
+export function getEventHistory(taskId: string) {
+  return db().getEventHistory(taskId);
 }

@@ -4,16 +4,25 @@
 
 :root {
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #020617 100%);
-  --panel-bg: rgba(30, 41, 59, 0.7);
-  --panel-border: rgba(255, 255, 255, 0.08);
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --primary: #6366f1;
-  --primary-hover: #4f46e5;
-  --success: #10b981;
+  --bg-primary: #0A0E14;
+  --bg-surface: #11151D;
+  --bg-surface-alt: #161B24;
+  --bg-secondary: #1A1F2E;
+  --border-color: #2A3040;
+  --border-subtle: #1F2630;
+  --text-primary: #F5F7FA;
+  --text-secondary: #8A93A3;
+  --accent-cyan: #38BDF8;
+  --accent-purple: #8B5CF6;
+  --accent-green: #34D399;
+  --gradient-primary: linear-gradient(90deg, #38BDF8 0%, #8B5CF6 100%);
+  --panel-bg: var(--bg-surface);
+  --panel-border: var(--border-subtle);
+  --primary: var(--accent-purple);
+  --primary-hover: #7c3aed;
+  --success: var(--accent-green);
   --danger: #ef4444;
-  --accent: #f43f5e;
+  --accent: var(--accent-cyan);
 }
 
 * {
@@ -24,14 +33,18 @@
 
 body {
   font-family: var(--font-sans);
-  background: var(--bg-gradient);
+  background: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Glassmorphism panel styling */
+html, body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
 .glass-panel {
   background: var(--panel-bg);
   backdrop-filter: blur(12px);
@@ -42,79 +55,6 @@ body {
   padding: 24px;
 }
 
-/* Base button styling with micro-animations */
-button, .btn {
-  font-family: var(--font-sans);
-  background: var(--primary);
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 20px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 6px -1px rgba(99, 102, 241, 0.2);
-}
-
-button:hover, .btn:hover {
-  background: var(--primary-hover);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
-}
-
-button:active, .btn:active {
-  transform: translateY(0);
-}
-
-button:disabled, .btn:disabled {
-  background: #334155;
-  color: #64748b;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-/* Navigation layout */
-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 40px;
-  background: rgba(15, 23, 42, 0.6);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--panel-border);
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-header .logo {
-  font-size: 1.5rem;
-  font-weight: 800;
-  background: linear-gradient(to right, #818cf8, #c084fc);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  text-decoration: none;
-}
-
-header nav {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-}
-
-header nav a {
-  color: var(--text-secondary);
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.2s ease;
-}
-
-header nav a:hover, header nav a.active {
-  color: var(--text-primary);
-}
-
-/* Key indicators / Chips */
 .chip {
   background: rgba(99, 102, 241, 0.15);
   border: 1px solid rgba(99, 102, 241, 0.3);
@@ -125,14 +65,6 @@ header nav a:hover, header nav a.active {
   font-weight: 600;
 }
 
-/* Main Layout container */
-main {
-  max-width: 1200px;
-  margin: 40px auto;
-  padding: 0 24px;
-}
-
-/* Table styling */
 table {
   width: 100%;
   border-collapse: collapse;
@@ -155,7 +87,6 @@ tr:hover td {
   background: rgba(255, 255, 255, 0.02);
 }
 
-/* Form controls */
 .form-group {
   margin-bottom: 20px;
   display: flex;
@@ -183,23 +114,15 @@ input[type="text"], input[type="number"], textarea {
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
-/* Error message and validation styling */
 .error-msg {
   color: var(--danger);
   font-size: 0.85rem;
   font-weight: 500;
 }
 
-/* Flex utilities */
-.flex { display: flex; }
-.gap-4 { gap: 16px; }
-.justify-between { justify-content: space-between; }
-.align-center { align-items: center; }
-
-/* Grid / DAG styles */
 .dag-container {
   display: flex;
   gap: 24px;
@@ -234,4 +157,25 @@ input:focus, textarea:focus {
 .dag-arrow {
   color: var(--text-secondary);
   font-size: 1.5rem;
+}
+
+@media (max-width: 767px) {
+  body {
+    font-size: 14px;
+  }
+
+  .glass-panel {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .dag-container {
+    flex-direction: column;
+    padding: 20px;
+  }
+
+  .dag-node {
+    min-width: 120px;
+    padding: 12px 16px;
+  }
 }

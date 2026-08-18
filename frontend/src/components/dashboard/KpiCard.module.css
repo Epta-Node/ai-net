@@ -1,6 +1,6 @@
 .card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 1rem;
   display: flex;
@@ -10,7 +10,7 @@
 
 .skeleton {
   height: 80px;
-  background: linear-gradient(90deg, #e0e0e0 25%, #f0f0f0 50%, #e0e0e0 75%);
+  background: linear-gradient(90deg, var(--bg-surface-alt) 25%, var(--bg-surface) 50%, var(--bg-surface-alt) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 4px;
@@ -23,12 +23,12 @@
 
 .title {
   font-size: 0.875rem;
-  color: #64748b;
+  color: var(--text-secondary);
   font-weight: 500;
 }
 
 .value {
   font-size: 1.75rem;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--text-primary);
 }

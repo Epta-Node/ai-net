@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
 import { useToast } from '../../hooks/useToast';
+import { useToast } from '../../context/ToastContext';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 const agentPreferences = [
@@ -37,6 +38,9 @@ export function TaskSubmissionForm() {
   const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, data } = useTaskSubmit();
+  const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
+  const { submitTask, status, error, data } = useTaskSubmit();
+  const { showToast } = useToast();
 
   const {
     register,
@@ -90,7 +94,7 @@ export function TaskSubmissionForm() {
             {...register('prompt')}
             rows={6}
             maxLength={1000}
-            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid #cbd5e1' }}
+            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.prompt)}
             aria-describedby="prompt-error"
           />
@@ -109,7 +113,7 @@ export function TaskSubmissionForm() {
             step="0.1"
             min="0.1"
             {...register('maxBudgetXLM', { valueAsNumber: true })}
-            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid #cbd5e1' }}
+            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
@@ -143,7 +147,7 @@ export function TaskSubmissionForm() {
                       gap: 10,
                       padding: 12,
                       borderRadius: 10,
-                      border: '1px solid #cbd5e1',
+                      border: '1px solid var(--border-color)',
                       cursor: 'pointer',
                     }}
                   >
@@ -198,15 +202,29 @@ export function TaskSubmissionForm() {
       <section style={{ marginBottom: 24 }}>
         <h2>Execution DAG preview</h2>
         {isLoading && (
-          <div aria-busy="true" style={{ padding: 24, background: '#f8fafc', borderRadius: 12 }}>
-            <div style={{ height: 18, width: '45%', background: '#e2e8f0', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '70%', background: '#e2e8f0', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '55%', background: '#e2e8f0', borderRadius: 8 }} />
+          <div aria-busy="true" style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 12 }}>
+            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
+            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
+            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 8 }} />
           </div>
         )}
         {!isLoading && <DAGPreview dagPreview={previewData ?? undefined} />}
       </section>
 
+      {error && (
+        <div
+          role="status"
+          style={{
+            marginTop: 24,
+            padding: 16,
+            borderRadius: 12,
+            background: '#f8d7da',
+            color: '#842029',
+          }}
+        >
+          {error}
+        </div>
+      )}
     </main>
   );
 }

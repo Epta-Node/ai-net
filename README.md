@@ -129,6 +129,41 @@ cp .env.example .env
 # Fill in your Stellar keypair and Venice AI key
 ```
 
+### Smart Contract Deployment
+
+Deploy contracts to testnet:
+
+```bash
+cd smart-contracts
+cp .env.example .env
+# Fill in STELLAR_SECRET_KEY and VENICE_API_KEY
+
+# Deploy all contracts
+./scripts/deploy.sh --network testnet
+
+# Verify deployment
+./scripts/verify.sh --network testnet
+```
+
+### Smart Contract Upgrades
+
+Upgrade deployed contracts:
+
+```bash
+cd smart-contracts
+
+# Dry run to see what would be upgraded
+./scripts/upgrade.sh --network testnet --dry-run
+
+# Upgrade specific contract
+./scripts/upgrade.sh --network testnet agent-registry
+
+# Upgrade all contracts
+./scripts/upgrade.sh --network testnet
+```
+
+For detailed upgrade procedures and storage migration guidance, see [STORAGE_MIGRATION.md](smart-contracts/docs/STORAGE_MIGRATION.md).
+
 ### Database migration
 This branch does not include an automated migration runner. To apply the backend index migration, run the SQL script directly against your PostgreSQL database:
 

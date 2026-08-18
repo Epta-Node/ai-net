@@ -4,6 +4,7 @@ import { Skeleton } from '../common/Skeleton';
 import styles from './RecentTasksTable.module.css';
 import { getRecentTasks } from '@services/api';
 import { useToast } from '../../hooks/useToast';
+import { useToast } from '../../context/ToastContext';
 import type { TaskResponse } from '../../types/api';
 
 interface Props {
@@ -28,6 +29,7 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
       } catch (e) {
         const message = e instanceof Error ? e.message : 'Failed to load recent tasks.';
         showToast(message, 'error');
+        showToast('Failed to fetch recent tasks', 'error');
         setTasks([]);
       }
     };

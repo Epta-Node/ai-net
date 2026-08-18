@@ -7,20 +7,39 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: {
-          DEFAULT: '#6366f1',
-          hover: '#4f46e5',
+        background: {
+          primary: 'var(--bg-primary)',
+          surface: 'var(--bg-surface)',
+          'surface-alt': 'var(--bg-surface-alt)',
         },
-        success: '#10b981',
-        danger: '#ef4444',
-        accent: '#f43f5e',
+        border: {
+          subtle: 'var(--border-subtle)',
+        },
+        text: {
+          primary: 'var(--text-primary)',
+          secondary: 'var(--text-secondary)',
+        },
+        accent: {
+          cyan: 'var(--accent-cyan)',
+          purple: 'var(--accent-purple)',
+          green: 'var(--accent-green)',
+        },
+        primary: {
+          DEFAULT: 'var(--primary)',
+          hover: 'var(--primary-hover)',
+        },
+        success: 'var(--success)',
+        danger: 'var(--danger)',
         panel: {
-          bg: 'rgba(30, 41, 59, 0.7)',
-          border: 'rgba(255, 255, 255, 0.08)',
+          bg: 'var(--panel-bg)',
+          border: 'var(--panel-border)',
         },
       },
       fontFamily: {
         sans: ['Outfit', 'Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
+      backgroundImage: {
+        'gradient-primary': 'var(--gradient-primary)',
       },
     },
   },
