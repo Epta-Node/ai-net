@@ -1,9 +1,13 @@
 import React, { useState } from 'react';
 import { DesignResult, ComponentNode } from '../../types/agent';
 import { getDesignDetails } from '../../utils/agentUtils';
+import { useLightbox } from '../../hooks/useLightbox';
+import ImageLightbox from '../common/ImageLightbox';
+import { Maximize2 } from 'lucide-react';
 
 interface Props {
   result: DesignResult | null | undefined;
+  searchQuery?: string;
 }
 
 // Collapsible Tree Node Component
@@ -71,11 +75,12 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
   );
 };
 
-const DesignRenderer: React.FC<Props> = ({ result }) => {
+const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const details = getDesignDetails(result);
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
+  const lightbox = useLightbox();
 
-  if (!details || (details.colors.length === 0 && !details.hierarchy)) {
+  if (!details || (details.colors.length === 0 && !details.hierarchy && details.images.length === 0)) {
     return (
       <div
         className="empty-state"
@@ -94,6 +99,15 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
     );
   }
 
+  // Search filtering
+  const query = searchQuery ? searchQuery.toLowerCase() : '';
+  const filteredColors = query
+    ? details.colors.filter((c) => (c.name || '').toLowerCase().includes(query) || (c.hex || '').toLowerCase().includes(query))
+    : details.colors;
+  const filteredImages = query
+    ? details.images.filter((img) => (img.title || '').toLowerCase().includes(query) || (img.alt || '').toLowerCase().includes(query))
+    : details.images;
+
   const handleCopyColor = async (hex: string) => {
     try {
       await navigator.clipboard.writeText(hex);
@@ -106,8 +120,84 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
 
   return (
     <div className="design-renderer" id="design-output">
+      {/* Design Outputs & Wireframes Gallery */}
+      {filteredImages.length > 0 && (
+        <div style={{ marginBottom: '32px' }} data-testid="design-images-gallery">
+          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>
+            Design Outputs & Wireframes ({filteredImages.length})
+          </h4>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+              gap: '16px',
+            }}
+          >
+            {filteredImages.map((img, idx) => (
+              <div
+                key={`design-img-${idx}`}
+                onClick={() => lightbox.openLightbox(filteredImages, idx)}
+                style={{
+                  position: 'relative',
+                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '10px',
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease',
+                }}
+                className="design-image-card"
+                data-testid={`design-image-card-${idx}`}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+                  e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'none';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <div style={{ position: 'relative', height: '160px', overflow: 'hidden', backgroundColor: '#000' }}>
+                  <img
+                    src={img.url}
+                    alt={img.alt || img.title || `Design output ${idx + 1}`}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      right: '8px',
+                      background: 'rgba(0, 0, 0, 0.6)',
+                      backdropFilter: 'blur(4px)',
+                      borderRadius: '6px',
+                      padding: '4px 8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      color: '#fff',
+                      fontSize: '0.75rem',
+                    }}
+                  >
+                    <Maximize2 size={12} />
+                    <span>Expand</span>
+                  </div>
+                </div>
+                {img.title && (
+                  <div style={{ padding: '10px 12px', fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)' }}>
+                    {img.title}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Color Palette Swatches */}
-      {details.colors.length > 0 && (
+      {filteredColors.length > 0 && (
         <div style={{ marginBottom: '32px' }}>
           <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>Color Palette Swatches</h4>
           <div
@@ -117,7 +207,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
               gap: '12px',
             }}
           >
-            {details.colors.map((color, idx) => {
+            {filteredColors.map((color, idx) => {
               const hexVal = color.hex || color.value || '#000000';
               const nameVal = color.name || hexVal;
               const isCopied = copiedColor === hexVal;
@@ -183,6 +273,25 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
           </div>
         </div>
       )}
+
+      {/* Lightbox Component */}
+      <ImageLightbox
+        isOpen={lightbox.isOpen}
+        images={lightbox.images}
+        currentIndex={lightbox.currentIndex}
+        scale={lightbox.scale}
+        position={lightbox.position}
+        onClose={lightbox.closeLightbox}
+        onPrev={lightbox.prevImage}
+        onNext={lightbox.nextImage}
+        onSelectIndex={lightbox.setIndex}
+        onZoomIn={lightbox.zoomIn}
+        onZoomOut={lightbox.zoomOut}
+        onResetZoom={lightbox.resetZoom}
+        onWheel={lightbox.handleWheel}
+        onPinch={lightbox.handlePinch}
+        onPositionChange={lightbox.setPosition}
+      />
     </div>
   );
 };

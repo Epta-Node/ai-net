@@ -53,7 +53,17 @@ export function getRisksList(result: RiskResult | null | undefined): RiskItem[] 
   return null;
 }
 
-export function getDesignDetails(result: DesignResult | null | undefined): { colors: DesignColor[]; hierarchy: ComponentNode | null } | null {
+export interface ExtractedImage {
+  url: string;
+  title?: string;
+  alt?: string;
+}
+
+export function getDesignDetails(result: DesignResult | null | undefined): {
+  colors: DesignColor[];
+  hierarchy: ComponentNode | null;
+  images: ExtractedImage[];
+} | null {
   if (!result) return null;
 
   const colorsList: DesignColor[] = [];
@@ -75,8 +85,35 @@ export function getDesignDetails(result: DesignResult | null | undefined): { col
 
   const hierarchy = result.hierarchy || result.components || null;
 
+  const imagesList: ExtractedImage[] = [];
+  const rawImageSources = [
+    ...(Array.isArray(result.images) ? result.images : []),
+    ...(Array.isArray(result.mockups) ? result.mockups : []),
+    ...(Array.isArray(result.wireframes) ? result.wireframes : [])
+  ];
+
+  rawImageSources.forEach((img, idx) => {
+    if (typeof img === 'string') {
+      imagesList.push({
+        url: img,
+        title: `Design Output #${idx + 1}`,
+        alt: `Design image ${idx + 1}`
+      });
+    } else if (img && typeof img === 'object') {
+      const url = img.url || img.src || img.image || '';
+      if (url) {
+        imagesList.push({
+          url,
+          title: img.title || img.name || img.description || `Design Output #${idx + 1}`,
+          alt: img.alt || img.description || img.name || `Design image ${idx + 1}`
+        });
+      }
+    }
+  });
+
   return {
     colors: colorsList,
-    hierarchy
+    hierarchy,
+    images: imagesList
   };
 }
