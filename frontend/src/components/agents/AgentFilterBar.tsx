@@ -11,6 +11,8 @@ interface AgentFilterBarProps {
   onChange: (next: Partial<AgentFilters>) => void
   onReset: () => void
   onRefresh: () => void
+  selectedCount?: number
+  onClearSelection?: () => void
 }
 
 const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
@@ -26,6 +28,8 @@ export function AgentFilterBar({
   onChange,
   onReset,
   onRefresh,
+  selectedCount = 0,
+  onClearSelection,
 }: AgentFilterBarProps) {
   const [domainMin, domainMax] = priceDomain
   const effectiveMax = filters.priceMax ?? domainMax
@@ -45,6 +49,28 @@ export function AgentFilterBar({
     filters.priceMax != null ||
     filters.status !== 'all' ||
     filters.sortKey != null
+
+  if (selectedCount > 0) {
+    return (
+      <div className={`${styles.bar} ${styles.bulkBar}`}>
+        <div className={styles.bulkInfo}>
+          <span className={styles.selectedCount}>{selectedCount} selected</span>
+          <button type="button" className={styles.bulkActionButton}>
+            Freeze
+          </button>
+          <button type="button" className={styles.bulkActionButton}>
+            Deregister
+          </button>
+        </div>
+        <div className={styles.actions}>
+          <button type="button" className={styles.resetButton} onClick={onClearSelection}>
+            <X size={14} />
+            Clear Selection
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={styles.bar}>

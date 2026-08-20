@@ -161,3 +161,17 @@
     grid-template-columns: 1fr;
   }
 }
+
+.inlineContainer {
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+}
+.inlineContainer .modal {
+  max-width: none;
+  max-height: none;
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
