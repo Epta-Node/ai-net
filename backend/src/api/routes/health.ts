@@ -1,5 +1,8 @@
 import { Router, Request, Response } from "express";
 import { getConfig } from "../../config";
+import { getTaskDb } from "../../db/tasks";
+import { getMigrationStatus } from "../../db/migrations";
+
 
 const router = Router();
 
@@ -121,6 +124,42 @@ router.get("/ready", async (_req: Request, res: Response) => {
   const allOk = Object.values(checks).every((status) => status === "ok");
   res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
 });
+
+/**
+ * @openapi
+ * /migrations:
+ *   get:
+ *     summary: Database migration status
+ *     operationId: getMigrationsStatus
+ *     description: Returns the list of available database migrations and their application status.
+ *     tags: [Migrations]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: List of migration statuses
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                 migrations:
+ *                   type: array
+ */
+export function getMigrationsHandler(_req: Request, res: Response): void {
+  try {
+    const db = getTaskDb();
+    const migrations = getMigrationStatus(db);
+    res.json({ status: "ok", migrations });
+  } catch (error) {
+    res.status(500).json({ status: "error", error: String(error) });
+  }
+}
+
+
+router.get("/migrations", getMigrationsHandler);
+
 
 async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
   try {

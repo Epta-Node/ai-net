@@ -12,6 +12,7 @@ import { AgentCleanupService } from "./services/agentCleanup";
 import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
+import { runMigrations } from "./db/migrations";
 
 async function main() {
   // ── Validate env config at startup ──────────────────────────────────────────
@@ -19,6 +20,15 @@ async function main() {
   const config = getConfig();
 
   console.log("[ai-net-backend] Starting server...");
+
+  // Run automated database migrations if enabled
+  if (config.AUTO_MIGRATE !== false) {
+    console.log("[ai-net-backend] Running database migrations...");
+    const migrationResult = runMigrations(getTaskDb());
+    console.log(
+      `[ai-net-backend] Migrations complete: ${migrationResult.migrated.length} applied.`,
+    );
+  }
 
   try {
     // Start agent sync

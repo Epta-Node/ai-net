@@ -19,7 +19,7 @@ import {
   type StellarReleasePaymentFn,
 } from "../payment";
 import { agentsRouter } from "./routes/agents";
-import { healthRouter } from "./routes/health";
+import { healthRouter, getMigrationsHandler } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
 import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
@@ -96,8 +96,10 @@ export function createApp(opts: AppOptions = {}): {
     heartbeatService.start();
   }
 
-  // ── Health routes ───────────────────────────────────────────────────────────
+  // ── Health & Migration routes ───────────────────────────────────────────────
   app.use("/health", healthRouter);
+  app.get("/migrations", getMigrationsHandler);
+
 
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", createStatsRouter(getTaskDb()));
