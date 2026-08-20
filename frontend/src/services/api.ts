@@ -65,6 +65,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           message = errorText || message;
         } catch {}
       }
+      window.dispatchEvent(
+        new CustomEvent('global_toast', {
+          detail: {
+            message,
+            type: 'error',
+            action: {
+              label: 'Retry',
+              onClick: () => request(path, init).catch(() => {})
+            }
+          }
+        })
+      );
+
       throw new ApiError(response.status, message, path);
     }
 
