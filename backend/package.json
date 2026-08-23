@@ -13,7 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "@stellar/stellar-sdk": "12.3.0",
-    "better-sqlite3": "^11.3.0",
+    "better-sqlite3": "^12.11.1",
     "cors": "^2.8.5",
     "express": "^4.18.2",
     "lru-cache": "^10.4.3",

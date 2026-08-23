@@ -54,6 +54,19 @@ export interface AgentDb {
   updateLastSeen(agentId: string): void;
   markStaleAgents(staleThresholdMinutes?: number): number;
   deleteOfflineAgents(offlineThresholdHours?: number): number;
+  // Optional on-chain event handlers used by registry/sync.ts. Not every
+  // AgentDb implementation mirrors contract state, so call sites use `?.`.
+  remove?(id: string): void;
+  setFrozen?(agentId: string, frozen: boolean): void;
+  updatePricing?(agentId: string, pricingXLM: number): void;
+  upsertError?(error: {
+    id: string;
+    reporter: string;
+    resolved: boolean;
+    resolution: string | null;
+    reportedAt: string;
+  }): void;
+  resolveError?(errorId: string, resolution: string): void;
 }
 
 export function createAgentDb(db: Database.Database): AgentDb {
@@ -128,12 +141,16 @@ export function createAgentDb(db: Database.Database): AgentDb {
     },
 
     updateLastSeen(agentId: string): void {
+      // Store an ISO-8601 UTC timestamp (same format upsert uses). The raw
+      // SQLite `datetime('now')` output lacks a timezone designator and gets
+      // parsed as *local* time by JS `new Date()`, shifting timestamps by the
+      // machine's UTC offset.
       db.prepare(`
         UPDATE agents
-        SET lastSeenAt = datetime('now'),
+        SET lastSeenAt = ?,
             status = 'online'
         WHERE id = ?
-      `).run(agentId);
+      `).run(new Date().toISOString(), agentId);
     },
 
     markStaleAgents(staleThresholdMinutes: number = 5): number {

@@ -4,6 +4,7 @@ module.exports = {
   roots: ['<rootDir>/tests', '<rootDir>/src'],
   testMatch: ['**/?(*.)+(spec|test).[tj]s'],
   testTimeout: 130_000,
+  globalTeardown: '<rootDir>/tests/global-teardown.ts',
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
       tsconfig: {

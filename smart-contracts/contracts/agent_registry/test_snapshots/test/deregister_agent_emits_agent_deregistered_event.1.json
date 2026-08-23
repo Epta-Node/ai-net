@@ -1,28 +1,73 @@
 {
   "generators": {
-    "address": 3,
+    "address": 2,
     "nonce": 0
   },
   "auth": [
     [],
-    [],
     [
       [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
         {
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "report_error",
+              "function_name": "register_agent",
               "args": [
                 {
-                  "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                },
-                {
-                  "string": "real"
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "capability"
+                      },
+                      "val": {
+                        "symbol": "analytics"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "endpoint"
+                      },
+                      "val": {
+                        "string": "https://agent.example.com"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "id"
+                      },
+                      "val": {
+                        "symbol": "dreg_ev"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "metadata"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "owner"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "price_stroops"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000
+                        }
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -38,20 +83,10 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "resolve_errors",
+              "function_name": "deregister_agent",
               "args": [
                 {
-                  "vec": [
-                    {
-                      "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
-                    },
-                    {
-                      "bytes": "6300000000000000000000000000000000000000000000000000000000000000"
-                    }
-                  ]
-                },
-                {
-                  "u32": 1
+                  "symbol": "dreg_ev"
                 }
               ]
             }
@@ -59,8 +94,7 @@
           "sub_invocations": []
         }
       ]
-    ],
-    []
+    ]
   ],
   "ledger": {
     "protocol_version": 22,
@@ -79,10 +113,10 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "ErrorRecord"
+                  "symbol": "CapabilityIndex"
                 },
                 {
-                  "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
+                  "symbol": "analytics"
                 }
               ]
             },
@@ -99,57 +133,16 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "ErrorRecord"
+                      "symbol": "CapabilityIndex"
                     },
                     {
-                      "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
+                      "symbol": "analytics"
                     }
                   ]
                 },
                 "durability": "persistent",
                 "val": {
-                  "map": [
-                    {
-                      "key": {
-                        "symbol": "id"
-                      },
-                      "val": {
-                        "bytes": "0a00000000000000000000000000000000000000000000000000000000000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "message"
-                      },
-                      "val": {
-                        "string": "real"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "reporter"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "resolution"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "resolved"
-                      },
-                      "val": {
-                        "bool": false
-                      }
-                    }
-                  ]
+                  "vec": []
                 }
               }
             },
@@ -180,32 +173,7 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": [
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Admin"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                        }
-                      },
-                      {
-                        "key": {
-                          "vec": [
-                            {
-                              "symbol": "Paused"
-                            }
-                          ]
-                        },
-                        "val": {
-                          "bool": false
-                        }
-                      }
-                    ]
+                    "storage": null
                   }
                 }
               }
@@ -213,6 +181,39 @@
             "ext": "v0"
           },
           4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 801925984706572462
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
         ]
       ],
       [
@@ -250,39 +251,6 @@
       ],
       [
         {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-            "key": {
-              "ledger_key_nonce": {
-                "nonce": 801925984706572462
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 801925984706572462
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
           "contract_code": {
             "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
@@ -304,5 +272,54 @@
       ]
     ]
   },
-  "events": []
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "agent_drg"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "agent_id"
+                  },
+                  "val": {
+                    "symbol": "dreg_ev"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "capability"
+                  },
+                  "val": {
+                    "symbol": "analytics"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "owner"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
 }
