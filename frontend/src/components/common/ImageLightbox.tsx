@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -47,6 +48,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   onPinch,
   onPositionChange
 }) => {
+  const { t } = useTranslation();
   const touchDistanceRef = useRef<number | null>(null);
 
   const currentImage = images[currentIndex] || null;
@@ -164,7 +166,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               <button
                 className={styles.iconBtn}
                 onClick={onZoomOut}
-                title="Zoom Out (-)"
+                title={t('a11y.zoomOut')}
                 data-testid="zoom-out-btn"
                 disabled={scale <= 1}
               >
@@ -176,7 +178,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               <button
                 className={styles.iconBtn}
                 onClick={onResetZoom}
-                title="Reset Zoom (0)"
+                title={t('a11y.resetZoom')}
                 data-testid="zoom-reset-btn"
               >
                 <RotateCcw size={16} style={{ marginRight: 6 }} />
@@ -188,7 +190,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               <button
                 className={styles.iconBtn}
                 onClick={onZoomIn}
-                title="Zoom In (+)"
+                title={t('a11y.zoomIn')}
                 data-testid="zoom-in-btn"
               >
                 <ZoomIn size={18} />
@@ -198,7 +200,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             <button
               className={styles.iconBtn}
               onClick={handleDownload}
-              title="Download Image"
+              title={t('a11y.downloadImage')}
               data-testid="download-btn"
             >
               <Download size={18} />
@@ -207,7 +209,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             <button
               className={`${styles.iconBtn} ${styles.closeBtn}`}
               onClick={onClose}
-              title="Close Lightbox (Esc)"
+              title={t('a11y.closeLightbox')}
               data-testid="close-btn"
             >
               <X size={20} />
@@ -234,7 +236,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 e.stopPropagation();
                 onPrev();
               }}
-              title="Previous Image (Left Arrow)"
+              title={t('a11y.previousImage')}
               data-testid="prev-btn"
             >
               <ChevronLeft size={24} />
@@ -246,7 +248,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             <motion.img
               key={currentImage.url}
               src={currentImage.url}
-              alt={currentImage.alt || currentImage.title || 'Design asset'}
+              alt={currentImage.alt || currentImage.title || t('a11y.designAsset')}
               className={styles.lightboxImage}
               data-testid="lightbox-image"
               drag={scale > 1}
@@ -277,7 +279,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 e.stopPropagation();
                 onNext();
               }}
-              title="Next Image (Right Arrow)"
+              title={t('a11y.nextImage')}
               data-testid="next-btn"
             >
               <ChevronRight size={24} />
@@ -295,7 +297,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 onClick={() => onSelectIndex(idx)}
                 data-testid={`thumb-${idx}`}
               >
-                <img src={img.url} alt={img.title || `Thumb ${idx + 1}`} className={styles.thumbImg} />
+                <img src={img.url} alt={img.title || t('a11y.thumbnail', { index: idx + 1 })} className={styles.thumbImg} />
               </div>
             ))}
           </div>

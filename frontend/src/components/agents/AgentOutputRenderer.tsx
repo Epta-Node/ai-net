@@ -1,4 +1,5 @@
 import React, { Suspense } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
 import DesignRenderer from './DesignRenderer';
@@ -12,20 +13,24 @@ interface Props {
   result: AgentResult;
 }
 
-const LoadingFallback: React.FC = () => (
-  <div
-    style={{
-      padding: '24px',
-      color: 'var(--text-secondary)',
-      fontStyle: 'italic',
-      fontSize: '0.9rem',
-    }}
-  >
-    Loading renderer...
-  </div>
-);
+const LoadingFallback: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        padding: '24px',
+        color: 'var(--text-secondary)',
+        fontStyle: 'italic',
+        fontSize: '0.9rem',
+      }}
+    >
+      {t('agent.output.loadingRenderer')}
+    </div>
+  );
+};
 
 const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
+  const { t } = useTranslation();
   // All renderers handle null/undefined result with an empty-state placeholder
   if (result === null || result === undefined) {
     return (
@@ -41,7 +46,7 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
           border: '1px dashed rgba(255, 255, 255, 0.1)',
         }}
       >
-        No output generated yet.
+        {t('agent.output.empty')}
       </div>
     );
   }

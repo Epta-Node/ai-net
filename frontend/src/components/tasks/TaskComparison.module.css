@@ -1,0 +1,434 @@
+/* ─── Overlay ────────────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  overflow-y: auto;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+}
+
+/* ─── Panel ──────────────────────────────────────────────────────── */
+
+.panel {
+  position: relative;
+  z-index: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 1120px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: calc(100vh - 48px);
+}
+
+/* ─── Header ─────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--panel-border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.headerIcon {
+  color: var(--primary);
+}
+
+.headerTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.headerSubtitle {
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  color: var(--text-secondary);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ─── Diff toggle ────────────────────────────────────────────────── */
+
+.diffToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 0;
+}
+
+.diffToggle input[type='checkbox'] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.diffLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ─── Export + close buttons ─────────────────────────────────────── */
+
+.exportBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  color: #c4b5fd;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: none;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.exportBtn:hover {
+  background: rgba(139, 92, 246, 0.28);
+  transform: none;
+  box-shadow: none;
+}
+
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  box-shadow: none;
+  transition: background 0.15s, color 0.15s;
+  padding: 0;
+}
+
+.closeBtn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #fca5a5;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ─── Split view ─────────────────────────────────────────────────── */
+
+.splitView {
+  display: grid;
+  grid-template-columns: 1fr 1px 1fr;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.divider {
+  background: var(--panel-border);
+  width: 1px;
+}
+
+/* ─── Column ─────────────────────────────────────────────────────── */
+
+.column {
+  padding: 20px 24px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.columnA {
+  border-right: none; /* divider handles it */
+}
+
+/* ─── Column header ──────────────────────────────────────────────── */
+
+.colHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.colLabel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(139, 92, 246, 0.2);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #c4b5fd;
+}
+
+.columnB .colLabel {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: #7dd3fc;
+}
+
+.colMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.colStatus {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.colStatusText {
+  font-size: 0.78rem;
+}
+
+.colDate {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+}
+
+.colId {
+  font-size: 0.68rem;
+  font-family: ui-monospace, monospace;
+  color: var(--text-secondary);
+}
+
+/* ─── Section ────────────────────────────────────────────────────── */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.sectionBody {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.promptText {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin: 0;
+  word-break: break-word;
+}
+
+/* ─── Stats grid ─────────────────────────────────────────────────── */
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.statCell {
+  background: rgba(15, 23, 42, 0.4);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.statLabel {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.statValue {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.statAgents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.agentPill {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid;
+  background: transparent;
+}
+
+/* ─── Agent outputs ──────────────────────────────────────────────── */
+
+.outputList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.outputNode {
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.outputNodeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--panel-border);
+  gap: 8px;
+}
+
+.outputNodeName {
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  text-transform: capitalize;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outputNodeStatus {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.outputPre {
+  font-size: 0.75rem;
+  font-family: ui-monospace, 'Fira Code', monospace;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  background: transparent;
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.outputError {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 0.76rem;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.06);
+}
+
+/* ─── Diff highlight ─────────────────────────────────────────────── */
+
+.diffMark {
+  background: rgba(245, 158, 11, 0.2);
+  border-radius: 3px;
+  color: #fde68a;
+  text-decoration: none;
+  padding: 0 2px;
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .splitView {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1px auto;
+  }
+
+  .divider {
+    width: 100%;
+    height: 1px;
+  }
+
+  .column {
+    padding: 16px;
+  }
+
+  .statsGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .headerActions {
+    gap: 8px;
+  }
+
+  .exportBtn {
+    padding: 6px 10px;
+    font-size: 0.72rem;
+  }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

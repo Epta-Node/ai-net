@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowUp, ArrowUpDown, Inbox } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import type { SortDir, SortKey } from '../../utils/agentRegistry'
@@ -38,21 +39,23 @@ export function AgentTable({
   onSort,
   onRowClick,
 }: AgentTableProps) {
+  const { t } = useTranslation()
+
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table} id="agent-table">
         <thead>
           <tr>
-            <th>Agent ID</th>
-            <th>Capabilities</th>
+            <th>{t('agent.table.agentId')}</th>
+            <th>{t('common.capabilities')}</th>
             <th>
               <button
                 type="button"
                 className={styles.sortButton}
                 onClick={() => onSort('price')}
-                aria-label="Sort by price"
+                aria-label={t('a11y.sortByPrice')}
               >
-                Price (XLM)
+                {t('agent.table.price')}
                 <SortIcon active={sortKey === 'price'} dir={sortDir} />
               </button>
             </th>
@@ -61,14 +64,14 @@ export function AgentTable({
                 type="button"
                 className={styles.sortButton}
                 onClick={() => onSort('reputation')}
-                aria-label="Sort by reputation"
+                aria-label={t('a11y.sortByReputation')}
               >
-                Reputation
+                {t('common.reputation')}
                 <SortIcon active={sortKey === 'reputation'} dir={sortDir} />
               </button>
             </th>
-            <th>Status</th>
-            <th>Actions</th>
+            <th>{t('common.status')}</th>
+            <th>{t('agent.table.actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -87,9 +90,9 @@ export function AgentTable({
               <td colSpan={6}>
                 <div className={styles.emptyState} data-testid="agents-empty">
                   <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
-                  <p className={styles.emptyTitle}>No agents found</p>
+                  <p className={styles.emptyTitle}>{t('agent.table.emptyTitle')}</p>
                   <p className={styles.emptySubtext}>
-                    No registered agents match your filters.
+                    {t('agent.table.emptySubtext')}
                   </p>
                 </div>
               </td>
@@ -103,7 +106,7 @@ export function AgentTable({
                 onClick={() => onRowClick(agent)}
                 tabIndex={0}
                 role="button"
-                aria-label={`View details for ${agent.name}`}
+                aria-label={t('a11y.viewDetailsFor', { name: agent.name })}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
@@ -137,7 +140,7 @@ export function AgentTable({
                       agent.status === 'active' ? styles.statusActive : styles.statusInactive
                     }`}
                   >
-                    {agent.status}
+                    {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
                   </span>
                 </td>
                 <td>
@@ -149,7 +152,7 @@ export function AgentTable({
                       onRowClick(agent)
                     }}
                   >
-                    Details
+                    {t('common.details')}
                   </button>
                 </td>
               </tr>

@@ -1,5 +1,7 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
+import { formatNumber } from '../../utils/format'
 
 export interface AgentData {
   id: string
@@ -17,6 +19,8 @@ interface AgentCardProps {
 }
 
 const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
+  const { t, i18n } = useTranslation()
+
   return (
     <motion.div
       className="bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col cursor-pointer group relative overflow-hidden"
@@ -52,11 +56,11 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
 
       <div className="flex items-center justify-between pt-4 border-t border-border-subtle/50 relative">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Tasks</span>
-          <span className="text-sm font-bold text-text-primary">{agent.tasksCompleted.toLocaleString()}</span>
+          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">{t('agent.tasks')}</span>
+          <span className="text-sm font-bold text-text-primary">{formatNumber(agent.tasksCompleted, i18n.language)}</span>
         </div>
         <div className="flex flex-col items-end gap-0.5">
-          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">Success</span>
+          <span className="text-[10px] text-text-secondary uppercase tracking-wider font-bold">{t('agent.success')}</span>
           <span className="text-sm font-bold text-accent-green">{agent.successRate}%</span>
         </div>
       </div>

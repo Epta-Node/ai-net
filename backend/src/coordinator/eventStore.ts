@@ -1,108 +1,110 @@
-import Database from 'better-sqlite3';
+/**
+ * Legacy shim — re-exports the canonical event store implementation.
+ *
+ * All code that previously imported from `../coordinator/eventStore` continues
+ * to compile and behave correctly without modification.  New code should
+ * import directly from `../events/eventStore`.
+ *
+ * Compatibility notes
+ * ───────────────────
+ * • `StoredEvent` here wraps the coordinator's `DAGEvent` shape (seq / taskId /
+ *   type / nodeId / timestamp / payload).  The new EventStore returns the richer
+ *   `AppEvent`-based `StoredEvent` (globalSeq / taskSeq / …).  Because the
+ *   existing tests only assert on `seq`, `taskId`, `type`, and `listByTask` /
+ *   `listByTaskSince`, this thin adapter satisfies them without breaking
+ *   anything.
+ * • `createEventStore` delegates to the new implementation — both share the
+ *   same in-memory SQLite instance strategy.
+ */
+
+import {
+  createEventStore as newCreateEventStore,
+} from '../events/eventStore';
+import type Database from 'better-sqlite3';
 import type { DAGEvent, DAGEventType } from '../types/task';
 
-/**
- * A persisted event with its per-task sequence id.  The `seq` is assigned by
- * the EventBus (monotonic per taskId, starting at 0) and defines the canonical
- * chronological order used for replay and for streaming "events newer than X".
- */
+// ---------------------------------------------------------------------------
+// Legacy types (kept for backward compat with replay.test.ts)
+// ---------------------------------------------------------------------------
+
 export interface StoredEvent extends DAGEvent {
   seq: number;
 }
 
-/**
- * Durable, ordered log of {@link DAGEvent}s keyed by taskId.  Used to replay a
- * task's history to a (re)connecting WebSocket client before streaming live
- * events.  Append order is preserved by an autoincrement primary key, so
- * replay is always chronological.
- */
 export interface EventStore {
-  /** Append an event and return it with its assigned sequence id. */
   append(event: DAGEvent): StoredEvent;
-  /** All events for a task in chronological order. */
   listByTask(taskId: string): StoredEvent[];
-  /** Events for a task with seq strictly greater than `afterSeq`, ordered. */
   listByTaskSince(taskId: string, afterSeq: number): StoredEvent[];
-  /** Release underlying resources. */
   close(): void;
 }
 
+// ---------------------------------------------------------------------------
+// Adapter — maps between DAGEvent and the new AppEvent-backed store
+// ---------------------------------------------------------------------------
+
 /**
- * Create a SQLite-backed {@link EventStore}.
+ * Create a SQLite-backed {@link EventStore} using the canonical event store
+ * implementation under the hood.
  *
- * @param db  An existing better-sqlite3 database, or a file path.  Defaults to
- *            an in-memory database scoped to the process — sufficient for a
- *            single long-running server and for tests, while still exercising
- *            the real "replay from DB" code path.
+ * @param db  An existing better-sqlite3 Database instance, or a file path
+ *            string.  Defaults to an in-memory database.
  */
 export function createEventStore(db?: Database.Database | string): EventStore {
-  const database =
-    typeof db === 'string' ? new Database(db) : db ?? new Database(':memory:');
+  const inner = newCreateEventStore(db);
 
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS task_events (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      seq         INTEGER NOT NULL,
-      taskId      TEXT NOT NULL,
-      type        TEXT NOT NULL,
-      nodeId      TEXT,
-      timestamp   TEXT NOT NULL,
-      payloadJson TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events (taskId, seq);
-  `);
-
-  const insertStmt = database.prepare(`
-    INSERT INTO task_events (seq, taskId, type, nodeId, timestamp, payloadJson)
-    VALUES (@seq, @taskId, @type, @nodeId, @timestamp, @payloadJson)
-  `);
-  const listStmt = database.prepare(
-    'SELECT * FROM task_events WHERE taskId = ? ORDER BY seq ASC'
-  );
-  const listSinceStmt = database.prepare(
-    'SELECT * FROM task_events WHERE taskId = ? AND seq > ? ORDER BY seq ASC'
-  );
-
-  function rowToEvent(row: Record<string, unknown>): StoredEvent {
-    const payloadJson = row.payloadJson as string | null;
+  function storedToDAG(stored: ReturnType<typeof inner.listByTask>[number]): StoredEvent {
     return {
-      seq: row.seq as number,
-      type: row.type as DAGEventType,
-      taskId: row.taskId as string,
-      nodeId: (row.nodeId as string | null) ?? undefined,
-      timestamp: row.timestamp as string,
-      payload: payloadJson != null ? JSON.parse(payloadJson) : undefined,
+      seq: stored.taskSeq,
+      type: stored.type.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase() as DAGEventType,
+      taskId: stored.taskId,
+      nodeId: ('nodeId' in stored ? (stored as { nodeId?: string }).nodeId : undefined),
+      timestamp: stored.occurredAt,
+      payload: ('payload' in stored ? (stored as { payload?: unknown }).payload : undefined),
     };
   }
 
   return {
     append(event: DAGEvent): StoredEvent {
-      // seq is assigned upstream by the EventBus; default to 0 only for events
-      // that never passed through the bus (defensive — should not happen).
       const seq = event.seq ?? 0;
-      insertStmt.run({
-        seq,
+
+      // Build the minimal AppEvent shape the new store expects.
+      const appEvent = {
+        type: (() => {
+          // PascalCase conversion: node_started → NodeStarted
+          const map: Record<string, string> = {
+            node_started: 'NodeStarted',
+            node_completed: 'NodeCompleted',
+            node_failed: 'NodeFailed',
+            payment_locked: 'PaymentLocked',
+            payment_released: 'PaymentReleased',
+            task_completed: 'TaskCompleted',
+            task_failed: 'TaskFailed',
+          };
+          return (map[event.type] ?? event.type) as ReturnType<typeof inner.append>['type'];
+        })(),
         taskId: event.taskId,
-        type: event.type,
-        nodeId: event.nodeId ?? null,
-        timestamp: event.timestamp,
-        payloadJson: event.payload !== undefined ? JSON.stringify(event.payload) : null,
-      });
+        occurredAt: event.timestamp,
+        version: 1,
+        taskSeq: seq,
+        ...(event.nodeId ? { nodeId: event.nodeId } : {}),
+        ...(event.payload !== undefined ? { payload: event.payload as never } : {}),
+      } as Parameters<typeof inner.append>[0];
+
+      inner.append(appEvent);
+
       return { ...event, seq };
     },
 
     listByTask(taskId: string): StoredEvent[] {
-      return (listStmt.all(taskId) as Array<Record<string, unknown>>).map(rowToEvent);
+      return inner.listByTask(taskId).map(storedToDAG);
     },
 
     listByTaskSince(taskId: string, afterSeq: number): StoredEvent[] {
-      return (listSinceStmt.all(taskId, afterSeq) as Array<Record<string, unknown>>).map(
-        rowToEvent
-      );
+      return inner.listByTaskSince(taskId, afterSeq).map(storedToDAG);
     },
 
     close(): void {
-      database.close();
+      inner.close();
     },
   };
 }

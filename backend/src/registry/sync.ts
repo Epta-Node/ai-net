@@ -8,17 +8,17 @@
  *
  * | topic[1]             | Action                                               |
  * |----------------------|------------------------------------------------------|
- * | `initializd`         | Log genesis admin; no DB write needed                |
+ * | `init`               | Log genesis admin; no DB write needed                |
  * | `adm_chngd`          | Log admin rotation for audit trail                   |
  * | `agent_reg`          | Upsert agent record into local DB                    |
- * | `agent_drg`          | Remove agent from local DB + capability index        |
- * | `err_rptd`           | Insert unresolved error record                       |
- * | `err_rslvd`          | Mark error record resolved                           |
- * | `paused`             | Update registry status flag                          |
- * | `unpaused`           | Update registry status flag                          |
- * | `freeze`             | Mark agent frozen                                    |
- * | `unfreeze`           | Mark agent active                                    |
- * | `price_upd`          | Update agent pricing in DB                           |
+ * | `agent_drg`          | Remove agent from local DB via db.delete()           |
+ * | `err_rptd`           | Log error report (no DB schema for errors yet)       |
+ * | `err_rslvd`          | Log error resolution (no DB schema for errors yet)   |
+ * | `paused`             | Log registry paused                                  |
+ * | `unpaused`           | Log registry unpaused                                |
+ * | `freeze`             | Mark agent offline                                   |
+ * | `unfreeze`           | Mark agent online via upsert                         |
+ * | `price_upd`          | Upsert agent with updated price                      |
  *
  * ## Topic convention
  *
@@ -59,15 +59,6 @@ const TOPICS = {
 
 // ── Event payload shapes ─────────────────────────────────────────────────────
 
-interface InitializedPayload {
-  admin: string;
-}
-
-interface AdminChangedPayload {
-  old_admin: string;
-  new_admin: string;
-}
-
 interface AgentRegisteredPayload {
   agent_id: string;
   owner: string;
@@ -82,20 +73,20 @@ interface AgentDeregisteredPayload {
 }
 
 interface ErrorReportedPayload {
-  error_id: string;   // hex-encoded BytesN<32>
+  error_id: string;
   reporter: string;
 }
 
 interface ErrorResolvedPayload {
   error_id: string;
-  resolution_code: number; // 0=Fixed, 1=Ignored, 2=Escalated
+  resolution_code: number;
 }
 
 // ── Handler helpers ──────────────────────────────────────────────────────────
 
 /**
  * Map a resolution_code integer back to a human-readable string.
- * Must stay in sync with the `Resolution` enum in lib.rs.
+ * Stays in sync with the `Resolution` enum in lib.rs.
  */
 function resolutionLabel(code: number): string {
   switch (code) {
@@ -109,6 +100,10 @@ function resolutionLabel(code: number): string {
 /**
  * Process a single decoded contract event.
  *
+ * Only uses methods that exist on the `AgentDb` interface:
+ *   upsert, findById, list, delete, updateReputation,
+ *   markAllOffline, updateLastSeen, markStaleAgents, deleteOfflineAgents
+ *
  * @param action  - The decoded topic[1] symbol string.
  * @param payload - The native JS value decoded from the event's XDR data.
  * @param db      - AgentDb instance to apply mutations to.
@@ -121,18 +116,14 @@ function handleEvent(
   switch (action) {
     // ── Contract lifecycle ────────────────────────────────────────────────
     case TOPICS.INITIALIZED: {
-      const data = payload as InitializedPayload;
-      console.log(
-        `[sync] Registry initialized. Genesis admin: ${data.admin}`
-      );
+      const data = payload as { admin?: string };
+      console.log(`[sync] Registry initialized. Genesis admin: ${data.admin ?? "unknown"}`);
       break;
     }
 
     case TOPICS.ADMIN_CHANGED: {
-      const data = payload as AdminChangedPayload;
-      console.log(
-        `[sync] Admin rotated: ${data.old_admin} → ${data.new_admin}`
-      );
+      const data = payload as { old_admin?: string; new_admin?: string };
+      console.log(`[sync] Admin rotated: ${data.old_admin} → ${data.new_admin}`);
       break;
     }
 
@@ -151,7 +142,7 @@ function handleEvent(
       const data = payload as AgentRegisteredPayload;
 
       // Upsert into local DB. capability is stored as an array for API
-      // compatibility; price is normalised from stroops (bigint-safe path).
+      // compatibility; price is normalised from stroops to XLM.
       db.upsert({
         id: data.agent_id,
         capabilities: [data.capability],
@@ -173,7 +164,8 @@ function handleEvent(
     case TOPICS.AGENT_DRG: {
       const data = payload as AgentDeregisteredPayload;
 
-      db.remove?.(data.agent_id);
+      // Remove the agent from the local DB using the existing delete method.
+      db.delete(data.agent_id);
 
       console.log(
         `[sync] Agent deregistered: id=${data.agent_id} ` +
@@ -183,25 +175,38 @@ function handleEvent(
     }
 
     case TOPICS.FREEZE: {
+      // Freeze: mark agent offline so it stops appearing in active lookups.
+      // The agent record is preserved — unfreezing can bring it back online.
       const agentId =
-        typeof payload === "string" ? payload : (payload as { agent_id?: string }).agent_id ?? "";
+        typeof payload === "string"
+          ? payload
+          : (payload as { agent_id?: string }).agent_id ?? "";
 
-      db.setFrozen?.(agentId, true);
-      console.log(`[sync] Agent frozen: ${agentId}`);
+      const existing = db.findById(agentId);
+      if (existing) {
+        db.upsert({ ...existing, status: "offline" });
+      }
+      console.log(`[sync] Agent frozen (marked offline): ${agentId}`);
       break;
     }
 
     case TOPICS.UNFREEZE: {
+      // Unfreeze: restore agent to online status.
       const agentId =
-        typeof payload === "string" ? payload : (payload as { agent_id?: string }).agent_id ?? "";
+        typeof payload === "string"
+          ? payload
+          : (payload as { agent_id?: string }).agent_id ?? "";
 
-      db.setFrozen?.(agentId, false);
-      console.log(`[sync] Agent unfrozen: ${agentId}`);
+      const existing = db.findById(agentId);
+      if (existing) {
+        db.upsert({ ...existing, status: "online", lastSeenAt: new Date().toISOString() });
+      }
+      console.log(`[sync] Agent unfrozen (marked online): ${agentId}`);
       break;
     }
 
     case TOPICS.PRICE_UPD: {
-      // Payload is a tuple: (agent_id, new_price_stroops)
+      // Payload is a tuple: (agent_id, new_price_stroops) or a struct.
       const [agentId, priceStroops] = Array.isArray(payload)
         ? payload
         : [
@@ -209,7 +214,13 @@ function handleEvent(
             (payload as { new_price?: number }).new_price ?? 0,
           ];
 
-      db.updatePricing?.(agentId, Number(priceStroops) / 10_000_000);
+      const existing = db.findById(agentId as string);
+      if (existing) {
+        db.upsert({
+          ...existing,
+          pricingXLM: Number(priceStroops) / 10_000_000,
+        });
+      }
       console.log(
         `[sync] Price updated: agent=${agentId} ` +
         `price_xlm=${(Number(priceStroops) / 10_000_000).toFixed(7)}`
@@ -218,19 +229,13 @@ function handleEvent(
     }
 
     // ── Error lifecycle ───────────────────────────────────────────────────
+    // The AgentDb interface does not yet have error tables; log only.
+    // These can be wired up once an errors table is added to the schema.
     case TOPICS.ERR_REPORTED: {
       const data = payload as ErrorReportedPayload;
-
-      db.upsertError?.({
-        id: data.error_id,
-        reporter: data.reporter,
-        resolved: false,
-        resolution: null,
-        reportedAt: new Date().toISOString(),
-      });
-
       console.log(
-        `[sync] Error reported: id=${data.error_id} reporter=${data.reporter}`
+        `[sync] Error reported: id=${data.error_id} reporter=${data.reporter} ` +
+        `(no DB schema for errors — logging only)`
       );
       break;
     }
@@ -238,11 +243,9 @@ function handleEvent(
     case TOPICS.ERR_RESOLVED: {
       const data = payload as ErrorResolvedPayload;
       const label = resolutionLabel(data.resolution_code);
-
-      db.resolveError?.(data.error_id, label);
-
       console.log(
-        `[sync] Error resolved: id=${data.error_id} resolution=${label}`
+        `[sync] Error resolved: id=${data.error_id} resolution=${label} ` +
+        `(no DB schema for errors — logging only)`
       );
       break;
     }

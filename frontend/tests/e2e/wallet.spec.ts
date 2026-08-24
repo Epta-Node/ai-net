@@ -33,7 +33,7 @@ test.describe('Wallet Connection', () => {
 
   test('fails correctly on invalid secret key input', async ({ page }) => {
     await page.fill('#secret-key-input', 'invalid-secret-key-123');
-    await page.click('button:has-text("Connect with Secret Key")');
+    await page.click('#btn-connect-secret-key');
 
     const errorEl = page.locator('#connect-error');
     await expect(errorEl).toBeVisible();
@@ -42,19 +42,20 @@ test.describe('Wallet Connection', () => {
 
   test('connects successfully with a valid testnet secret key', async ({ page }) => {
     await page.fill('#secret-key-input', VALID_SECRET);
-    await page.click('button:has-text("Connect with Secret Key")');
+    await page.click('#btn-connect-secret-key');
 
     const navKeyEl = page.locator('#wallet-pubkey-display');
     await expect(navKeyEl).toBeVisible({ timeout: 5000 });
 
+    // The truncated-key shape is the real signal that a wallet is connected;
+    // it also rules out the disconnected placeholder without depending on its copy.
     const navKeyText = await navKeyEl.innerText();
-    expect(navKeyText).not.toBe('Not Connected');
     expect(navKeyText).toMatch(/^G[A-Z0-9]{3}\.\.\.[A-Z0-9]{3}$/);
   });
 
   test('persists wallet connection after page refresh', async ({ page }) => {
     await page.fill('#secret-key-input', VALID_SECRET);
-    await page.click('button:has-text("Connect with Secret Key")');
+    await page.click('#btn-connect-secret-key');
 
     await expect(page.locator('#wallet-pubkey-display')).toBeVisible({ timeout: 5000 });
     const beforeKey = await page.locator('#wallet-pubkey-display').innerText();
@@ -68,7 +69,7 @@ test.describe('Wallet Connection', () => {
 
   test('shows connect form when wallet session is cleared', async ({ page }) => {
     await page.fill('#secret-key-input', VALID_SECRET);
-    await page.click('button:has-text("Connect with Secret Key")');
+    await page.click('#btn-connect-secret-key');
 
     await expect(page.locator('#wallet-pubkey-display')).toBeVisible({ timeout: 5000 });
     expect(await page.locator('#wallet-pubkey-display').innerText()).toMatch(/^G/);
@@ -81,7 +82,9 @@ test.describe('Wallet Connection', () => {
     await page.reload();
 
     await expect(page.locator('#secret-key-input')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('#wallet-pubkey-display')).toHaveText('Not Connected');
+    // Not the copy: the placeholder is translated, and what this test cares about
+    // is that the display no longer shows a key.
+    await expect(page.locator('#wallet-pubkey-display')).not.toHaveText(/^G[A-Z0-9]{3}\.\.\./);
   });
 
   test('opens confirmation modal before sending XLM', async ({ page }) => {
@@ -103,15 +106,15 @@ test.describe('Wallet Connection', () => {
     await page.fill('#send-destination', VALID_DESTINATION);
     await page.fill('#send-amount', '1.5');
 
-    await page.click('button:has-text("Send")');
+    await page.click('#btn-send-xlm');
 
     const modal = page.locator('[role="dialog"][aria-modal="true"]');
     await expect(modal).toBeVisible({ timeout: 5000 });
-    await expect(modal.locator('#confirm-title')).toHaveText('Confirm Payment');
-    await expect(modal.locator('button:has-text("Confirm & Send")')).toBeVisible();
-    await expect(modal.locator('button:has-text("Cancel")')).toBeVisible();
+    await expect(modal.locator('#confirm-title')).toBeVisible();
+    await expect(modal.locator('#btn-confirm-payment')).toBeVisible();
+    await expect(modal.locator('#btn-cancel-payment')).toBeVisible();
 
-    await modal.locator('button:has-text("Cancel")').click();
+    await modal.locator('#btn-cancel-payment').click();
     await expect(modal).not.toBeVisible();
   });
 });

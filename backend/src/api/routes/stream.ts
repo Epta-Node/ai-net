@@ -5,11 +5,45 @@ import { WebSocketServer, WebSocket } from 'ws';
 
 import { eventBus as defaultEventBus } from '../../coordinator/eventBus';
 import { getTask as defaultGetTask } from '../../coordinator/taskStore';
-import type { EventStore } from '../../coordinator/eventStore';
+import type { EventStore, StoredEvent } from '../../events/eventStore';
 import type { Task } from '../../types/task';
 import { WS_CLOSE } from '../../types/stream';
 
 const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;
+
+// ---------------------------------------------------------------------------
+// Wire-format normalisation
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a stored event to the wire shape expected by WebSocket clients:
+ *  • `type` is in snake_case  (the coordinator's original DAGEventType)
+ *  • `seq`  is the per-task cursor (mapped from `taskSeq`)
+ *
+ * Clients use `event.type === 'task_completed'` / `event.seq` as a resume
+ * cursor, so this mapping must be stable.
+ */
+function toWireEvent(event: StoredEvent): Record<string, unknown> {
+  const snakeType = event.type
+    // PascalCase → snake_case: "NodeStarted" → "node_started"
+    .replace(/([A-Z])/g, (_match, _p1, offset: number) =>
+      offset === 0 ? _match.toLowerCase() : `_${_match.toLowerCase()}`
+    );
+
+  const { taskSeq, globalSeq, occurredAt, version, ...rest } = event as StoredEvent & {
+    taskSeq: number;
+    globalSeq: number;
+    occurredAt: string;
+    version: number;
+  };
+
+  return {
+    ...rest,
+    type: snakeType,
+    seq: taskSeq,
+    timestamp: occurredAt,
+  };
+}
 
 /**
  * Parse the optional `?lastEventId=<number>` cursor from a stream URL. Returns
@@ -132,10 +166,10 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
     const flush = (): void => {
       const events = eventStore.listByTaskSince(taskId, lastSentSeq);
       for (const event of events) {
-        // Send the full event including its seq so the client can record a
-        // cursor and resume from it via ?lastEventId on a later reconnect.
-        send(event);
-        lastSentSeq = event.seq;
+        // Normalise to the wire format (snake_case type, seq cursor) before
+        // sending so clients see the same shape regardless of internal storage.
+        send(toWireEvent(event));
+        lastSentSeq = event.taskSeq;
       }
     };
 

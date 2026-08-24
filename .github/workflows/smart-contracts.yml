@@ -40,6 +40,7 @@ jobs:
         run: |
           cargo build --locked -p agent-registry --target wasm32v1-none --release
           cargo build --locked -p error-registry --target wasm32v1-none --release
+          cargo build --locked -p agent-bidding --target wasm32v1-none --release
           ls -la target/wasm32v1-none/release/*.wasm
 
       - name: Generate checksums

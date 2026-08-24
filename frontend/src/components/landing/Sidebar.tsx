@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { LayoutDashboard, ClipboardList, Bot, Hammer, UserPlus, CreditCard, Settings, ChevronLeft } from 'lucide-react'
@@ -8,18 +9,19 @@ interface SidebarProps {
   onToggle: () => void
 }
 
-const navItems = [
-  { label: 'Dashboard', icon: <LayoutDashboard size={16} />, route: '/dashboard' },
-  { label: 'Tasks', icon: <ClipboardList size={16} />, route: '/tasks/new' },
-  { label: 'Agents', icon: <Bot size={16} />, route: '/agents' },
-  { label: 'Builder', icon: <Hammer size={16} />, route: '#' },
-  { label: 'Register', icon: <UserPlus size={16} />, route: '#' },
-  { label: 'Payments', icon: <CreditCard size={16} />, route: '/wallet' },
-  { label: 'Settings', icon: <Settings size={16} />, route: '#' },
-]
-
 const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
+  const { t } = useTranslation()
   const navigate = useNavigate()
+
+  const navItems = [
+    { label: t('nav.dashboard'), icon: <LayoutDashboard size={16} />, route: '/dashboard' },
+    { label: t('nav.tasks'), icon: <ClipboardList size={16} />, route: '/tasks/new' },
+    { label: t('nav.agents'), icon: <Bot size={16} />, route: '/agents' },
+    { label: t('nav.builder'), icon: <Hammer size={16} />, route: '#' },
+    { label: t('nav.register'), icon: <UserPlus size={16} />, route: '#' },
+    { label: t('nav.payments'), icon: <CreditCard size={16} />, route: '/wallet' },
+    { label: t('nav.settings'), icon: <Settings size={16} />, route: '#' },
+  ]
 
   return (
     <>
@@ -56,7 +58,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed, onToggle }) => {
         transition={{ type: 'spring', damping: 26, stiffness: 260 }}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.9 }}
-        aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        aria-label={collapsed ? t('a11y.expandSidebar') : t('a11y.collapseSidebar')}
       >
         <motion.div
           animate={{ rotate: collapsed ? 180 : 0 }}

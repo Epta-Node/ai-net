@@ -1,48 +1,65 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
 import { useToast } from '../../context/ToastContext';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
-const agentPreferences = [
-  { label: 'Research Agent', value: 'research' as const },
-  { label: 'Risk Agent', value: 'risk' as const },
-  { label: 'Coding Agent', value: 'coding' as const },
-  { label: 'Design Agent', value: 'design' as const },
-  { label: 'Report Agent', value: 'report' as const },
-];
+// Only the label is translated: `value` is the wire format the API and the zod
+// enum below rely on, so it stays in English regardless of the UI language.
+const AGENT_PREFERENCE_VALUES = ['research', 'risk', 'coding', 'design', 'report'] as const;
 
-const taskSchema = z.object({
-  prompt: z.string().trim().min(1, 'Prompt is required').max(1000, 'Prompt must be 1000 characters or less'),
-  maxBudgetXLM: z
-    .preprocess((value) => {
+/**
+ * A factory because zod bakes the message strings in at schema construction
+ * time, and `t` only exists inside the component.
+ */
+const makeTaskSchema = (t: TFunction) =>
+  z.object({
+    prompt: z
+      .string()
+      .trim()
+      .min(1, t('validation.promptRequired'))
+      .max(1000, t('validation.promptTooLong')),
+    maxBudgetXLM: z.preprocess((value) => {
       if (typeof value === 'string') {
         return Number(value);
       }
       return value;
-    }, z.number().min(0.1, 'Minimum budget is 0.1 XLM')),
-  agentPreferences: z
-    .array(z.enum(['research', 'risk', 'coding', 'design', 'report']))
-    .min(1, 'Choose at least one agent'),
-});
+    }, z.number().min(0.1, t('validation.minBudget'))),
+    agentPreferences: z.array(z.enum(AGENT_PREFERENCE_VALUES)).min(1, t('validation.agentRequired')),
+  });
 
-type TaskFormValues = z.infer<typeof taskSchema>;
+type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
 
 export function TaskSubmissionForm() {
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
   const { showToast } = useToast();
 
+  const agentPreferences = useMemo(
+    () =>
+      AGENT_PREFERENCE_VALUES.map((value) => ({
+        value,
+        label: t(`task.submit.pref.${value}`),
+      })),
+    [t],
+  );
+
+  const taskSchema = useMemo(() => makeTaskSchema(t), [t]);
+
   const {
     register,
     handleSubmit,
     control,
-    formState: { errors, isSubmitting },
+    trigger,
+    formState: { errors, isSubmitting, isSubmitted },
   } = useForm<TaskFormValues>({
     resolver: zodResolver(taskSchema),
     defaultValues: {
@@ -51,6 +68,21 @@ export function TaskSubmissionForm() {
       agentPreferences: [],
     },
   });
+
+  // Validation messages are copied into `errors` when validation runs, so an
+  // error already on screen would keep the previous language. React Hook Form
+  // re-reads `resolver` on every render, so re-validating here is enough.
+  const language = i18n.language;
+  const lastLanguage = useRef(language);
+  useEffect(() => {
+    if (lastLanguage.current === language) {
+      return;
+    }
+    lastLanguage.current = language;
+    if (isSubmitted) {
+      void trigger();
+    }
+  }, [language, isSubmitted, trigger]);
 
   const onSubmit = async (values: TaskFormValues) => {
     try {
@@ -61,7 +93,8 @@ export function TaskSubmissionForm() {
         navigate(`/tasks/${result.taskId}`);
       }, 300);
     } catch (submitError) {
-      const message = submitError instanceof Error ? submitError.message : 'Unable to submit task';
+      const message =
+        submitError instanceof Error ? submitError.message : t('task.submit.unableToSubmit');
       showToast(message, 'error');
     }
   };
@@ -73,17 +106,17 @@ export function TaskSubmissionForm() {
     if (errors.maxBudgetXLM) {
       return errors.maxBudgetXLM.message;
     }
-    return 'Budget must be at least 0.1 XLM.';
-  }, [errors.maxBudgetXLM]);
+    return t('task.submit.budgetHelper');
+  }, [errors.maxBudgetXLM, t]);
 
   return (
     <main style={{ maxWidth: 900, margin: '0 auto', padding: '24px' }}>
-      <h1>Submit a New Task</h1>
+      <h1>{t('task.submit.title')}</h1>
 
       <form onSubmit={handleSubmit(onSubmit)} noValidate id="task-form">
         <div style={{ marginBottom: 20 }}>
           <label htmlFor="prompt" style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
-            Task prompt
+            {t('task.submit.promptLabel')}
           </label>
           <textarea
             id="prompt"
@@ -101,7 +134,7 @@ export function TaskSubmissionForm() {
 
         <div style={{ marginBottom: 20 }}>
           <label htmlFor="maxBudgetXLM" style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
-            Maximum budget (XLM)
+            {t('task.submit.budgetLabel')}
           </label>
           <input
             id="maxBudgetXLM"
@@ -120,7 +153,7 @@ export function TaskSubmissionForm() {
 
         <div style={{ marginBottom: 20 }}>
           <span id="agentPreferences-label" style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
-            Agent preferences
+            {t('task.submit.preferencesLabel')}
           </span>
           <Controller
             control={control}
@@ -187,16 +220,16 @@ export function TaskSubmissionForm() {
               cursor: isLoading ? 'not-allowed' : 'pointer',
             }}
           >
-            {isLoading ? 'Submitting...' : 'Submit task'}
+            {isLoading ? t('task.submit.submitting') : t('task.submit.submit')}
           </button>
           {status === 'success' && (
-            <span style={{ color: '#16a34a' }}>Task submitted successfully. Redirecting...</span>
+            <span style={{ color: '#16a34a' }}>{t('task.submit.success')}</span>
           )}
         </div>
       </form>
 
       <section style={{ marginBottom: 24 }}>
-        <h2>Execution DAG preview</h2>
+        <h2>{t('task.submit.dagTitle')}</h2>
         {isLoading && (
           <div aria-busy="true" style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 12 }}>
             <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />

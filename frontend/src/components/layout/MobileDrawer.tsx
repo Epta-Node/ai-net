@@ -1,6 +1,7 @@
 import React, { forwardRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, PlusCircle, Bot, Wallet } from 'lucide-react'
+import { LayoutDashboard, PlusCircle, Bot, Wallet, History } from 'lucide-react'
 import './MobileDrawer.css'
 
 interface MobileDrawerProps {
@@ -14,11 +15,14 @@ const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(({
   currentPath, 
   onNavigate 
 }, ref) => {
+  const { t } = useTranslation()
+
   const navItems = [
-    { path: '/', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-    { path: '/tasks/new', icon: <PlusCircle size={20} />, label: 'New Task' },
-    { path: '/agents', icon: <Bot size={20} />, label: 'Agents' },
-    { path: '/wallet', icon: <Wallet size={20} />, label: 'Wallet' },
+    { path: '/', icon: <LayoutDashboard size={20} />, label: t('nav.dashboard') },
+    { path: '/tasks/new', icon: <PlusCircle size={20} />, label: t('nav.newTask') },
+    { path: '/tasks/history', icon: <History size={20} />, label: t('nav.taskHistory') },
+    { path: '/agents', icon: <Bot size={20} />, label: t('nav.agents') },
+    { path: '/wallet', icon: <Wallet size={20} />, label: t('nav.wallet') },
   ]
 
   const handleKeyDown = (e: React.KeyboardEvent, path: string) => {
@@ -45,14 +49,14 @@ const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(({
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         role="navigation"
-        aria-label="Mobile navigation menu"
+        aria-label={t('a11y.mobileNavigationMenu')}
       >
         <div className="drawer-header">
-          <h2>Navigation</h2>
+          <h2>{t('nav.navigation')}</h2>
           <button 
             className="close-btn"
             onClick={onClose}
-            aria-label="Close navigation menu"
+            aria-label={t('a11y.closeNavigationMenu')}
           >
             ✕
           </button>
