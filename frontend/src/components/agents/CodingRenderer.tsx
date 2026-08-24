@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { CodingResult } from '../../types/agent';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 const CodingRenderer: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const details = getCodeDetails(result);
   const [copied, setCopied] = useState(false);
 
@@ -26,7 +28,7 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           border: '1px dashed rgba(255, 255, 255, 0.1)',
         }}
       >
-        No code output available.
+        {t('agent.coding.empty')}
       </div>
     );
   }
@@ -74,7 +76,7 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           outline: 'none',
         }}
       >
-        {copied ? '✓ Copied!' : 'Copy Code'}
+        {copied ? t('agent.coding.copied') : t('agent.coding.copyCode')}
       </button>
       <SyntaxHighlighter
         language={details.language}

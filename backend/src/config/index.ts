@@ -39,6 +39,12 @@ const envSchema = z.object({
   HEARTBEAT_STALE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(5),
   /** Hours an offline agent is kept before permanent cleanup. Default: 24. */
   AGENT_OFFLINE_DELETE_HOURS: z.coerce.number().int().positive().default(24),
+
+  // ── Payment reconciliation ──────────────────────────────────────────────────
+  /** Optional webhook URL that receives reconciliation discrepancy alerts. */
+  RECONCILIATION_WEBHOOK_URL: z.string().url().optional(),
+  /** Automated reconciliation interval in milliseconds. Default: 86 400 000 (daily). */
+  RECONCILIATION_INTERVAL_MS: z.coerce.number().int().positive().default(86_400_000),
 });
 
 

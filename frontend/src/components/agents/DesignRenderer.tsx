@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { DesignResult, ComponentNode } from '../../types/agent';
 import { getDesignDetails } from '../../utils/agentUtils';
 import { useLightbox } from '../../hooks/useLightbox';
@@ -75,6 +76,7 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
 };
 
 const DesignRenderer: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const details = getDesignDetails(result);
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
   const lightbox = useLightbox();
@@ -93,7 +95,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
           border: '1px dashed rgba(255, 255, 255, 0.1)',
         }}
       >
-        No design output available.
+        {t('agent.design.empty')}
       </div>
     );
   }
@@ -114,7 +116,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
       {details.images.length > 0 && (
         <div style={{ marginBottom: '32px' }} data-testid="design-images-gallery">
           <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>
-            Design Outputs & Wireframes ({details.images.length})
+            {t('agent.design.outputsTitle', { total: details.images.length })}
           </h4>
           <div
             style={{
@@ -152,7 +154,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
                 <div style={{ position: 'relative', height: '160px', overflow: 'hidden', backgroundColor: '#000' }}>
                   <img
                     src={img.url}
-                    alt={img.alt || img.title || `Design output ${idx + 1}`}
+                    alt={img.alt || img.title || t('a11y.designOutput', { index: idx + 1 })}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                   <div
@@ -172,7 +174,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
                     }}
                   >
                     <Maximize2 size={12} />
-                    <span>Expand</span>
+                    <span>{t('common.expand')}</span>
                   </div>
                 </div>
                 {img.title && (
@@ -189,7 +191,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
       {/* Color Palette Swatches */}
       {details.colors.length > 0 && (
         <div style={{ marginBottom: '32px' }}>
-          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>Color Palette Swatches</h4>
+          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('agent.design.colorPalette')}</h4>
           <div
             style={{
               display: 'grid',
@@ -237,7 +239,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
                     {nameVal}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: isCopied ? '#10b981' : 'var(--text-secondary)', marginTop: '2px', fontFamily: 'monospace' }}>
-                    {isCopied ? 'Copied!' : hexVal}
+                    {isCopied ? t('agent.design.copied') : hexVal}
                   </div>
                 </div>
               );
@@ -249,7 +251,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
       {/* Collapsible Component Hierarchy Tree */}
       {details.hierarchy && (
         <div>
-          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>Component Hierarchy Tree</h4>
+          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('agent.design.hierarchy')}</h4>
           <div
             style={{
               padding: '16px',

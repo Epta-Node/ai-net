@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -48,13 +49,15 @@ export function useToast() {
 }
 
 function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
+  const { t } = useTranslation();
+
   if (toasts.length === 0) return null;
   return (
     <div className="toast-container" role="alert" aria-live="polite">
       {toasts.map(toast => (
         <div key={toast.id} className={`toast toast-${toast.type}`}>
           <span>{toast.message}</span>
-          <button onClick={() => onDismiss(toast.id)} aria-label="Dismiss">&times;</button>
+          <button onClick={() => onDismiss(toast.id)} aria-label={t('a11y.dismiss')}>&times;</button>
         </div>
       ))}
     </div>

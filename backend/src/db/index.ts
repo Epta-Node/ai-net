@@ -65,6 +65,8 @@ export interface PaymentDb {
   insert(record: PaymentRecord): void;
   findByKey(taskId: string, nodeId: string): PaymentRecord | undefined;
   updateStatus(taskId: string, nodeId: string, status: PaymentStatus, txHash: string): void;
+  /** All payment records — used by payment reconciliation. */
+  listAll(): PaymentRecord[];
 }
 
 export function createPaymentDb(db: Database.Database): PaymentDb {
@@ -99,6 +101,18 @@ export function createPaymentDb(db: Database.Database): PaymentDb {
       db.prepare(
         "UPDATE payments SET status = ?, txHash = ? WHERE taskId = ? AND nodeId = ?"
       ).run(status, txHash, taskId, nodeId);
+    },
+
+    listAll(): PaymentRecord[] {
+      const rows = db.prepare("SELECT * FROM payments").all() as Array<Record<string, unknown>>;
+      return rows.map((row) => ({
+        taskId: row.taskId as string,
+        nodeId: row.nodeId as string,
+        balanceId: row.balanceId as string,
+        status: row.status as PaymentStatus,
+        amountStroops: BigInt(row.amountStroops as string),
+        txHash: row.txHash as string | null,
+      }));
     },
   };
 }

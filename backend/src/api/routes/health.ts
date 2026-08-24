@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { getConfig } from "../../config";
+import { tracingService } from "../../services/tracing";
 
 const router = Router();
 
@@ -120,6 +121,55 @@ router.get("/ready", async (_req: Request, res: Response) => {
 
   const allOk = Object.values(checks).every((status) => status === "ok");
   res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
+});
+
+/**
+ * @openapi
+ * /health/traces/{correlationId}:
+ *   get:
+ *     summary: Retrieve distributed trace by correlation ID
+ *     operationId: getTrace
+ *     description: >
+ *       Returns the in-memory trace for the given correlation ID, including all
+ *       recorded spans with their timestamps, durations, and statuses.
+ *       Returns 404 when no spans have been recorded for the ID.
+ *     tags: [Health]
+ *     security: []
+ *     parameters:
+ *       - in: path
+ *         name: correlationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The UUID v4 correlation ID propagated via X-Correlation-ID header
+ *     responses:
+ *       200:
+ *         description: Trace found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 correlationId:
+ *                   type: string
+ *                 spans:
+ *                   type: array
+ *                 startedAt:
+ *                   type: string
+ *                 endedAt:
+ *                   type: string
+ *                 totalDurationMs:
+ *                   type: number
+ *       404:
+ *         description: No trace found for the given correlation ID
+ */
+router.get("/traces/:correlationId", (req: Request, res: Response) => {
+  const trace = tracingService.getTrace(req.params.correlationId);
+  if (!trace) {
+    res.status(404).json({ error: "Trace not found", correlationId: req.params.correlationId });
+    return;
+  }
+  res.json(trace);
 });
 
 async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ResearchReportResult } from '../../types/agent';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const markdown = getMarkdown(result);
 
   if (!markdown) {
@@ -25,7 +27,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
           border: '1px dashed rgba(255, 255, 255, 0.1)',
         }}
       >
-        No research output available.
+        {t('agent.research.empty')}
       </div>
     );
   }

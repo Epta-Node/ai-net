@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -7,18 +8,9 @@ import {
 } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
 
-const navItems = [
-  { label: 'Dashboard', icon: <LayoutDashboard size={16} />, route: '/dashboard' },
-  { label: 'Tasks', icon: <ClipboardList size={16} />, route: '/tasks/new' },
-  { label: 'Agents', icon: <Bot size={16} />, route: '/agents' },
-  { label: 'Builder', icon: <Hammer size={16} />, route: '#' },
-  { label: 'Register', icon: <UserPlus size={16} />, route: '#' },
-  { label: 'Payments', icon: <CreditCard size={16} />, route: '/wallet' },
-  { label: 'Settings', icon: <Settings size={16} />, route: '#' },
-]
-
 const Navbar: React.FC = () => {
   const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
@@ -62,6 +54,16 @@ const Navbar: React.FC = () => {
     navigate(route)
   }
 
+  const navItems = [
+    { label: t('nav.dashboard'), icon: <LayoutDashboard size={16} />, route: '/dashboard' },
+    { label: t('nav.tasks'), icon: <ClipboardList size={16} />, route: '/tasks/new' },
+    { label: t('nav.agents'), icon: <Bot size={16} />, route: '/agents' },
+    { label: t('nav.builder'), icon: <Hammer size={16} />, route: '#' },
+    { label: t('nav.register'), icon: <UserPlus size={16} />, route: '#' },
+    { label: t('nav.payments'), icon: <CreditCard size={16} />, route: '/wallet' },
+    { label: t('nav.settings'), icon: <Settings size={16} />, route: '#' },
+  ]
+
   return (
     <>
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80 shadow-[0_1px_0_rgba(255,255,255,0.02)]">
@@ -71,7 +73,7 @@ const Navbar: React.FC = () => {
             whileTap={{ scale: 0.9 }}
             className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary/60 hover:text-text-primary hover:bg-background-surface/80 transition-colors"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label="Toggle mobile menu"
+            aria-label={t('a11y.toggleMobileMenu')}
           >
             <motion.div
               animate={{ rotate: mobileMenuOpen ? 90 : 0 }}
@@ -112,7 +114,7 @@ const Navbar: React.FC = () => {
                   setMobileSearchOpen(true)
                 }
               }}
-              placeholder="Search agents, tasks..."
+              placeholder={t('common.searchPlaceholder')}
               className="flex-1 bg-transparent pl-0 pr-0 text-[12.5px] text-text-primary placeholder:text-text-secondary/25 outline-none min-w-0 tracking-wide"
             />
             <div className="flex items-center pr-2 pl-1">
@@ -133,7 +135,7 @@ const Navbar: React.FC = () => {
               <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
             </span>
             <span className="text-[11px] font-medium text-text-secondary/70 tracking-wide">
-              Stellar Testnet
+              {t('landing.navbar.network')}
             </span>
           </div>
 
@@ -142,7 +144,7 @@ const Navbar: React.FC = () => {
             whileTap={{ scale: 0.9 }}
             className="sm:hidden flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary/50 hover:text-text-primary hover:bg-background-surface/80 transition-colors"
             onClick={() => setMobileSearchOpen(!mobileSearchOpen)}
-            aria-label="Search"
+            aria-label={t('a11y.search')}
           >
             <Search size={15} />
           </motion.button>
@@ -158,13 +160,13 @@ const Navbar: React.FC = () => {
               </span>
               {connectionMethod && (
                 <span className="text-[9px] font-medium text-text-secondary/50 tracking-wide mx-1 hidden sm:inline">
-                  {connectionMethod === 'freighter' ? 'Freighter' : 'Secret Key'}
+                  {connectionMethod === 'freighter' ? t('wallet.freighter') : t('wallet.secretKey')}
                 </span>
               )}
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={copyToClipboard}
-                aria-label="Copy public key"
+                aria-label={t('a11y.copyPublicKey')}
                 className="flex items-center justify-center w-5 h-5 rounded text-text-secondary/40 hover:text-text-primary hover:bg-background-surface/80 transition-colors"
               >
                 <Copy size={10} />
@@ -172,7 +174,7 @@ const Navbar: React.FC = () => {
               <motion.button
                 whileTap={{ scale: 0.9 }}
                 onClick={disconnect}
-                aria-label="Disconnect wallet"
+                aria-label={t('a11y.disconnectWallet')}
                 className="flex items-center justify-center w-5 h-5 rounded text-text-secondary/40 hover:text-red-400/80 hover:bg-background-surface/80 transition-colors"
               >
                 <ExternalLink size={10} />
@@ -187,7 +189,7 @@ const Navbar: React.FC = () => {
             >
               <Wallet size={12} className="text-accent-cyan/80 group-hover:text-accent-cyan group-hover:scale-110 transition-all" />
               <span className="text-[11px] font-medium text-text-secondary/60 group-hover:text-text-primary/90 transition-colors hidden sm:inline">
-                Connect
+                {t('landing.navbar.connect')}
               </span>
             </motion.button>
           )}
@@ -209,14 +211,14 @@ const Navbar: React.FC = () => {
               <input
                 ref={mobileSearchRef}
                 type="text"
-                placeholder="Search agents, tasks..."
+                placeholder={t('common.searchPlaceholder')}
                 onKeyDown={(e) => e.key === 'Escape' && setMobileSearchOpen(false)}
                 className="flex-1 bg-transparent pl-2 pr-2 text-[13px] text-text-primary placeholder:text-text-secondary/25 outline-none min-w-0"
               />
               <button
                 onClick={() => setMobileSearchOpen(false)}
                 className="flex items-center justify-center mr-2 text-text-secondary/30 hover:text-text-primary transition-colors"
-                aria-label="Close search"
+                aria-label={t('a11y.closeSearch')}
               >
                 <X size={14} />
               </button>
@@ -258,7 +260,7 @@ const Navbar: React.FC = () => {
                     ai-net
                   </span>
                   <span className="text-[9px] text-text-secondary/50 tracking-[0.05em]">
-                    Agent Network
+                    {t('landing.navbar.agentNetwork')}
                   </span>
                 </div>
               </div>

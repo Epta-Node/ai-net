@@ -1,7 +1,10 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 export const NotFoundPage: React.FC = () => {
+    const { t } = useTranslation();
+
     return (
         <div style={{
             display: 'flex',
@@ -21,7 +24,7 @@ export const NotFoundPage: React.FC = () => {
                 marginBottom: '1rem',
                 color: 'var(--text-primary)'
             }}>
-            404 — Page Not Found
+            {t('page.notFound.title')}
             </h1>
 
             <p style={{
@@ -31,7 +34,7 @@ export const NotFoundPage: React.FC = () => {
                 marginBottom: '2rem',
                 lineHeight: '1.5'
             }}>
-            The page you are looking for does not exist or has been moved.
+            {t('page.notFound.body')}
             </p>
 
             <div style={{
@@ -51,7 +54,7 @@ export const NotFoundPage: React.FC = () => {
                 textDecoration: 'none',
                 display: 'inline-block'
             }}>
-            Go to Dashboard
+            {t('page.notFound.goDashboard')}
             </Link>
 
             <Link to="/" style={{
@@ -65,7 +68,7 @@ export const NotFoundPage: React.FC = () => {
                 textDecoration: 'none',
                 display: 'inline-block'
             }}>
-            Go Home
+            {t('page.notFound.goHome')}
             </Link>
         </div>
     </div>

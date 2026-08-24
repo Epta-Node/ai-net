@@ -325,6 +325,42 @@
   gap: 24px;
 }
 
+/* Page skeleton */
+.balanceCardSkeleton {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 28px;
+  margin-bottom: 32px;
+}
+
+.balanceSkeletonSection {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.publicKeySkeleton {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.publicKeySkeletonDetails {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.panelSkeleton {
+  min-height: 240px;
+}
+
 .sendSection {
   min-width: 0;
 }

@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ExternalLink, X } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import { ReputationStars } from './ReputationStars'
@@ -12,7 +13,9 @@ interface AgentDetailModalProps {
   inline?: boolean
 }
 
-export function AgentDetailModal({ agent, onClose, inline = false }: AgentDetailModalProps) {
+export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
+  const { t } = useTranslation()
+
   useEffect(() => {
     if (!agent || inline) return
     const onKey = (e: KeyboardEvent) => {
@@ -26,9 +29,11 @@ export function AgentDetailModal({ agent, onClose, inline = false }: AgentDetail
 
   const content = (
     <div
-      className={styles.modal}
-      onClick={(e) => e.stopPropagation()}
-      data-testid="agent-detail-modal"
+      className={styles.overlay}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('a11y.detailsFor', { name: agent.name })}
     >
       <header className={styles.header}>
         <div>
@@ -42,58 +47,53 @@ export function AgentDetailModal({ agent, onClose, inline = false }: AgentDetail
             type="button"
             className={styles.closeButton}
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <X size={18} />
           </button>
         )}
       </header>
 
-      <dl className={styles.grid}>
-        <div className={styles.field}>
-          <dt>Status</dt>
-          <dd>
-            <span
-              className={`${styles.status} ${
-                agent.status === 'active' ? styles.statusActive : styles.statusInactive
-              }`}
-            >
-              {agent.status}
-            </span>
-          </dd>
-        </div>
+        <dl className={styles.grid}>
+          <div className={styles.field}>
+            <dt>{t('common.status')}</dt>
+            <dd>
+              <span
+                className={`${styles.status} ${
+                  agent.status === 'active' ? styles.statusActive : styles.statusInactive
+                }`}
+              >
+                {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
+              </span>
+            </dd>
+          </div>
 
-        <div className={styles.field}>
-          <dt>Price</dt>
-          <dd className={styles.value}>{agent.price.toFixed(2)} XLM</dd>
-        </div>
+          <div className={styles.field}>
+            <dt>{t('common.price')}</dt>
+            <dd className={styles.value}>{agent.price.toFixed(2)} XLM</dd>
+          </div>
 
-        <div className={styles.field}>
-          <dt>Reputation</dt>
-          <dd>
-            <ReputationStars value={agent.reputation} />
-          </dd>
-        </div>
-
-        <div className={styles.fieldWide}>
-          <dt>Capabilities</dt>
-          <dd className={styles.pills}>
-            {agent.capabilities.length === 0 ? (
-              <span className={styles.value}>—</span>
-            ) : (
-              agent.capabilities.map((cap) => (
-                <span key={cap} className={styles.pill}>
-                  {cap}
-                </span>
-              ))
-            )}
-          </dd>
-        </div>
+          <div className={styles.field}>
+            <dt>{t('common.reputation')}</dt>
+            <dd>
+              <ReputationStars value={agent.reputation} />
+            </dd>
+          </div>
 
         {agent.endpoint && (
           <div className={styles.fieldWide}>
-            <dt>Endpoint</dt>
-            <dd className={styles.mono}>{agent.endpoint}</dd>
+            <dt>{t('common.capabilities')}</dt>
+            <dd className={styles.pills}>
+              {agent.capabilities.length === 0 ? (
+                <span className={styles.value}>—</span>
+              ) : (
+                agent.capabilities.map((cap) => (
+                  <span key={cap} className={styles.pill}>
+                    {cap}
+                  </span>
+                ))
+              )}
+            </dd>
           </div>
         )}
 
@@ -120,19 +120,34 @@ export function AgentDetailModal({ agent, onClose, inline = false }: AgentDetail
     </div>
   )
 
-  if (inline) {
-    return <div className={styles.inlineContainer}>{content}</div>
-  }
+          {agent.endpoint && (
+            <div className={styles.fieldWide}>
+              <dt>{t('agent.modal.endpoint')}</dt>
+              <dd className={styles.mono}>{agent.endpoint}</dd>
+            </div>
+          )}
 
-  return (
-    <div
-      className={styles.overlay}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Details for ${agent.name}`}
-    >
-      {content}
+          <div className={styles.fieldWide}>
+            <dt>{t('agent.modal.registrationTx')}</dt>
+            <dd>
+              {agent.registrationTxHash ? (
+                <a
+                  className={styles.txLink}
+                  href={`${STELLAR_EXPLORER}/tx/${agent.registrationTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="registration-tx-link"
+                >
+                  <span className={styles.mono}>{agent.registrationTxHash}</span>
+                  <ExternalLink size={14} aria-hidden="true" />
+                </a>
+              ) : (
+                <span className={styles.value}>{t('common.notAvailable')}</span>
+              )}
+            </dd>
+          </div>
+        </dl>
+      </div>
     </div>
   )
 }

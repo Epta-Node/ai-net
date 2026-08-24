@@ -23,6 +23,8 @@
   --success: var(--accent-green);
   --danger: #ef4444;
   --accent: var(--accent-cyan);
+  --skeleton-base: #1a1f2e;
+  --skeleton-shine: #2a3040;
 }
 
 * {
@@ -43,6 +45,26 @@ body {
 html, body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+/* Skeleton fade-in: transitions from skeleton to loaded content over 200ms. */
+.fade-in {
+  animation: skeletonFadeIn 200ms ease-in-out;
+}
+
+@keyframes skeletonFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    animation: none;
+  }
 }
 
 .glass-panel {

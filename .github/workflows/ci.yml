@@ -121,12 +121,12 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Cargo clippy
-        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry --all-targets -- -D warnings
+        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding --all-targets -- -D warnings
 
       # `--locked` keeps CI on the workspace lockfile resolution, which pins
       # ed25519-dalek to a version compatible with current stable Rust.
       - name: Cargo tests
-        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry
+        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding
 
       # Optimized Wasm builds for the deployable contracts.
       # (error-resolver is exercised natively above; its Wasm target is
@@ -136,6 +136,7 @@ jobs:
         run: |
           cargo build --locked -p agent-registry --target wasm32v1-none --release
           cargo build --locked -p error-registry --target wasm32v1-none --release
+          cargo build --locked -p agent-bidding --target wasm32v1-none --release
           ls -la target/wasm32v1-none/release/*.wasm
 
   e2e-fullstack:

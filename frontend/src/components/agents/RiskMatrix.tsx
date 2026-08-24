@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RiskItem, RiskResult } from '../../types/agent';
 import { getRisksList } from '../../utils/agentUtils';
 
@@ -29,6 +30,7 @@ const heatmapColors = {
 };
 
 const RiskMatrix: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const risks = getRisksList(result);
   const [hoveredRisk, setHoveredRisk] = useState<{ risk: RiskItem; cx: number; cy: number } | null>(null);
 
@@ -46,7 +48,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           border: '1px dashed rgba(255, 255, 255, 0.1)',
         }}
       >
-        No risk assessment available.
+        {t('agent.risk.empty')}
       </div>
     );
   }
@@ -175,7 +177,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           textAnchor="middle"
           style={{ fontWeight: 600, letterSpacing: '0.05em' }}
         >
-          Impact
+          {t('agent.risk.axisImpact')}
         </text>
 
         <text
@@ -187,7 +189,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           textAnchor="middle"
           style={{ fontWeight: 600, letterSpacing: '0.05em' }}
         >
-          Likelihood
+          {t('agent.risk.axisLikelihood')}
         </text>
 
         {/* Plotted Risk Dots */}
@@ -282,7 +284,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           </div>
           {hoveredRisk.risk.mitigations && hoveredRisk.risk.mitigations.length > 0 && (
             <div style={{ color: '#94a3b8', fontSize: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '4px', marginTop: '4px' }}>
-              <span style={{ fontWeight: 600, color: '#e2e8f0' }}>Mitigation: </span>
+              <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{t('agent.risk.mitigation')}</span>
               {hoveredRisk.risk.mitigations[0]}
             </div>
           )}

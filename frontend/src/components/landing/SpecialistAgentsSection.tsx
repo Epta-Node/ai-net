@@ -1,8 +1,12 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import AgentCard, { AgentData } from './AgentCard'
 import { Search, ShieldAlert, Code2, Paintbrush, FileText } from 'lucide-react'
 
+// Placeholder for the agent registry API. Names, types and descriptions are
+// data, not UI copy, so they stay untranslated -- same rule the agent registry
+// e2e specs rely on.
 const mockAgents: AgentData[] = [
   {
     id: '1',
@@ -52,6 +56,8 @@ const mockAgents: AgentData[] = [
 ]
 
 const SpecialistAgentsSection: React.FC = () => {
+  const { t } = useTranslation()
+
   return (
     <section className="px-4 max-w-[1000px] mx-auto pb-24">
       <motion.div
@@ -62,10 +68,10 @@ const SpecialistAgentsSection: React.FC = () => {
         transition={{ duration: 0.5 }}
       >
         <h2 className="text-[11px] font-bold text-text-secondary uppercase tracking-[0.2em] mb-2">
-          Specialist Agents Available Now
+          {t('landing.specialists.title')}
         </h2>
         <p className="text-sm text-text-secondary/60 max-w-[400px] mx-auto">
-          Choose from a growing roster of specialized AI agents ready to handle your tasks.
+          {t('landing.specialists.subtitle')}
         </p>
       </motion.div>
 

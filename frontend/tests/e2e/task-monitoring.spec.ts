@@ -29,7 +29,7 @@ test.describe('Task Monitoring', () => {
 
     // Wait for WebSocket connection status chip to show connected
     const statusChip = page.locator('#ws-status');
-    await expect(statusChip).toContainText('WS: connected');
+    await expect(statusChip).toHaveAttribute('data-ws-state', 'connected');
 
     // Find the research node (it starts as "running")
     const nodeResearch = page.locator('#node-research');
