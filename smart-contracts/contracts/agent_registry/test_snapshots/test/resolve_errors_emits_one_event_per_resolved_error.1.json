@@ -16,13 +16,13 @@
               "function_name": "report_error",
               "args": [
                 {
-                  "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
+                  "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
-                  "string": "a"
+                  "string": "t1"
                 }
               ]
             }
@@ -41,13 +41,38 @@
               "function_name": "report_error",
               "args": [
                 {
-                  "bytes": "1500000000000000000000000000000000000000000000000000000000000000"
+                  "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
-                  "string": "b"
+                  "string": "t2"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "report_error",
+              "args": [
+                {
+                  "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "string": "t3"
                 }
               ]
             }
@@ -68,7 +93,13 @@
                 {
                   "vec": [
                     {
-                      "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
+                      "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
+                    },
+                    {
+                      "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
+                    },
+                    {
+                      "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
                     }
                   ]
                 },
@@ -81,37 +112,7 @@
           "sub_invocations": []
         }
       ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "resolve_errors",
-              "args": [
-                {
-                  "vec": [
-                    {
-                      "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
-                    },
-                    {
-                      "bytes": "1500000000000000000000000000000000000000000000000000000000000000"
-                    }
-                  ]
-                },
-                {
-                  "u32": 2
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    []
+    ]
   ],
   "ledger": {
     "protocol_version": 22,
@@ -133,7 +134,7 @@
                   "symbol": "ErrorRecord"
                 },
                 {
-                  "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
+                  "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             },
@@ -153,7 +154,7 @@
                       "symbol": "ErrorRecord"
                     },
                     {
-                      "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
+                      "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
                     }
                   ]
                 },
@@ -165,7 +166,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "bytes": "1400000000000000000000000000000000000000000000000000000000000000"
+                        "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -173,7 +174,7 @@
                         "symbol": "message"
                       },
                       "val": {
-                        "string": "a"
+                        "string": "t1"
                       }
                     },
                     {
@@ -219,7 +220,7 @@
                   "symbol": "ErrorRecord"
                 },
                 {
-                  "bytes": "1500000000000000000000000000000000000000000000000000000000000000"
+                  "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             },
@@ -239,7 +240,7 @@
                       "symbol": "ErrorRecord"
                     },
                     {
-                      "bytes": "1500000000000000000000000000000000000000000000000000000000000000"
+                      "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
                     }
                   ]
                 },
@@ -251,7 +252,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "bytes": "1500000000000000000000000000000000000000000000000000000000000000"
+                        "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -259,7 +260,7 @@
                         "symbol": "message"
                       },
                       "val": {
-                        "string": "b"
+                        "string": "t2"
                       }
                     },
                     {
@@ -283,7 +284,93 @@
                         "symbol": "resolved"
                       },
                       "val": {
-                        "bool": false
+                        "bool": true
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          535680
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ErrorRecord"
+                },
+                {
+                  "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ErrorRecord"
+                    },
+                    {
+                      "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "id"
+                      },
+                      "val": {
+                        "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "message"
+                      },
+                      "val": {
+                        "string": "t3"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reporter"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "resolution"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "resolved"
+                      },
+                      "val": {
+                        "bool": true
                       }
                     }
                   ]
@@ -358,39 +445,6 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 1033654523790656264
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 1033654523790656264
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
                 "nonce": 4837995959683129791
               }
             },
@@ -440,6 +494,39 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 1033654523790656264
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 1033654523790656264
                   }
                 },
                 "durability": "temporary",
@@ -507,5 +594,126 @@
       ]
     ]
   },
-  "events": []
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "err_rslvd"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "error_id"
+                  },
+                  "val": {
+                    "bytes": "3200000000000000000000000000000000000000000000000000000000000000"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "resolution_code"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "err_rslvd"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "error_id"
+                  },
+                  "val": {
+                    "bytes": "3300000000000000000000000000000000000000000000000000000000000000"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "resolution_code"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "err_rslvd"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "error_id"
+                  },
+                  "val": {
+                    "bytes": "3400000000000000000000000000000000000000000000000000000000000000"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "resolution_code"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
 }
