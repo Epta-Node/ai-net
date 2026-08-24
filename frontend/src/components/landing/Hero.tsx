@@ -23,7 +23,6 @@ const itemVariants = {
 const Hero: React.FC = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const typedText = useTypingAnimation()
   const { canvasRef, prefersReducedMotion } = useParticles()
 
   return (

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
@@ -65,4 +65,20 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
       ))}
     </div>
   );
+}
+
+function useToastManager() {
+  const [activeToasts, setActiveToasts] = useState<Toast[]>([]);
+  const dismissToast = useCallback((id: string) => {
+    setActiveToasts(prev => prev.filter(toast => toast.id !== id));
+  }, []);
+  const showToast = useCallback((message: string, type: ToastType = 'info', action?: ToastAction, duration: number = 3000) => {
+    const id = Date.now().toString();
+    const newToast: Toast = { id, message, type, action, duration };
+    setActiveToasts(prev => [...prev, newToast]);
+    if (duration > 0) {
+      setTimeout(() => dismissToast(id), duration);
+    }
+  }, [dismissToast]);
+  return { activeToasts, showToast, dismissToast };
 }

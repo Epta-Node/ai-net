@@ -129,14 +129,6 @@ function WalletPage() {
     )
   }, [balance, balanceLoading, balanceError])
 
-  if (!hasCompletedWizard) {
-    return (
-      <div className={styles.page}>
-        <WalletWizard />
-      </div>
-    )
-  }
-
   if (!connected || !publicKey) {
     return (
       <div className={styles.page}>
