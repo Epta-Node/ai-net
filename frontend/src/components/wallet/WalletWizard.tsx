@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState } from 'react'
 import { Wallet, Download, CheckCircle, ExternalLink } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
@@ -10,7 +10,7 @@ import styles from './WalletWizard.module.css'
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
   const { balance } = useWalletBalance(publicKey)
-  const { currentStep, nextStep, prevStep, isFirstStep, isLastStep } = useOnboarding(4)
+  const { currentStep, nextStep, prevStep } = useOnboarding(4)
 
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)

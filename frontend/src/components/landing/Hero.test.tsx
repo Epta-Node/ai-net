@@ -1,15 +1,17 @@
-import React from 'react';
+// Remove the unused React default import
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Hero from './Hero';
 import { useTypingAnimation } from '../../hooks/useTypingAnimation';
 import { useParticles } from '../../hooks/useParticles';
+import { vi, describe, beforeEach, afterEach, it, expect } from 'vitest';
+import type { Mock } from 'vitest';
 
-jest.mock('../../hooks/useTypingAnimation');
-jest.mock('../../hooks/useParticles');
+vi.mock('../../hooks/useTypingAnimation');
+vi.mock('../../hooks/useParticles');
 
-const mockUseTypingAnimation = useTypingAnimation as jest.Mock;
-const mockUseParticles = useParticles as jest.Mock;
+const mockUseTypingAnimation = useTypingAnimation as unknown as Mock;
+const mockUseParticles = useParticles as unknown as Mock;
 
 describe('Hero Component', () => {
   beforeEach(() => {
@@ -21,7 +23,7 @@ describe('Hero Component', () => {
   });
 
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   const renderComponent = () => {

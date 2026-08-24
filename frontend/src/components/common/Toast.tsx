@@ -33,7 +33,7 @@ export function ToastItem({ toast, onDismiss }: { toast: ToastType; onDismiss: (
       drag="x"
       dragConstraints={{ left: 0, right: 0 }}
       dragElastic={{ left: 0, right: 1 }}
-      onDragEnd={(e, { offset, velocity }) => {
+      onDragEnd={(_, { offset, velocity }) => {
         if (offset.x > 100 || velocity.x > 500) {
           onDismiss(toast.id);
         }

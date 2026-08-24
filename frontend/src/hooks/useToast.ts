@@ -3,7 +3,7 @@ import { Toast, ToastType, ToastAction } from '../context/ToastContext';
 
 export function useToastManager() {
   const [activeToasts, setActiveToasts] = useState<Toast[]>([]);
-  const [queue, setQueue] = useState<Toast[]>([]);
+  const [, setQueue] = useState<Toast[]>([]);
   const MAX_VISIBLE = 3;
 
   const dismissToast = useCallback((id: string) => {
