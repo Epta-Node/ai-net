@@ -75,7 +75,12 @@ function useToastManager() {
   const showToast = useCallback((message: string, type: ToastType = 'info', action?: ToastAction, duration: number = 3000) => {
     const id = Date.now().toString();
     const newToast: Toast = { id, message, type, action, duration };
-    setActiveToasts(prev => [...prev, newToast]);
+    setActiveToasts(prev => {
+      if (prev.length >= 3) {
+        return [...prev.slice(1), newToast];
+      }
+      return [...prev, newToast];
+    });
     if (duration > 0) {
       setTimeout(() => dismissToast(id), duration);
     }

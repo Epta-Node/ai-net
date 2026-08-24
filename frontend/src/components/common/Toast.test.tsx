@@ -45,19 +45,19 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Success'));
-    expect(screen.getByText('Success!')).toBeInTheDocument();
+    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
 
     // Success auto-dismisses in 5s
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4900);
     });
-    expect(screen.getByText('Success!')).toBeInTheDocument();
+    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
     });
     await waitFor(() => {
-      expect(screen.queryByText('Success!')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Success!/)).not.toBeInTheDocument();
     });
   });
 
@@ -69,12 +69,12 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Error'));
-    expect(screen.getByText('Error msg')).toBeInTheDocument();
+    expect(screen.queryByText(/Error msg/)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
-    expect(screen.getByText('Error msg')).toBeInTheDocument();
+    expect(screen.queryByText(/Error msg/)).toBeInTheDocument();
   });
 
   it('pauses auto-dismiss on hover', async () => {
@@ -85,7 +85,7 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Success'));
-    const toastMessage = screen.getByText('Success!');
+    const toastMessage = screen.getByText(/Success!/);
 
     // Hover over the toast
     fireEvent.mouseEnter(toastMessage.parentElement!);
@@ -95,7 +95,7 @@ describe('Toast behavior', () => {
     });
     
     // Should still be there because of hover
-    expect(screen.getByText('Success!')).toBeInTheDocument();
+    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
 
     // Mouse leave
     fireEvent.mouseLeave(toastMessage.parentElement!);
@@ -105,7 +105,7 @@ describe('Toast behavior', () => {
       await vi.advanceTimersByTimeAsync(5100);
     });
     await waitFor(() => {
-      expect(screen.queryByText('Success!')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Success!/)).not.toBeInTheDocument();
     });
   });
 
@@ -124,7 +124,7 @@ describe('Toast behavior', () => {
 
     // The oldest one should be dismissed to make room for the 4th
     await waitFor(() => {
-      const errorToasts = screen.getAllByText('Error msg');
+      const errorToasts = screen.getAllByText(/Error msg/);
       expect(errorToasts).toHaveLength(3);
     });
   });
@@ -137,16 +137,16 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Action'));
-    expect(screen.getByText('Action required')).toBeInTheDocument();
+    expect(screen.queryByText(/Action required/)).toBeInTheDocument();
 
-    const retryBtn = screen.getByText('Retry');
+    const retryBtn = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryBtn);
 
     expect(screen.getByTestId('retry-count')).toHaveTextContent('1');
     
     // Toast should dismiss after action is clicked
     await waitFor(() => {
-      expect(screen.queryByText('Action required')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Action required/)).not.toBeInTheDocument();
     });
   });
 });

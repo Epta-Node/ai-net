@@ -3,6 +3,7 @@ import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Sparkles, ArrowRight } from 'lucide-react'
+import { useTypingAnimation } from '../../hooks/useTypingAnimation'
 import { useParticles } from '../../hooks/useParticles'
 import styles from './Hero.module.css'
 
@@ -22,6 +23,7 @@ const itemVariants = {
 const Hero: React.FC = () => {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const typedText = useTypingAnimation()
   const { canvasRef, prefersReducedMotion } = useParticles()
 
   return (
@@ -66,7 +68,9 @@ const Hero: React.FC = () => {
           i18nKey="landing.hero.headline"
           components={[
             <br key="break" />,
-            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary" />,
+            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary">
+              {typedText || '\u00A0'}
+            </span>,
           ]}
         />
       </motion.h1>

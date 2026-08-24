@@ -36,7 +36,7 @@ describe('Hero Component', () => {
 
   it('renders typing animation text', () => {
     renderComponent();
-    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText(/Research/i)).toBeInTheDocument();
   });
 
   it('renders canvas when prefersReducedMotion is false', () => {
@@ -56,7 +56,7 @@ describe('Hero Component', () => {
     expect(canvas).not.toBeInTheDocument();
     
     // Fallback div should be rendered (we check by class or element type if specific)
-    const fallbackDiv = container.querySelector('.staticGradient');
-    expect(fallbackDiv).toBeInTheDocument();
+    const fallbackDiv = container.querySelector('div[class*="staticGradient"]');
+    expect(fallbackDiv).toBeTruthy();
   });
 });
