@@ -71,6 +71,9 @@ function makeDb(initial?: PaymentRecord): PaymentDb {
       const r = store.get(`${taskId}:${nodeId}`);
       if (r) { r.status = status; r.txHash = txHash; }
     },
+    listAll(): PaymentRecord[] {
+      return [...store.values()].map((r) => ({ ...r }));
+    },
   };
 }
 

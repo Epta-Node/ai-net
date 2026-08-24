@@ -1,0 +1,529 @@
+/* ─── Timeline container ─────────────────────────────────────────── */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ─── Date bucket separator ─────────────────────────────────────── */
+
+.dateBucket {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0 8px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* slight backdrop so it doesn't clash with cards when scrolling */
+  background: var(--bg-primary);
+}
+
+.dateBucketLine {
+  flex: 1;
+  height: 1px;
+  background: var(--panel-border);
+}
+
+.dateBucketLabel {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+/* ─── Entry layout ──────────────────────────────────────────────── */
+
+.entry {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 0 12px;
+  padding: 6px 0;
+  transition: opacity 0.15s;
+}
+
+.entry[aria-selected='true'] .card {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18);
+}
+
+.entryFailed .card {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ─── Connector (dot + line) ──────────────────────────────────────  */
+
+.connectorArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 14px;
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  z-index: 1;
+  border: 2px solid transparent;
+  transition: box-shadow 0.15s;
+}
+
+.dotPending {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.dotRunning {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #818cf8;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.dotCompleted {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.dotFailed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+.dotSkeleton {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--panel-border);
+}
+
+.line {
+  flex: 1;
+  width: 2px;
+  min-height: 16px;
+  background: var(--panel-border);
+  margin-top: 4px;
+}
+
+/* Hide the line on the very last entry in each group */
+.entry:last-child .line {
+  display: none;
+}
+
+/* ─── Card ─────────────────────────────────────────────────────────  */
+
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  cursor: default;
+  min-width: 0;
+}
+
+.card:hover {
+  border-color: rgba(139, 92, 246, 0.25);
+}
+
+/* ─── Card header ───────────────────────────────────────────────── */
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cardHeaderLeft {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cardHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ─── Select button ─────────────────────────────────────────────── */
+
+.selectBtn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+  margin-top: 2px;
+  transition: border-color 0.15s, background 0.15s;
+  cursor: pointer;
+  padding: 0;
+}
+
+.selectBtn:hover {
+  border-color: var(--primary);
+  background: rgba(139, 92, 246, 0.12);
+  transform: none;
+  box-shadow: none;
+}
+
+.selectBtnActive {
+  border-color: var(--primary);
+  background: rgba(139, 92, 246, 0.3);
+}
+
+.selectIndex {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: #c7d2fe;
+}
+
+.selectEmpty {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: transparent;
+}
+
+/* ─── Task title / prompt ──────────────────────────────────────── */
+
+.taskTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.taskPrompt {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.taskId {
+  font-size: 0.68rem;
+  font-family: ui-monospace, 'Fira Code', monospace;
+  color: var(--text-secondary);
+}
+
+/* ─── Status badge ──────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+.badgePending {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+}
+
+.badgeRunning {
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  color: #818cf8;
+}
+
+.badgeCompleted {
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+.badgeFailed {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+/* ─── Date / time labels ────────────────────────────────────────── */
+
+.dateLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.timeLabel {
+  opacity: 0.6;
+}
+
+/* ─── Detail link ───────────────────────────────────────────────── */
+
+.detailBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  box-shadow: none;
+  transition: color 0.15s, background 0.15s;
+  padding: 0;
+}
+
+.detailBtn:hover {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.3);
+  transform: none;
+  box-shadow: none;
+}
+
+/* ─── Execution bar ─────────────────────────────────────────────── */
+
+.execBar {
+  display: flex;
+  height: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0 8px;
+  background: var(--panel-border);
+  gap: 1px;
+}
+
+.execSegment {
+  flex: 1;
+  border-radius: 2px;
+  transition: opacity 0.2s;
+}
+
+.execSegmentPending { background: rgba(245, 158, 11, 0.35); }
+.execSegmentRunning {
+  background: #6366f1;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+.execSegmentCompleted { background: #10b981; }
+.execSegmentFailed { background: #ef4444; }
+
+/* ─── Meta row ──────────────────────────────────────────────────── */
+
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agentIcons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.agentBadge {
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+
+.stats {
+  display: flex;
+  gap: 12px;
+}
+
+.stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ─── Error section ─────────────────────────────────────────────── */
+
+.errorSection {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.errorToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: #f87171;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.errorToggle:hover {
+  color: #fca5a5;
+  transform: none;
+  box-shadow: none;
+}
+
+.errorIcon {
+  color: #ef4444;
+}
+
+.errorDetails {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.errorItem {
+  display: flex;
+  gap: 8px;
+  font-size: 0.75rem;
+  background: rgba(239, 68, 68, 0.06);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.errorNodeId {
+  font-weight: 700;
+  font-family: monospace;
+  color: #fca5a5;
+  white-space: nowrap;
+  text-transform: capitalize;
+  flex-shrink: 0;
+}
+
+.errorMsg {
+  color: #fecaca;
+  word-break: break-word;
+}
+
+/* ─── Empty state ───────────────────────────────────────────────── */
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+  gap: 10px;
+}
+
+.emptyIcon {
+  color: var(--text-secondary);
+  opacity: 0.3;
+}
+
+.emptyTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.emptySubtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  max-width: 340px;
+}
+
+/* ─── Skeleton ──────────────────────────────────────────────────── */
+
+.skeletonCard {
+  pointer-events: none;
+}
+
+.skeletonLine {
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ─── Animations ────────────────────────────────────────────────── */
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(99, 102, 241, 0.3); }
+  50%       { box-shadow: 0 0 16px rgba(99, 102, 241, 0.6); }
+}
+
+@keyframes shimmer {
+  0%   { opacity: 0.6; }
+  50%  { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ─── Responsive ────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .entry {
+    grid-template-columns: 28px 1fr;
+    gap: 0 8px;
+  }
+
+  .dot {
+    width: 22px;
+    height: 22px;
+    font-size: 10px;
+  }
+
+  .cardHeaderRight {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+  }
+
+  .taskPrompt {
+    font-size: 0.8rem;
+  }
+
+  .stats {
+    gap: 8px;
+  }
+}

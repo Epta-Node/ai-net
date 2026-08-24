@@ -118,16 +118,13 @@ export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentR
   // POST /api/tasks — rate-limited, then Zod-validated
   tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
     const { prompt } = req.body as z.infer<typeof createTaskSchema>;
-    // Body first, then the header, then "anonymous" — the precedence the
-    // previous app.ts handler used.
+    // Body first, then the header (both spellings accepted), then "anonymous".
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
 
     // ── Per-wallet daily quota ───────────────────────────────────────────────
-    // Reject early if the wallet has already hit its 24-hour task ceiling.
-    // This prevents a single wallet from exhausting the Venice AI token budget.
     if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
       const db = createTaskDb(getTaskDb());
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();

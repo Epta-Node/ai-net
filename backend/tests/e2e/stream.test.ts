@@ -34,7 +34,7 @@ import type { AgentResult } from '../../src/agents/research/types';
 // yields the full 5-node DAG this suite is built around.
 const PROMPT =
   'Generate a market-entry report for solar energy in Southeast Asia, including software implementation and UI design';
-const OWNER = 'GOWNERWALLETPUBLICKEY';
+const OWNER = 'GOWNERWALLETTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK';
 const NODE_IDS = ['node_research', 'node_risk', 'node_coding', 'node_design', 'node_report'];
 
 const mockReleasePayment: PaymentReleaseFn = async (_taskId, nodeId) => `fakehash_${nodeId}`;
@@ -210,7 +210,7 @@ describe('WebSocket task stream', () => {
 
   it('closes with a 403 close frame for a non-owner walletPublicKey', async () => {
     const taskId = await createTaskFor(OWNER);
-    const { closed } = connect(taskId, 'GIMPOSTERWALLETPUBLICKEY');
+    const { closed } = connect(taskId, 'GIMPOSTERTEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ');
     const { code } = await closed;
     expect(code).toBe(WS_CLOSE.FORBIDDEN);
   }, 10_000);

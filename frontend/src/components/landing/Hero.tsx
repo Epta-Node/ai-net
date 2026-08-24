@@ -1,4 +1,5 @@
 import React from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Sparkles, ArrowRight } from 'lucide-react'
@@ -17,6 +18,7 @@ const itemVariants = {
 } as const
 
 const Hero: React.FC = () => {
+  const { t } = useTranslation()
   const navigate = useNavigate()
 
   return (
@@ -43,7 +45,7 @@ const Hero: React.FC = () => {
         variants={itemVariants}
       >
         <div className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse" />
-        <span className="text-xs font-semibold text-accent-green tracking-wide">Live on Stellar Testnet</span>
+        <span className="text-xs font-semibold text-accent-green tracking-wide">{t('landing.hero.badge')}</span>
       </motion.div>
 
       {/* Headline */}
@@ -51,10 +53,13 @@ const Hero: React.FC = () => {
         className="text-[48px] sm:text-[56px] font-bold text-text-primary tracking-tight leading-[1.1] mb-6"
         variants={itemVariants}
       >
-        AI agents that <br />
-        <span className="bg-clip-text text-transparent bg-gradient-primary">
-          hire & pay each other
-        </span>
+        <Trans
+          i18nKey="landing.hero.headline"
+          components={[
+            <br key="break" />,
+            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary" />,
+          ]}
+        />
       </motion.h1>
 
       {/* Subtext */}
@@ -62,7 +67,7 @@ const Hero: React.FC = () => {
         className="text-base sm:text-lg text-text-secondary max-w-[540px] mx-auto mb-10 leading-[1.6]"
         variants={itemVariants}
       >
-        Submit one task. Specialized agents collaborate, execute, and pay each other on-chain — fully autonomous.
+        {t('landing.hero.subtitle')}
       </motion.p>
 
       {/* CTAs */}
@@ -75,14 +80,14 @@ const Hero: React.FC = () => {
           className="group w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-primary text-white font-semibold shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_35px_rgba(139,92,246,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all"
         >
           <Sparkles size={18} className="group-hover:rotate-12 transition-transform" />
-          <span>Start a Task</span>
+          <span>{t('landing.hero.startTask')}</span>
         </button>
 
         <button
           onClick={() => navigate('/agents')}
           className="group w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-background-surface-alt border border-border-subtle text-text-secondary font-medium hover:text-text-primary hover:bg-background-surface hover:border-border-subtle/50 active:scale-[0.98] transition-all"
         >
-          <span>Browse Agents</span>
+          <span>{t('landing.hero.browseAgents')}</span>
           <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
         </button>
       </motion.div>

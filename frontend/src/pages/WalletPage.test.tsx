@@ -19,6 +19,8 @@ let mockWalletState: {
   connect: typeof mockConnect
   connectFreighter: typeof mockConnectFreighter
   disconnect: typeof mockDisconnect
+  hasCompletedWizard: boolean
+  completeWizard: typeof vi.fn
 } = {
   publicKey: null as string | null,
   keypair: null as any,
@@ -29,6 +31,8 @@ let mockWalletState: {
   connect: mockConnect,
   connectFreighter: mockConnectFreighter,
   disconnect: mockDisconnect,
+  hasCompletedWizard: true,
+  completeWizard: vi.fn(),
 }
 
 vi.mock('../context/WalletContext', () => ({
@@ -80,6 +84,8 @@ beforeEach(() => {
     connect: mockConnect,
     connectFreighter: mockConnectFreighter,
     disconnect: mockDisconnect,
+    hasCompletedWizard: true,
+    completeWizard: vi.fn(),
   }
 })
 
@@ -127,6 +133,8 @@ describe('WalletPage - Connected State', () => {
       connect: mockConnect,
       connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
+      hasCompletedWizard: true,
+      completeWizard: vi.fn(),
     }
   })
 
@@ -198,6 +206,8 @@ describe('SendXLMForm Validation', () => {
       connect: mockConnect,
       connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
+      hasCompletedWizard: true,
+      completeWizard: vi.fn(),
     }
   })
 

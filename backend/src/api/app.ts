@@ -11,7 +11,7 @@ import { httpDispatch } from "../coordinator/dispatch";
 import type { AgentRegistry } from "../types/agent";
 import { getTask } from "../coordinator/taskStore";
 import { eventBus } from "../coordinator/eventBus";
-import { createEventStore, type EventStore } from "../coordinator/eventStore";
+import type { EventStore } from "../events/eventStore";
 import { attachTaskStream, type TaskStreamOptions } from "./routes/stream";
 import type { DAGNode } from "../types/task";
 import {
@@ -22,9 +22,11 @@ import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
+import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
 import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
+import { compressionMiddleware } from "./middleware/compression";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
 import { errorHandler } from "./middleware/errorHandler";
@@ -38,7 +40,14 @@ export interface AppOptions {
   dispatch?: DispatchFn;
   /** Called after each node completes; defaults to no-op (returns 'mock-hash') */
   releasePayment?: PaymentReleaseFn;
-  /** Event log for stream replay; defaults to an in-memory SQLite store */
+  /**
+   * Override the EventStore used for stream replay.  When omitted, the store
+   * owned by `eventBus` is used — which is the canonical single store that the
+   * EventBus persists to.  Only provide this in tests that need an isolated
+   * store; production code should leave it unset.
+   *
+   * @deprecated Pass a custom EventBus instance (with its own store) instead.
+   */
   eventStore?: EventStore;
   /** Heartbeat / auth timing for the WebSocket stream */
   stream?: TaskStreamOptions;
@@ -51,6 +60,10 @@ export interface AppOptions {
   enableHeartbeatCleanup?: boolean;
   /** Custom options for heartbeat cleanup service */
   heartbeatOptions?: HeartbeatServiceOptions;
+  /** Options for the payment reconciliation router */
+  reconciliation?: ReconciliationRouterOptions;
+  /** Disable response compression (useful in tests). Default: false. */
+  disableCompression?: boolean;
 }
 
 /**
@@ -86,6 +99,13 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestId);
   app.use(requestLogger);
 
+  // ── Response compression ────────────────────────────────────────────────────
+  // Applied early so that all downstream route handlers benefit automatically.
+  // Disabled in tests (disableCompression: true) to keep assertions simple.
+  if (!opts.disableCompression && process.env.NODE_ENV !== "test") {
+    app.use(...compressionMiddleware());
+  }
+
   const dispatch: DispatchFn = opts.dispatch ?? makeHttpDispatch(opts.agentRegistry);
   const releasePayment: PaymentReleaseFn =
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
@@ -117,17 +137,19 @@ export function createApp(opts: AppOptions = {}): {
   // ── Task routes ────────────────────────────────────────────────────────────
   app.use("/api/tasks", createTasksRouter(dispatch, releasePayment));
 
+  // ── Payment reconciliation routes ──────────────────────────────────────────
+  app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
+
   // ── HTTP server ────────────────────────────────────────────────────────────
   const httpServer = createServer(app);
 
   // ── Event persistence ──────────────────────────────────────────────────────
-  // Record every Coordinator event (with its EventBus-assigned per-task seq) so
-  // a (re)connecting client can replay history before live streaming begins —
-  // either the full history, or only events past a `?lastEventId` cursor.
-  const eventStore = opts.eventStore ?? createEventStore();
-  const stopRecording = eventBus.subscribeAll((event) =>
-    eventStore.append(event),
-  );
+  // The EventBus already persists every event to its own EventStore (wired in
+  // the EventBus constructor).  We use that same store as the single canonical
+  // source for stream replay so there is exactly one DB and one writer.
+  // opts.eventStore is kept for backward compatibility with tests that inject
+  // a custom store; in production it will always be undefined here.
+  const eventStore = opts.eventStore ?? eventBus.store;
 
   // ── WebSocket: /tasks/:id/stream ───────────────────────────────────────────
   const detachStream = attachTaskStream({
@@ -144,8 +166,6 @@ export function createApp(opts: AppOptions = {}): {
   function close(callback?: () => void): void {
     heartbeatService.stop();
     detachStream();
-    stopRecording();
-    eventStore.close();
     httpServer.close(callback);
   }
 

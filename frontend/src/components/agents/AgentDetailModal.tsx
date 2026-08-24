@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ExternalLink, X } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import { ReputationStars } from './ReputationStars'
@@ -12,6 +13,8 @@ interface AgentDetailModalProps {
 }
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
+  const { t } = useTranslation()
+
   useEffect(() => {
     if (!agent) return
     const onKey = (e: KeyboardEvent) => {
@@ -29,7 +32,7 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`Details for ${agent.name}`}
+      aria-label={t('a11y.detailsFor', { name: agent.name })}
     >
       <div
         className={styles.modal}
@@ -47,7 +50,7 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
             type="button"
             className={styles.closeButton}
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('common.close')}
           >
             <X size={18} />
           </button>
@@ -55,32 +58,32 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
 
         <dl className={styles.grid}>
           <div className={styles.field}>
-            <dt>Status</dt>
+            <dt>{t('common.status')}</dt>
             <dd>
               <span
                 className={`${styles.status} ${
                   agent.status === 'active' ? styles.statusActive : styles.statusInactive
                 }`}
               >
-                {agent.status}
+                {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
               </span>
             </dd>
           </div>
 
           <div className={styles.field}>
-            <dt>Price</dt>
+            <dt>{t('common.price')}</dt>
             <dd className={styles.value}>{agent.price.toFixed(2)} XLM</dd>
           </div>
 
           <div className={styles.field}>
-            <dt>Reputation</dt>
+            <dt>{t('common.reputation')}</dt>
             <dd>
               <ReputationStars value={agent.reputation} />
             </dd>
           </div>
 
           <div className={styles.fieldWide}>
-            <dt>Capabilities</dt>
+            <dt>{t('common.capabilities')}</dt>
             <dd className={styles.pills}>
               {agent.capabilities.length === 0 ? (
                 <span className={styles.value}>—</span>
@@ -96,13 +99,13 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
 
           {agent.endpoint && (
             <div className={styles.fieldWide}>
-              <dt>Endpoint</dt>
+              <dt>{t('agent.modal.endpoint')}</dt>
               <dd className={styles.mono}>{agent.endpoint}</dd>
             </div>
           )}
 
           <div className={styles.fieldWide}>
-            <dt>Registration Transaction</dt>
+            <dt>{t('agent.modal.registrationTx')}</dt>
             <dd>
               {agent.registrationTxHash ? (
                 <a
@@ -116,7 +119,7 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
               ) : (
-                <span className={styles.value}>Not available</span>
+                <span className={styles.value}>{t('common.notAvailable')}</span>
               )}
             </dd>
           </div>

@@ -70,10 +70,10 @@ describe('AgentsPage - rendering', () => {
     expect(screen.getByTestId('agent-row-agent-audit-003')).toBeInTheDocument()
   })
 
-  it('shows a 5-row skeleton while loading', () => {
+  it('shows the dedicated page skeleton while loading', () => {
     getAgents.mockReturnValue(new Promise(() => {})) // never resolves
     renderPage()
-    expect(screen.getAllByTestId('agent-skeleton-row')).toHaveLength(5)
+    expect(screen.getByTestId('agents-page-skeleton')).toBeInTheDocument()
   })
 
   it('renders the empty state when the API returns []', async () => {
@@ -213,6 +213,7 @@ describe('AgentsPage - auto-refresh', () => {
       expect(screen.getByTestId('agent-row-agent-new-004')).toBeInTheDocument()
     })
     // Refresh must not flash the loading skeleton.
+    expect(screen.queryByTestId('agents-page-skeleton')).not.toBeInTheDocument()
     expect(screen.queryByTestId('agent-skeleton-row')).not.toBeInTheDocument()
     expect(getAgents).toHaveBeenCalledTimes(2)
   })

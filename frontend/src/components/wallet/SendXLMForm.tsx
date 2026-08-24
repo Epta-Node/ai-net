@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
@@ -23,6 +24,7 @@ interface ConfirmationData {
 }
 
 export function SendXLMForm() {
+  const { t } = useTranslation()
   const { publicKey, keypair, connected, connectionMethod } = useWallet()
   const { balance } = useWalletBalance(publicKey)
 
@@ -38,22 +40,24 @@ export function SendXLMForm() {
   const validateField = useCallback(
     (field: 'destination' | 'amount'): string | undefined => {
       if (field === 'destination') {
-        if (!destination.trim()) return 'Destination address is required'
+        if (!destination.trim()) return t('validation.destinationRequired')
         if (!isValidStellarAddress(destination.trim()))
-          return 'Invalid Stellar address. Must start with G and be 56 characters.'
+          return t('validation.invalidStellarAddress')
         return undefined
       }
       if (field === 'amount') {
-        if (!amount.trim()) return 'Amount is required'
+        if (!amount.trim()) return t('validation.amountRequired')
         const parsed = parseFloat(amount)
-        if (isNaN(parsed) || parsed <= 0) return 'Amount must be a positive number'
+        if (isNaN(parsed) || parsed <= 0) return t('validation.amountPositive')
         const availableBalance = parseFloat(balance)
-        if (parsed > availableBalance) return 'Insufficient balance'
+        if (parsed > availableBalance) return t('validation.insufficientBalance')
         return undefined
       }
       return undefined
     },
-    [destination, amount, balance]
+    // `t` belongs here: these messages are re-validated and re-rendered, so a
+    // stale closure would keep showing them in the previous language.
+    [destination, amount, balance, t]
   )
 
   const handleDestinationBlur = () => {
@@ -141,7 +145,7 @@ export function SendXLMForm() {
       const submitData = await submitRes.json()
 
       if (!submitRes.ok) {
-        throw new Error(submitData.extras?.result_codes?.transaction || 'Transaction submission failed')
+        throw new Error(submitData.extras?.result_codes?.transaction || t('wallet.send.submitFailed'))
       }
 
       const txHash = submitData.hash
@@ -152,7 +156,7 @@ export function SendXLMForm() {
       setConfirmation(null)
       setErrors({})
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to send payment'
+      const message = err instanceof Error ? err.message : t('wallet.send.failedToSend')
       setSubmitError(message)
     } finally {
       setSubmitting(false)
@@ -166,18 +170,18 @@ export function SendXLMForm() {
   if (!connected) {
     return (
       <div className={styles.container}>
-        <p className={styles.disconnected}>Connect your wallet to send XLM.</p>
+        <p className={styles.disconnected}>{t('wallet.send.disconnected')}</p>
       </div>
     )
   }
 
   return (
     <div className={styles.container}>
-      <h3 className={styles.heading}>Send XLM</h3>
+      <h3 className={styles.heading}>{t('wallet.send.heading')}</h3>
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-destination">
-          Destination address
+          {t('wallet.send.destinationLabel')}
         </label>
         <input
           id="send-destination"
@@ -200,7 +204,7 @@ export function SendXLMForm() {
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-amount">
-          Amount (XLM)
+          {t('wallet.send.amountLabel')}
         </label>
         <input
           id="send-amount"
@@ -217,7 +221,7 @@ export function SendXLMForm() {
           disabled={Boolean(successTx)}
         />
         <p className={styles.helper}>
-          Available balance: {parseFloat(balance).toFixed(7)} XLM
+          {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
         </p>
         {errors.amount && (
           <p id="amount-error" className={styles.error} role="alert">
@@ -228,13 +232,13 @@ export function SendXLMForm() {
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-memo">
-          Memo (optional)
+          {t('wallet.send.memoLabel')}
         </label>
         <input
           id="send-memo"
           className={styles.input}
           type="text"
-          placeholder="Payment memo (max 28 chars)"
+          placeholder={t('wallet.send.memoPlaceholder')}
           maxLength={28}
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
@@ -243,11 +247,12 @@ export function SendXLMForm() {
       </div>
 
       <button
+        id="btn-send-xlm"
         className={styles.sendButton}
         onClick={handleSendClick}
         disabled={submitting || Boolean(successTx)}
       >
-        {submitting ? 'Sending...' : 'Send'}
+        {submitting ? t('wallet.send.sending') : t('wallet.send.send')}
       </button>
 
       {submitError && (
@@ -258,15 +263,19 @@ export function SendXLMForm() {
 
       {successTx && (
         <div className={styles.successMessage} role="status">
-          <p>Payment sent successfully!</p>
+          <p>{t('wallet.send.success')}</p>
           <p className={styles.txHash}>
-            TX: <code>{successTx}</code>
+            <Trans
+              i18nKey="wallet.send.txHash"
+              values={{ hash: successTx }}
+              components={[<code key="hash" />]}
+            />
           </p>
           <button
             className={styles.dismissButton}
             onClick={() => setSuccessTx(null)}
           >
-            Dismiss
+            {t('common.dismiss')}
           </button>
         </div>
       )}
@@ -282,42 +291,44 @@ export function SendXLMForm() {
             aria-labelledby="confirm-title"
           >
             <h3 id="confirm-title" className={styles.modalTitle}>
-              Confirm Payment
+              {t('wallet.send.confirmTitle')}
             </h3>
             <div className={styles.modalBody}>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>To:</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.to')}</span>
                 <span className={styles.confirmValue}>{confirmation.destination}</span>
               </div>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>Amount:</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.amount')}</span>
                 <span className={styles.confirmValue}>{confirmation.amount} XLM</span>
               </div>
               {confirmation.memo && (
                 <div className={styles.confirmRow}>
-                  <span className={styles.confirmLabel}>Memo:</span>
+                  <span className={styles.confirmLabel}>{t('wallet.send.memo')}</span>
                   <span className={styles.confirmValue}>{confirmation.memo}</span>
                 </div>
               )}
             </div>
             <div className={styles.modalActions}>
               <button
+                id="btn-cancel-payment"
                 className={styles.cancelButton}
                 onClick={handleCancelConfirm}
                 disabled={submitting}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
+                id="btn-confirm-payment"
                 className={styles.confirmButton}
                 onClick={handleConfirm}
                 disabled={submitting}
               >
                 {submitting
                   ? connectionMethod === 'freighter'
-                    ? 'Signing with Freighter...'
-                    : 'Signing & Sending...'
-                  : 'Confirm & Send'}
+                    ? t('wallet.send.signingFreighter')
+                    : t('wallet.send.signingSending')
+                  : t('wallet.send.confirmSend')}
               </button>
             </div>
           </div>

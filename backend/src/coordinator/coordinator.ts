@@ -5,6 +5,7 @@ import { eventBus } from './eventBus';
 import { updateNode, updateTask } from './taskStore';
 import type { DAGNode, Task } from '../types/task';
 import { createLogger } from '../utils/logger';
+import { tracingService } from '../services/tracing';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -31,6 +32,8 @@ export interface CoordinatorOptions {
   dispatch?: DispatchFn;
   /** Structured logger bound with correlation context (e.g. { taskId, requestId }) */
   logger?: pino.Logger;
+  /** Correlation ID for distributed tracing — propagated to all sub-spans and agent HTTP calls. */
+  correlationId?: string;
 }
 
 class ConcurrencyLimiter {
@@ -88,6 +91,7 @@ export class Coordinator {
   private readonly agentRegistry?: AgentRegistry;
   private readonly paymentService: PaymentService;
   private readonly log: pino.Logger;
+  private readonly correlationId: string;
 
   constructor(options: CoordinatorOptions = {}) {
     this.bus = options.eventBus ?? eventBus;
@@ -98,6 +102,7 @@ export class Coordinator {
     this.agentRegistry = options.agentRegistry;
     this.paymentService = options.paymentService ?? { release: async () => 'mock-hash' };
     this.log = options.logger ?? createLogger();
+    this.correlationId = options.correlationId ?? '';
   }
 
   async executeDAG(taskId: string, dag: DAGNode[]): Promise<void> {
@@ -109,6 +114,14 @@ export class Coordinator {
     let settled = false;
 
     this.log.info({ taskId, totalNodes: dag.length }, 'DAG execution started');
+
+    // Open a tracing span for the full DAG execution.
+    const dagSpan = this.correlationId
+      ? tracingService.startSpan(this.correlationId, 'coordinator', 'executeDAG', {
+          taskId,
+          totalNodes: dag.length,
+        })
+      : null;
 
     updateTaskIfPresent(taskId, { status: 'running' });
 
@@ -129,6 +142,14 @@ export class Coordinator {
           { taskId, status, completedCount: completed.size, failedCount: failed.size },
           'DAG execution finished'
         );
+
+        // Close the DAG span.
+        if (dagSpan) {
+          tracingService.endSpan(dagSpan.spanId, status, {
+            completedCount: completed.size,
+            failedCount: failed.size,
+          });
+        }
 
         resolve();
       };
@@ -218,10 +239,17 @@ export class Coordinator {
 
     this.log.debug({ nodeId: node.nodeId, agentId: target.id, agentType: node.type }, 'dispatching node to agent');
 
+    // Build request headers, propagating the correlation ID so the receiving
+    // agent can continue the same trace.
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (this.correlationId) {
+      headers['X-Correlation-ID'] = this.correlationId;
+    }
+
     try {
       const response = await this.fetchImpl(`${target.endpoint.replace(/\/$/, '')}/execute`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({ node, context }),
         signal: controller.signal,
       });
@@ -263,6 +291,15 @@ export class Coordinator {
       timestamp: now(),
     });
 
+    // Open a per-node tracing span.
+    const nodeSpan = this.correlationId
+      ? tracingService.startSpan(this.correlationId, 'coordinator', 'node_execution', {
+          taskId,
+          nodeId: node.nodeId,
+          agentType: node.type,
+        })
+      : null;
+
     this.log.info(
       { taskId, nodeId: node.nodeId, agentType: node.type },
       'node execution started'
@@ -301,6 +338,8 @@ export class Coordinator {
         'payment released'
       );
 
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'completed', { txHash });
+
       return 'completed';
     } catch (err) {
       node.status = 'failed';
@@ -318,6 +357,8 @@ export class Coordinator {
         { taskId, nodeId: node.nodeId, agentType: node.type, err },
         'node failed'
       );
+
+      if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', { error: asErrorMessage(err) });
 
       return 'failed';
     }

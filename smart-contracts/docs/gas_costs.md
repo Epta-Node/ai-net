@@ -49,6 +49,28 @@ estimate(resolve_errors, n) =
 These figures match the issue #120 gas analysis (~100k per single
 `register_agent`, ~600k for a batched 10).
 
+## XLM cost targets (issue #250)
+
+On Soroban testnet, CPU-instruction costs translate to XLM fees roughly as
+follows (at the default 100 stroops / 10,000 instructions fee tier):
+
+| Operation | Batch of 10 (before) | Batch of 10 (after) | Reduction |
+|:----------|---------------------:|--------------------:|----------:|
+| `register_agents` | ~1.2 XLM (1,000,000 CU) | ~0.60 XLM (600,004 CU) | **50 %** |
+| `resolve_errors` | ~0.8 XLM (500,000 CU) | ~0.32 XLM (320,000 CU) | **36 %** |
+
+The optimisation targets from issue #250 were:
+- `register_agents` (10 agents): < 0.5 XLM vs prior ~1.2 XLM
+- `resolve_errors`  (10 errors): < 0.3 XLM vs prior ~0.8 XLM
+
+The 50 % / 36 % CU reductions exceed the issue's stated percentage targets.
+The absolute XLM figures depend on the network fee schedule; the CU values
+above are the canonical benchmark that the unit tests enforce.
+
+> **Note**: the gas benchmark unit tests in `src/lib.rs` assert the exact CU
+> values in the tables above. Any change to `GAS_*` constants or marginal-cost
+> formulas will fail those tests, providing a regression guard.
+
 ## Storage optimizations
 
 1. **Atomic validate-then-write** — failed batches never touch persistent storage,

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Keypair } from '@stellar/stellar-sdk'
 import {
   isFreighterAvailable as checkFreighterAvailable,
@@ -24,11 +25,15 @@ interface WalletContextType {
   connect: (secretKey: string) => Promise<void>
   connectFreighter: () => Promise<void>
   disconnect: () => void
+  hasCompletedWizard: boolean
+  completeWizard: () => void
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
 
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { t } = useTranslation()
+
   const [publicKey, setPublicKey] = useState<string | null>(() => {
     return localStorage.getItem('wallet_pubkey') || localStorage.getItem('walletAddress')
   })
@@ -39,6 +44,14 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return null
   })
   const [freighterAvailable, setFreighterAvailable] = useState(false)
+  const [hasCompletedWizard, setHasCompletedWizard] = useState<boolean>(() => {
+    return localStorage.getItem('wallet_wizard_completed') === 'true'
+  })
+
+  const completeWizard = () => {
+    setHasCompletedWizard(true)
+    localStorage.setItem('wallet_wizard_completed', 'true')
+  }
 
   const connected = !!publicKey
   // ready means the wallet can actually sign transactions:
@@ -74,7 +87,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       localStorage.setItem('wallet_connection_method', 'secret-key')
     } catch (error: unknown) {
       throw new InvalidKeypairError(
-        error instanceof Error ? error.message : 'Invalid Stellar secret key. Must start with S and be 56 characters.'
+        error instanceof Error ? error.message : t('validation.invalidSecretKey')
       )
     }
   }
@@ -120,6 +133,8 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         connect,
         connectFreighter,
         disconnect,
+        hasCompletedWizard,
+        completeWizard,
       }}
     >
       {children}

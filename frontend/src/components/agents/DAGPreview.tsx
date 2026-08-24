@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactFlow, { Background, Controls, ConnectionLineType, Edge, MarkerType, Node, NodeProps, Position, Handle } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { DagEdge, DagNode } from '../../services/taskService';
@@ -16,10 +17,12 @@ interface PreviewNodeData {
 }
 
 const PreviewNode = ({ id, data }: NodeProps<PreviewNodeData>) => {
+  const { t } = useTranslation();
+
   return (
     <div id={id} className="dag-node p-3 rounded-xl border border-slate-700 bg-slate-800 text-slate-100 min-w-[140px] text-center font-semibold shadow-md">
       <Handle type="target" position={Position.Left} style={{ background: '#475569', width: 6, height: 6 }} />
-      <div className="text-[10px] uppercase tracking-wider opacity-65 mb-0.5">Agent Preview</div>
+      <div className="text-[10px] uppercase tracking-wider opacity-65 mb-0.5">{t('agent.dagPreview')}</div>
       <div className="text-sm font-bold truncate">{data.label}</div>
       <Handle type="source" position={Position.Right} style={{ background: '#475569', width: 6, height: 6 }} />
     </div>
@@ -31,6 +34,7 @@ const nodeTypes = {
 };
 
 export function DAGPreview({ dagPreview }: DAGPreviewProps) {
+  const { t } = useTranslation();
   const nodes = dagPreview?.nodes ?? [];
   const edges = dagPreview?.edges ?? [];
 
@@ -77,7 +81,7 @@ export function DAGPreview({ dagPreview }: DAGPreviewProps) {
           justifyContent: 'center',
         }}
       >
-        No DAG preview available yet.
+        {t('agent.dag.empty')}
       </div>
     );
   }

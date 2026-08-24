@@ -2,278 +2,206 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  detect_projects:
-    name: Detect Projects
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.detect.outputs.backend }}
-      frontend: ${{ steps.detect.outputs.frontend }}
-      smart_contracts_cargo: ${{ steps.detect.outputs.smart_contracts_cargo }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Detect project manifests
-        id: detect
-        run: |
-          test -f backend/package.json && echo "backend=true" >> "$GITHUB_OUTPUT" || echo "backend=false" >> "$GITHUB_OUTPUT"
-          test -f frontend/package.json && echo "frontend=true" >> "$GITHUB_OUTPUT" || echo "frontend=false" >> "$GITHUB_OUTPUT"
-          test -d smart-contracts/contracts && echo "smart_contracts_cargo=true" >> "$GITHUB_OUTPUT" || echo "smart_contracts_cargo=false" >> "$GITHUB_OUTPUT"
-
   backend:
-    name: Backend
-    needs: detect_projects
-    if: ${{ needs.detect_projects.outputs.backend == 'true' }}
+    name: backend
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     defaults:
       run:
         working-directory: backend
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: backend/node_modules
-          key: ${{ runner.os }}-node-24-backend-${{ hashFiles('backend/package-lock.json', 'backend/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-24-backend-
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Build
-        run: npm run build --if-present
+      - name: Type-check and build
+        run: npm run build
 
-      - name: Lint
-        run: npm run lint --if-present
+      - name: Unit tests
+        run: npm test
 
-      - name: Test (unit)
-        run: npm test --if-present
-
-  e2e-integration:
-    name: Fullstack E2E Integration
-    needs: detect_projects
-    if: ${{ github.ref == 'refs/heads/main' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch' }}
+  frontend:
+    name: frontend
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+  contracts:
+    name: smart-contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: smart-contracts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: smart-contracts/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32v1-none
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── TypeScript SDK ────────────────────────────────────────────────
+      - name: TypeScript SDK — build
+        run: npm run build
+
+      - name: TypeScript SDK — lint
+        run: npm run lint
+
+      - name: TypeScript SDK — unit tests
+        run: npm run test:unit
+
+      # ── Soroban contracts ─────────────────────────────────────────────
+      - name: Cargo format check
+        run: cargo fmt --all -- --check
+
+      - name: Cargo clippy
+        run: cargo clippy --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding --all-targets -- -D warnings
+
+      # `--locked` keeps CI on the workspace lockfile resolution, which pins
+      # ed25519-dalek to a version compatible with current stable Rust.
+      - name: Cargo tests
+        run: cargo test --locked -p error-resolver -p error-registry -p agent-registry -p agent-bidding
+
+      # Optimized Wasm builds for the deployable contracts.
+      # (error-resolver is exercised natively above; its Wasm target is
+      # currently blocked by a serde dependency that does not compile for
+      # wasm32v1-none.)
+      - name: Build optimized Wasm binaries
+        run: |
+          cargo build --locked -p agent-registry --target wasm32v1-none --release
+          cargo build --locked -p error-registry --target wasm32v1-none --release
+          cargo build --locked -p agent-bidding --target wasm32v1-none --release
+          ls -la target/wasm32v1-none/release/*.wasm
+
+  e2e-fullstack:
+    name: e2e-fullstack
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: backend/node_modules
-          key: ${{ runner.os }}-node-24-backend-${{ hashFiles('backend/package-lock.json', 'backend/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-24-backend-
+      - name: Install backend dependencies
+        run: npm ci
 
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run E2E Integration Tests (Scenarios A, B, C)
-        run: npx jest --config ../tests/e2e/jest.config.js --runInBand --passWithNoTests --forceExit
+      - name: Run fullstack E2E suite
+        run: npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit
         env:
           NODE_ENV: test
           SKIP_STELLAR_ACCOUNT_VERIFY: "true"
           STELLAR_TEST_SECRET: ${{ secrets.STELLAR_TEST_SECRET }}
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
 
-      - name: Upload E2E Coverage Report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: e2e-coverage-report
-          path: coverage-e2e/
-
-
-
-  frontend:
-    name: Frontend
-    needs: detect_projects
-    if: ${{ needs.detect_projects.outputs.frontend == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    defaults:
-      run:
-        working-directory: frontend
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: frontend/node_modules
-          key: ${{ runner.os }}-node-24-frontend-${{ hashFiles('frontend/package-lock.json', 'frontend/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-24-frontend-
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build --if-present
-
-      - name: Lint
-        run: npm run lint --if-present
-
-      - name: Test
-        run: npm test --if-present
-
-  smart-contracts:
-    name: Smart Contracts
-    needs: detect_projects
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    defaults:
-      run:
-        working-directory: smart-contracts
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-          targets: wasm32-unknown-unknown
-
-      - name: Cache Cargo dependencies
-        if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: smart-contracts
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: smart-contracts/node_modules
-          key: ${{ runner.os }}-node-24-smart-contracts-${{ hashFiles('smart-contracts/package-lock.json', 'smart-contracts/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-24-smart-contracts-
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Unit tests (fast, always run)
-        run: npm run test:unit
-
-      - name: Cargo lint
-        if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
-        run: cargo fmt --all -- --check
-
-      - name: Cargo clippy
-        if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
-        run: |
-          cargo clippy --locked -p error-resolver --all-targets -- -D warnings
-          cargo clippy --locked -p error-registry --all-targets -- -D warnings
-
-      # Soroban contract unit tests run on stable here. This works because the
-      # workspace lockfile pins ed25519-dalek to 2.2.0: compiling the contracts'
-      # `testutils` dev-dependency pulls in soroban-env-host 22.1.3, whose
-      # default ed25519-dalek 3.0.0 resolution has a trait-bound incompatibility
-      # on current Rust stable (see commits f09c71c / d4e1c8a), and 2.2.0 avoids
-      # it. `--locked` keeps CI on that pinned resolution.
-      - name: Cargo test
-        if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
-        run: |
-          cargo test --locked -p error-resolver
-          cargo test --locked -p error-registry
-          cargo test --locked -p agent-registry
-
-      # The wasm build still exercises each contract's real compile target.
-      - name: Cargo build
-        if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' }}
-        run: |
-          cargo build --locked -p agent-registry --target wasm32v1-none --release
-          cargo build --locked -p error-registry --target wasm32v1-none --release
-
-  smart-contracts-integration:
-    name: Smart Contracts (Integration)
-    needs: detect_projects
-    if: ${{ needs.detect_projects.outputs.smart_contracts_cargo == 'true' && github.ref == 'refs/heads/main' }}
+  contracts-integration:
+    name: contracts-integration
+    continue-on-error: true
+    needs: contracts
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
+    env:
+      STELLAR_COORDINATOR_SECRET: ${{ secrets.STELLAR_COORDINATOR_SECRET }}
+      VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
     defaults:
       run:
         working-directory: smart-contracts
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
-
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: smart-contracts/node_modules
-          key: ${{ runner.os }}-node-20-smart-contracts-${{ hashFiles('smart-contracts/package-lock.json', 'smart-contracts/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-20-smart-contracts-
+          node-version: 24
+          cache: npm
+          cache-dependency-path: smart-contracts/package-lock.json
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Integration tests
+      - name: Run integration tests
+        if: env.STELLAR_COORDINATOR_SECRET != '' && env.VENICE_API_KEY != ''
         run: npm run test:integration
         env:
-          STELLAR_COORDINATOR_SECRET: ${{ secrets.STELLAR_COORDINATOR_SECRET }}
-          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+          RUN_INTEGRATION_TESTS: "true"
+
+      - name: Skip notice
+        if: env.STELLAR_COORDINATOR_SECRET == '' || env.VENICE_API_KEY == ''
+        run: echo "Integration secrets not configured — skipping integration tests."

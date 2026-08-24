@@ -127,13 +127,15 @@ describe("Agents API route", () => {
     expect(response.body).toEqual({ error: "Agent not found" });
   });
 
-  it("returns 204 and updates lastSeenAt on heartbeat", async () => {
+  it("returns 200 with the updated lastSeenAt on heartbeat", async () => {
     const app = createTestApp([codingAgent]);
     const before = new Date();
 
     const response = await request(app).post("/api/agents/coding-1/heartbeat");
 
-    expect(response.status).toBe(204);
+    expect(response.status).toBe(200);
+    expect(response.body.status).toBe("ok");
+    expect(new Date(response.body.lastSeenAt).getTime()).toBeGreaterThanOrEqual(before.getTime());
     const updated = await request(app).get("/api/agents/coding-1");
     expect(new Date(updated.body.lastSeenAt).getTime()).toBeGreaterThanOrEqual(before.getTime());
     expect(updated.body.status).toBe("online");
@@ -148,7 +150,8 @@ describe("Agents API route", () => {
 });
 
 describe("Stellar public key validation", () => {
-  const VALID_KEY = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHN";
+  // Must satisfy /^G[A-Z2-7]{55}$/ — 56 characters total.
+  const VALID_KEY = "GDPDTI4X27QVEKWCZ3XOOB2G5ZVBCQFF3LTUXPITCVYQQIHDK2DW6CG2";
 
   beforeAll(() => {
     process.env.SKIP_STELLAR_ACCOUNT_VERIFY = "true";
@@ -231,23 +234,23 @@ describe("Stellar public key validation", () => {
       return app;
     }
 
-    it("returns 400 for invalid walletpublickey header", async () => {
+    // walletPublicKey is optional by design (header or body, falling back to
+    // "anonymous") — see createTaskSchema in src/api/routes/tasks.ts.
+    it("accepts an invalid walletpublickey header as anonymous", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .set("walletpublickey", "INVALID-KEY-123")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe("Invalid Stellar public key format");
+      expect(response.status).toBe(201);
     });
 
-    it("returns 400 when walletpublickey header is missing", async () => {
+    it("accepts a missing walletpublickey header as anonymous", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
-      expect(response.status).toBe(400);
-      expect(response.body.error).toBe("Invalid Stellar public key format");
+      expect(response.status).toBe(201);
     });
   });
 });

@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
 import { CircuitBreaker } from '../../venice/circuitBreaker.js';
 import { CircuitOpenError, TokenBudgetExceededError } from '../../venice/errors.js';
+import { VeniceResponseCache, buildCacheKey } from './cache.js';
+import { RequestDeduplicator } from './dedup.js';
+import { getConfig } from '../../config/index.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -10,6 +13,20 @@ import type {
   VeniceClientLike,
   VeniceMessage,
 } from './types.js';
+
+interface CacheEnvConfig {
+  VENICE_MODEL_VERSION: string;
+  VENICE_CACHE_TTL_MS: number;
+  VENICE_CACHE_CODING_TTL_MS: number;
+  VENICE_CACHE_SIMILARITY_THRESHOLD: number;
+}
+
+const CONFIG_FALLBACK: CacheEnvConfig = {
+  VENICE_MODEL_VERSION: 'v1',
+  VENICE_CACHE_TTL_MS: 24 * 60 * 60 * 1000,
+  VENICE_CACHE_CODING_TTL_MS: 60 * 60 * 1000,
+  VENICE_CACHE_SIMILARITY_THRESHOLD: 0.8,
+};
 
 const log = createLogger({ module: 'VeniceClient' });
 
@@ -32,11 +49,35 @@ export class VeniceClient implements VeniceClientLike {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly breaker: CircuitBreaker;
+  private readonly cache: VeniceResponseCache;
+  private readonly deduplicator: RequestDeduplicator;
+  private readonly modelVersion: string;
 
   constructor(config: VeniceClientConfig) {
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl ?? 'https://api.venice.ai/api/v1';
     this.breaker = config.circuitBreaker ?? new CircuitBreaker();
+
+    const env = this.resolveConfig();
+    this.modelVersion = config.modelVersion ?? env.VENICE_MODEL_VERSION;
+    const cacheConfig = config.cacheConfig ?? {};
+    this.cache =
+      config.cache ??
+      new VeniceResponseCache({
+        defaultTtlMs: cacheConfig.defaultTtlMs ?? env.VENICE_CACHE_TTL_MS,
+        codingTtlMs: cacheConfig.codingTtlMs ?? env.VENICE_CACHE_CODING_TTL_MS,
+        similarityThreshold:
+          cacheConfig.similarityThreshold ?? env.VENICE_CACHE_SIMILARITY_THRESHOLD,
+      });
+    this.deduplicator = config.deduplicator ?? new RequestDeduplicator();
+  }
+
+  private resolveConfig(): CacheEnvConfig {
+    try {
+      return getConfig() as unknown as CacheEnvConfig;
+    } catch {
+      return CONFIG_FALLBACK;
+    }
   }
 
   getModelFor(agentType: AgentType): string {
@@ -51,6 +92,21 @@ export class VeniceClient implements VeniceClientLike {
     return this.breaker.getFailureCount();
   }
 
+  /** Current cache hit rate (0..1) for monitoring. */
+  getCacheHitRate(): number {
+    return this.cache.getHitRate();
+  }
+
+  /** Clear the entire response cache. */
+  invalidateCache(): void {
+    this.cache.invalidateAll();
+  }
+
+  /** Drop cache entries created under a specific model version. */
+  invalidateModelVersion(modelVersion: string): void {
+    this.cache.invalidateModelVersion(modelVersion);
+  }
+
   async complete(
     prompt: string,
     agentType: AgentType,
@@ -62,7 +118,7 @@ export class VeniceClient implements VeniceClientLike {
       model,
       options,
       promptForLogging: prompt,
-      agentLabel: agentType,
+      agentType,
     });
   }
 
@@ -73,7 +129,7 @@ export class VeniceClient implements VeniceClientLike {
       model: options.model ?? DEFAULT_CHAT_MODEL,
       options,
       promptForLogging,
-      agentLabel: 'chat',
+      agentType: 'chat',
     });
   }
 
@@ -82,13 +138,13 @@ export class VeniceClient implements VeniceClientLike {
     model,
     options,
     promptForLogging,
-    agentLabel,
+    agentType,
   }: {
     messages: VeniceMessage[];
     model: string;
     options?: CompleteOptions;
     promptForLogging: string;
-    agentLabel: string;
+    agentType: string;
   }): Promise<string> {
     const maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
     if (maxTokens > HARD_TOKEN_CAP) {
@@ -97,6 +153,46 @@ export class VeniceClient implements VeniceClientLike {
 
     this.breaker.assertClosed();
 
+    const force = options?.force === true;
+    const cacheKey = buildCacheKey(promptForLogging, agentType, this.modelVersion);
+
+    if (!force) {
+      const cached = this.cache.get(promptForLogging, agentType, this.modelVersion);
+      if (cached !== null) {
+        log.info(
+          { agentType, model, modelVersion: this.modelVersion, hitRate: this.cache.getHitRate() },
+          'venice cache hit',
+        );
+        return cached;
+      }
+    }
+
+    const runFetch = (): Promise<string> =>
+      this.runVeniceFetch({ messages, model, options, promptForLogging, agentType });
+
+    const result = force
+      ? await runFetch()
+      : await this.deduplicator.dedup(cacheKey, runFetch);
+
+    if (!force) {
+      this.cache.set(promptForLogging, agentType, this.modelVersion, result);
+    }
+    return result;
+  }
+
+  private async runVeniceFetch({
+    messages,
+    model,
+    options,
+    promptForLogging,
+    agentType,
+  }: {
+    messages: VeniceMessage[];
+    model: string;
+    options?: CompleteOptions;
+    promptForLogging: string;
+    agentType: string;
+  }): Promise<string> {
     const requestId = randomUUID();
     const start = Date.now();
     let retries = 0;
@@ -105,7 +201,7 @@ export class VeniceClient implements VeniceClientLike {
       model,
       messages,
       temperature: options?.temperature ?? 0.2,
-      max_tokens: maxTokens,
+      max_tokens: options?.maxTokens ?? DEFAULT_MAX_TOKENS,
     });
 
     try {
@@ -117,14 +213,14 @@ export class VeniceClient implements VeniceClientLike {
       }
 
       this.breaker.recordSuccess();
-      this.logRequest(requestId, agentLabel, model, promptForLogging, Date.now() - start, 'ok', retries);
+      this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'ok', retries);
       return content;
     } catch (err) {
       if (err instanceof CircuitOpenError || err instanceof TokenBudgetExceededError) {
         throw err;
       }
       this.breaker.recordFailure();
-      this.logRequest(requestId, agentLabel, model, promptForLogging, Date.now() - start, 'error', retries);
+      this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'error', retries);
       throw err;
     }
   }

@@ -12,6 +12,7 @@ declare module "@stellar/stellar-sdk" {
     constructor(serverURL: string);
     loadAccount(publicKey: string): Promise<AccountResponse>;
     submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+    claimableBalances(): ClaimableBalanceCallBuilder;
   }
 
   export namespace Horizon {
@@ -19,7 +20,33 @@ declare module "@stellar/stellar-sdk" {
       constructor(serverURL: string);
       loadAccount(publicKey: string): Promise<AccountResponse>;
       submitTransaction(tx: Transaction): Promise<HorizonResponse>;
+      claimableBalances(): ClaimableBalanceCallBuilder;
     }
+  }
+
+  export class ClaimableBalanceRecordBuilder {
+    call(): Promise<ClaimableBalanceRecord>;
+  }
+
+  export class ClaimableBalanceCallBuilder {
+    claimableBalance(balanceId: string): ClaimableBalanceRecordBuilder;
+    forAsset(asset: Asset): ClaimableBalanceCallBuilder;
+    limit(limit: number): ClaimableBalanceCallBuilder;
+    call(): Promise<ClaimableBalancePage>;
+    next(): Promise<ClaimableBalancePage>;
+  }
+
+  export interface ClaimableBalanceRecord {
+    id: string;
+    asset: string;
+    amount: string;
+    sponsor: string;
+    claimants?: Array<{ destination: string; predicate?: unknown }>;
+  }
+
+  export interface ClaimableBalancePage {
+    records: ClaimableBalanceRecord[];
+    next(): Promise<ClaimableBalancePage>;
   }
 
   export interface AccountResponse {
