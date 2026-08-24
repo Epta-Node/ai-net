@@ -3,7 +3,6 @@ import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Sparkles, ArrowRight } from 'lucide-react'
-import { useTypingAnimation } from '../../hooks/useTypingAnimation'
 import { useParticles } from '../../hooks/useParticles'
 import styles from './Hero.module.css'
 
