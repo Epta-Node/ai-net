@@ -19,3 +19,9 @@ CREATE TABLE IF NOT EXISTS task_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_events_taskId ON task_events (taskId);
+
+-- DOWN
+DROP INDEX IF EXISTS idx_task_events_taskId;
+DROP TABLE IF EXISTS task_events;
+DROP TABLE IF EXISTS tasks;
+

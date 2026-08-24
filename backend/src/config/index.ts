@@ -15,6 +15,13 @@ const envSchema = z.object({
   NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? "0.1.0"),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
 
+  // ── Database Migrations ───────────────────────────────────────────────────
+  /** Whether to automatically run database migrations on server startup. Default: true. */
+  AUTO_MIGRATE: z
+    .string()
+    .optional()
+    .transform((val) => val === undefined || val === "" || val === "true" || val === "1"),
+
   // ── Input validation ────────────────────────────────────────────────────────
   /** Maximum allowed length (characters) for a task prompt. Default: 10 000. */
   MAX_PROMPT_LENGTH: z.coerce.number().int().positive().default(10_000),
