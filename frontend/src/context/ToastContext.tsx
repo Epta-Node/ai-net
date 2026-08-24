@@ -60,6 +60,14 @@ function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id
       {toasts.map(toast => (
         <div key={toast.id} className={`toast toast-${toast.type}`}>
           <span>{toast.message}</span>
+          {toast.action && (
+            <button onClick={() => {
+              toast.action?.onClick();
+              onDismiss(toast.id);
+            }}>
+              {toast.action.label}
+            </button>
+          )}
           <button onClick={() => onDismiss(toast.id)} aria-label={t('a11y.dismiss')}>&times;</button>
         </div>
       ))}

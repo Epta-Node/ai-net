@@ -36,7 +36,9 @@ describe('Hero Component', () => {
 
   it('renders typing animation text', () => {
     renderComponent();
-    expect(screen.getByText(/Research/i)).toBeInTheDocument();
+    expect(screen.getByText((content, element) => {
+      return element?.textContent?.includes('Research') ?? false;
+    })).toBeInTheDocument();
   });
 
   it('renders canvas when prefersReducedMotion is false', () => {

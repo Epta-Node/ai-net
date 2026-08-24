@@ -45,13 +45,13 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Success'));
-    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText(/Success!/)).toBeInTheDocument();
 
     // Success auto-dismisses in 5s
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4900);
     });
-    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText(/Success!/)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
@@ -69,12 +69,12 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Error'));
-    expect(screen.queryByText(/Error msg/)).toBeInTheDocument();
+    expect(screen.getByText(/Error msg/)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
-    expect(screen.queryByText(/Error msg/)).toBeInTheDocument();
+    expect(screen.getByText(/Error msg/)).toBeInTheDocument();
   });
 
   it('pauses auto-dismiss on hover', async () => {
@@ -95,7 +95,7 @@ describe('Toast behavior', () => {
     });
     
     // Should still be there because of hover
-    expect(screen.queryByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText(/Success!/)).toBeInTheDocument();
 
     // Mouse leave
     fireEvent.mouseLeave(toastMessage.parentElement!);
@@ -137,7 +137,7 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Action'));
-    expect(screen.queryByText(/Action required/)).toBeInTheDocument();
+    expect(screen.getByText(/Action required/)).toBeInTheDocument();
 
     const retryBtn = screen.getByRole('button', { name: /retry/i });
     fireEvent.click(retryBtn);
