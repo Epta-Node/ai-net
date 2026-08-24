@@ -36,7 +36,7 @@ describe('Hero Component', () => {
 
   it('renders typing animation text', () => {
     renderComponent();
-    expect(screen.getByText((content, element) => {
+    expect(screen.getByText((_, element) => {
       return element?.textContent?.includes('Research') ?? false;
     })).toBeInTheDocument();
   });
