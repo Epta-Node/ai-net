@@ -12,7 +12,6 @@ import {
   filtersToSearchParams,
   priceDomain,
   type AgentFilters,
-  type SortKey,
 } from '../utils/agentRegistry'
 import styles from './AgentsPage.module.css'
 
