@@ -45,19 +45,19 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Success'));
-    expect(screen.getByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.includes('Success!') ?? false)).toBeInTheDocument();
 
     // Success auto-dismisses in 5s
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4900);
     });
-    expect(screen.getByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.includes('Success!') ?? false)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(200);
     });
     await waitFor(() => {
-      expect(screen.queryByText(/Success!/)).not.toBeInTheDocument();
+      expect(screen.queryByText((_, element) => element?.textContent?.includes('Success!') ?? false)).not.toBeInTheDocument();
     });
   });
 
@@ -69,12 +69,12 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Error'));
-    expect(screen.getByText(/Error msg/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.includes('Error msg') ?? false)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10000);
     });
-    expect(screen.getByText(/Error msg/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.includes('Error msg') ?? false)).toBeInTheDocument();
   });
 
   it('pauses auto-dismiss on hover', async () => {
@@ -85,27 +85,27 @@ describe('Toast behavior', () => {
     );
 
     fireEvent.click(screen.getByText('Add Success'));
-    const toastMessage = screen.getByText(/Success!/);
+    const toastMessage = screen.getByText((_, element) => element?.textContent?.includes('Success!') ?? false);
 
     // Hover over the toast
-    fireEvent.mouseEnter(toastMessage.parentElement!);
+    fireEvent.mouseEnter(toastMessage.closest('.toast')!);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(6000);
     });
     
     // Should still be there because of hover
-    expect(screen.getByText(/Success!/)).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent?.includes('Success!') ?? false)).toBeInTheDocument();
 
     // Mouse leave
-    fireEvent.mouseLeave(toastMessage.parentElement!);
+    fireEvent.mouseLeave(toastMessage.closest('.toast')!);
     
     // Now it should auto-dismiss after its duration
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5100);
     });
     await waitFor(() => {
-      expect(screen.queryByText(/Success!/)).not.toBeInTheDocument();
+      expect(screen.queryByText((_, element) => element?.textContent?.includes('Success!') ?? false)).not.toBeInTheDocument();
     });
   });
 
