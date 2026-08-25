@@ -48,7 +48,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "symbol": "dup"
+                        "symbol": "bonded_agent"
                       }
                     },
                     {
@@ -109,7 +109,7 @@
                   "symbol": "Agent"
                 },
                 {
-                  "symbol": "dup"
+                  "symbol": "bonded_agent"
                 }
               ]
             },
@@ -129,7 +129,7 @@
                       "symbol": "Agent"
                     },
                     {
-                      "symbol": "dup"
+                      "symbol": "bonded_agent"
                     }
                   ]
                 },
@@ -168,7 +168,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "symbol": "dup"
+                        "symbol": "bonded_agent"
                       }
                     },
                     {
@@ -245,7 +245,7 @@
                 "val": {
                   "vec": [
                     {
-                      "symbol": "dup"
+                      "symbol": "bonded_agent"
                     }
                   ]
                 }

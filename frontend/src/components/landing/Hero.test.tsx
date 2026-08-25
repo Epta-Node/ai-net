@@ -1,4 +1,4 @@
-// Remove the unused React default import
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import Hero from './Hero';
@@ -10,8 +10,8 @@ import type { Mock } from 'vitest';
 vi.mock('../../hooks/useTypingAnimation');
 vi.mock('../../hooks/useParticles');
 
-const mockUseTypingAnimation = useTypingAnimation as unknown as Mock;
-const mockUseParticles = useParticles as unknown as Mock;
+const mockUseTypingAnimation = vi.mocked(useTypingAnimation);
+const mockUseParticles = vi.mocked(useParticles);
 
 describe('Hero Component', () => {
   beforeEach(() => {

@@ -5,6 +5,7 @@ import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
+import { ThemeProvider } from './context/ThemeContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
@@ -92,13 +93,15 @@ const App: React.FC = () => {
   return (
     <I18nextProvider i18n={i18n}>
       <ErrorBoundary>
-        <WalletProvider>
-          <ToastProvider>
-            <Router>
-              <AppContent />
-            </Router>
-          </ToastProvider>
-        </WalletProvider>
+        <ThemeProvider>
+          <WalletProvider>
+            <ToastProvider>
+              <Router>
+                <AppContent />
+              </Router>
+            </ToastProvider>
+          </WalletProvider>
+        </ThemeProvider>
       </ErrorBoundary>
     </I18nextProvider>
   )

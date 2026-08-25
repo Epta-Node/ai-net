@@ -48,7 +48,7 @@
                         "symbol": "id"
                       },
                       "val": {
-                        "symbol": "dup"
+                        "symbol": "early_return"
                       }
                     },
                     {
@@ -87,6 +87,25 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "deregister_agent",
+              "args": [
+                {
+                  "symbol": "early_return"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     []
   ],
   "ledger": {
@@ -106,10 +125,10 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "Agent"
+                  "symbol": "BondCooldown"
                 },
                 {
-                  "symbol": "dup"
+                  "symbol": "early_return"
                 }
               ]
             },
@@ -126,10 +145,10 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "Agent"
+                      "symbol": "BondCooldown"
                     },
                     {
-                      "symbol": "dup"
+                      "symbol": "early_return"
                     }
                   ]
                 },
@@ -149,34 +168,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "capability"
+                        "symbol": "expiry_ledger"
                       },
                       "val": {
-                        "symbol": "research"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "endpoint"
-                      },
-                      "val": {
-                        "string": "https://agent.example.com"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "id"
-                      },
-                      "val": {
-                        "symbol": "dup"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "metadata"
-                      },
-                      "val": {
-                        "map": []
+                        "u32": 17280
                       }
                     },
                     {
@@ -185,17 +180,6 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "price_stroops"
-                      },
-                      "val": {
-                        "i128": {
-                          "hi": 0,
-                          "lo": 1000
-                        }
                       }
                     }
                   ]
@@ -243,11 +227,7 @@
                 },
                 "durability": "persistent",
                 "val": {
-                  "vec": [
-                    {
-                      "symbol": "dup"
-                    }
-                  ]
+                  "vec": []
                 }
               }
             },
@@ -310,6 +290,39 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5541220902715666415
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5541220902715666415
                   }
                 },
                 "durability": "temporary",

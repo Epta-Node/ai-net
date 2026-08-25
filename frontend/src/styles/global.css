@@ -201,3 +201,36 @@ input:focus, textarea:focus {
     padding: 12px 16px;
   }
 }
+
+/* Theme transition helpers */
+body,
+.glass-panel,
+input,
+textarea,
+th,
+td,
+.dag-node,
+.chip {
+  transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
+}
+
+/* Light theme overrides */
+.theme-light {
+  --bg-primary: #FFFFFF;
+  --bg-surface: #F8FAFC;
+  --bg-surface-alt: #F1F5F9;
+  --bg-secondary: #F3F4F6;
+  --border-color: #E6E9EE;
+  --border-subtle: #E9EEF4;
+  --text-primary: #0A0E14;
+  --text-secondary: #475569;
+  --accent-cyan: #0EA5E9;
+  --accent-purple: #7C3AED;
+  --accent-green: #059669;
+  --panel-bg: var(--bg-surface);
+  --panel-border: var(--border-color);
+  --primary: var(--accent-purple);
+  --primary-hover: #6d28d9;
+  --accent: var(--accent-cyan);
+}
+

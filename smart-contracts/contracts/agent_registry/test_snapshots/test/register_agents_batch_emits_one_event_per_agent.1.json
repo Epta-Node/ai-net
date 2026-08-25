@@ -20,6 +20,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -75,6 +86,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -128,6 +150,17 @@
                     },
                     {
                       "map": [
+                        {
+                          "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
                         {
                           "key": {
                             "symbol": "capability"
@@ -203,6 +236,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -258,6 +302,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -311,6 +366,17 @@
                     },
                     {
                       "map": [
+                        {
+                          "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
                         {
                           "key": {
                             "symbol": "capability"
@@ -386,6 +452,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -441,6 +518,17 @@
                       "map": [
                         {
                           "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "capability"
                           },
                           "val": {
@@ -494,6 +582,17 @@
                     },
                     {
                       "map": [
+                        {
+                          "key": {
+                            "symbol": "bond_amount"
+                          },
+                          "val": {
+                            "i128": {
+                              "hi": 0,
+                              "lo": 100000000
+                            }
+                          }
+                        },
                         {
                           "key": {
                             "symbol": "capability"
@@ -606,6 +705,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -703,6 +813,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -798,6 +919,17 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "capability"
@@ -1231,6 +1363,57 @@
                 "symbol": "registry"
               },
               {
+                "symbol": "bond_lck"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "agent_id"
+                  },
+                  "val": {
+                    "symbol": "bev1"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "amount_stroops"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "owner"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
                 "symbol": "agent_reg"
               }
             ],
@@ -1290,6 +1473,57 @@
                 "symbol": "registry"
               },
               {
+                "symbol": "bond_lck"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "agent_id"
+                  },
+                  "val": {
+                    "symbol": "bev2"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "amount_stroops"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "owner"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
                 "symbol": "agent_reg"
               }
             ],
@@ -1328,6 +1562,57 @@
                       "hi": 0,
                       "lo": 1000
                     }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "bond_lck"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "agent_id"
+                  },
+                  "val": {
+                    "symbol": "bev3"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "amount_stroops"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 100000000
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "owner"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                   }
                 }
               ]

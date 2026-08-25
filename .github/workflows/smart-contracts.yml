@@ -21,6 +21,16 @@ jobs:
     name: Build Wasm artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # ── Rust resource limits ──────────────────────────────────────────
+      # Run only 1 cargo job at a time to prevent CPU/RAM saturation.
+      CARGO_BUILD_JOBS: "1"
+      # 1 codegen unit keeps peak RAM low by not splitting crates into
+      # many parallel LLVM modules.
+      RUSTFLAGS: "-C codegen-units=1"
+      # Skip incremental compilation artifacts — not useful in CI and
+      # wastes disk/RAM building the incremental cache.
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5

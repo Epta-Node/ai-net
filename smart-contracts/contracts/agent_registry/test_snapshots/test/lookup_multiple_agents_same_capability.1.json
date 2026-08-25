@@ -18,6 +18,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -89,6 +100,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -158,6 +180,17 @@
               "args": [
                 {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "capability"
@@ -269,6 +302,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -366,6 +410,17 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "capability"
                       },
                       "val": {
@@ -461,6 +516,17 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "bond_amount"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 100000000
+                        }
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "capability"

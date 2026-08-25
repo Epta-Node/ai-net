@@ -150,3 +150,53 @@ pub struct ErrorResolvedEvent {
     /// How the error was closed: `Fixed`, `Ignored`, or `Escalated`.
     pub resolution_code: u32,
 }
+
+// ─── Bond event data structs ──────────────────────────────────────────────────
+
+/// Data payload for `(registry, bond_locked)`.
+///
+/// Published by `register_agent` when an agent successfully registers with a
+/// bond. Indexers can use this to track the total bonded value per agent and
+/// detect under-bonded agents after `set_min_bond` increases the minimum.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondLocked {
+    /// The agent that locked the bond.
+    pub agent_id: Symbol,
+    /// Owner address that authorised the registration.
+    pub owner: Address,
+    /// Bond amount locked in stroops.
+    pub amount_stroops: i128,
+}
+
+/// Data payload for `(registry, bond_slsh)`.
+///
+/// Published by `slash_bond` when an admin penalises an agent's bond.
+/// Both the penalty applied and the resulting remaining balance are included
+/// so indexers don't need to recompute the residual from prior state.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondSlashed {
+    /// The agent whose bond was reduced.
+    pub agent_id: Symbol,
+    /// The amount deducted from the bond in stroops (capped at the prior balance).
+    pub penalty_stroops: i128,
+    /// Remaining bond balance after the slash (≥ 0).
+    pub remaining_stroops: i128,
+}
+
+/// Data payload for `(registry, bond_ret)`.
+///
+/// Published by the second `deregister_agent` call once the 24-hour cooldown
+/// has elapsed and the bond is eligible for return to the owner. Only emitted
+/// when `bond_amount > 0`; zero-bond deregistrations skip this event.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondReturned {
+    /// The agent that was deregistered.
+    pub agent_id: Symbol,
+    /// Address that receives the returned bond.
+    pub owner: Address,
+    /// Bond amount returned in stroops.
+    pub amount_stroops: i128,
+}
