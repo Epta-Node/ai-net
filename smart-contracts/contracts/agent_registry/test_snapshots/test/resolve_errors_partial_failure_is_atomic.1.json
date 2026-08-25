@@ -51,11 +51,7 @@
                   ]
                 },
                 {
-                  "vec": [
-                    {
-                      "symbol": "Ignored"
-                    }
-                  ]
+                  "u32": 1
                 }
               ]
             }
@@ -142,11 +138,7 @@
                         "symbol": "resolution"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Fixed"
-                          }
-                        ]
+                        "u32": 0
                       }
                     },
                     {

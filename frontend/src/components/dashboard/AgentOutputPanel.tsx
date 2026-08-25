@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp, Terminal, Copy, Check } from 'lucide-react';
 
 interface AgentOutputPanelProps {
@@ -14,6 +15,7 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
   selectedNodeId,
   onSelectNode,
 }) => {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const outputContainerRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
       >
         <div className="flex items-center gap-2">
           <Terminal size={18} className="text-indigo-400" />
-          <h3 className="text-md font-semibold text-[var(--text-primary)]">Agent Execution Output</h3>
+          <h3 className="text-md font-semibold text-[var(--text-primary)]">{t('task.output.title')}</h3>
         </div>
         <div className="flex items-center gap-4">
           {isOpen && activeOutput && (
@@ -66,10 +68,10 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
                 handleCopy();
               }}
               className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-slate-700 transition"
-              title="Copy Output"
+              title={t('a11y.copyOutput')}
             >
               {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} className="text-slate-400" />}
-              <span>{copied ? 'Copied' : 'Copy'}</span>
+              <span>{copied ? t('task.output.copied') : t('task.output.copy')}</span>
             </button>
           )}
           {isOpen ? <ChevronUp size={20} className="text-slate-400" /> : <ChevronDown size={20} className="text-slate-400" />}
@@ -80,7 +82,7 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
         <div className="flex flex-1 overflow-hidden mt-3" style={{ height: 'calc(100% - 60px)' }}>
           {/* Node Selector Sidebar */}
           <div className="w-1/4 border-r border-[var(--panel-border)] pr-3 flex flex-col gap-1.5 overflow-y-auto">
-            <div className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider mb-1">Nodes</div>
+            <div className="text-[10px] uppercase font-bold text-[var(--text-secondary)] tracking-wider mb-1">{t('task.output.nodes')}</div>
             {nodes.map((node) => {
               const isActive = selectedNodeId === node.nodeId;
               const hasOutput = !!outputs[node.nodeId];
@@ -95,7 +97,9 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
                   } ${hasOutput ? 'text-slate-100' : ''}`}
                 >
                   <div className="truncate font-semibold capitalize">
-                    {node.nodeId.replace('node_', '').replace('node-', '')} Agent
+                    {t('task.agentName', {
+                      name: node.nodeId.replace('node_', '').replace('node-', ''),
+                    })}
                   </div>
                   <div className="flex items-center gap-1.5 mt-1">
                     <span className={`w-1.5 h-1.5 rounded-full ${
@@ -125,10 +129,10 @@ export const AgentOutputPanel: React.FC<AgentOutputPanelProps> = ({
                   <div>
                     {selectedNodeId ? (
                       nodes.find(n => n.nodeId === selectedNodeId)?.status === 'pending'
-                        ? 'Waiting for node to start...'
-                        : 'Agent executing, waiting for output chunks...'
+                        ? t('task.output.waitingForNode')
+                        : t('task.output.executing')
                     ) : (
-                      'Select a node to view its execution output.'
+                      t('task.output.selectNode')
                     )}
                   </div>
                 </div>

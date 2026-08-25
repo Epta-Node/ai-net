@@ -1,6 +1,15 @@
-import React from 'react'
+import React, { useState, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { Bell } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
+import { useNotifications } from '../../hooks/useNotifications'
+import { NotificationCenter } from '../notifications/NotificationCenter'
+import { SUPPORTED_LANGUAGES } from '../../i18n/options'
+import type { SupportedLanguage } from '../../i18n/options'
 import './TopNav.css'
+import useTheme from '../../hooks/useTheme'
+import { Sun, Moon, Monitor } from 'lucide-react'
 
 interface TopNavProps {
   onMenuClick: () => void
@@ -8,6 +17,21 @@ interface TopNavProps {
   sidebarCollapsed: boolean
   isMobile: boolean
   isDrawerOpen?: boolean
+}
+
+/**
+ * Presentation for each language in the switcher.
+ *
+ * Language names stay in their own language by convention, so they are not
+ * translated. Typing this as a `Record<SupportedLanguage, ...>` makes the build
+ * fail if a language is added to `SUPPORTED_LANGUAGES` without an entry here.
+ */
+const LANGUAGE_OPTIONS: Record<
+  SupportedLanguage,
+  { flag: string; nativeName: string; shortLabel: string }
+> = {
+  en: { flag: '🇬🇧', nativeName: 'English', shortLabel: 'EN' },
+  zh: { flag: '🇨🇳', nativeName: '中文', shortLabel: '中文' },
 }
 
 const TopNav: React.FC<TopNavProps> = ({ 
@@ -18,17 +42,26 @@ const TopNav: React.FC<TopNavProps> = ({
   isDrawerOpen = false,
 }) => {
   const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
+  const { unreadCount } = useNotifications()
+  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
+  const bellButtonRef = useRef<HTMLButtonElement>(null)
+  const { t, i18n } = useTranslation()
+  const location = useLocation()
+  const { mode, setMode } = useTheme()
+
+  const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
 
   const getTitle = () => {
-    const path = window.location.pathname
+    const path = location.pathname
     switch (path) {
-      case '/': return 'Dashboard'
-      case '/agents': return 'Agent Registry'
-      case '/tasks/new': return 'New Task'
-      case '/wallet': return 'Wallet'
+      case '/': return t('nav.dashboard')
+      case '/agents': return t('nav.agentRegistry')
+      case '/tasks/new': return t('nav.newTask')
+      case '/tasks/history': return t('nav.taskHistory')
+      case '/wallet': return t('nav.wallet')
       default:
-        if (path.startsWith('/tasks/')) return 'Task Monitoring'
-        return 'Dashboard'
+        if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
+        return t('nav.dashboard')
     }
   }
 
@@ -44,7 +77,7 @@ const TopNav: React.FC<TopNavProps> = ({
           <button 
             className="hamburger"
             onClick={onMenuClick}
-            aria-label="Open navigation menu"
+            aria-label={t('a11y.openNavigationMenu')}
             aria-expanded={isDrawerOpen}
           >
             <span></span>
@@ -55,7 +88,7 @@ const TopNav: React.FC<TopNavProps> = ({
           <button 
             className="sidebar-toggle"
             onClick={onToggleSidebar}
-            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? t('a11y.expandSidebar') : t('a11y.collapseSidebar')}
             aria-expanded={!sidebarCollapsed}
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
@@ -74,6 +107,72 @@ const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       <div className="nav-right">
+        <div className="notification-wrapper">
+          <button
+            ref={bellButtonRef}
+            type="button"
+            className={`notification-bell-btn ${isNotificationOpen ? 'active' : ''}`}
+            onClick={() => setIsNotificationOpen(prev => !prev)}
+            aria-label="Notifications"
+            aria-expanded={isNotificationOpen}
+            id="btn-notifications"
+            data-testid="notification-bell-btn"
+          >
+            <Bell size={20} />
+            {unreadCount > 0 && (
+              <span className="notification-badge" data-testid="notification-badge">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          <NotificationCenter
+            isOpen={isNotificationOpen}
+            onClose={() => setIsNotificationOpen(false)}
+            anchorRef={bellButtonRef}
+          />
+        </div>
+
+        {/* Theme toggle: cycles light -> dark -> system */}
+        <button
+          className="theme-toggle"
+          onClick={() => {
+            const next: Record<string, 'light' | 'dark' | 'system'> = { light: 'dark', dark: 'system', system: 'light' }
+            setMode(next[mode])
+          }}
+          role="switch"
+          aria-label={mode === 'light' ? 'Switch to dark or system theme' : mode === 'dark' ? 'Switch to system or light theme' : 'Switch to light or dark theme'}
+          aria-checked={mode === 'dark' ? 'true' : mode === 'light' ? 'false' : 'mixed'}
+          title={`Theme: ${mode}`}
+        >
+          {mode === 'light' ? <Sun size={16} /> : mode === 'dark' ? <Moon size={16} /> : <Monitor size={16} />}
+        </button>
+
+        <div
+          className="language-switcher"
+          id="language-switcher"
+          role="group"
+          aria-label={t('a11y.languageSwitcher')}
+        >
+          {SUPPORTED_LANGUAGES.map((language) => (
+            <button
+              key={language}
+              type="button"
+              id={`btn-lang-${language}`}
+              className={`language-option ${language === activeLanguage ? 'active' : ''}`}
+              onClick={() => { void i18n.changeLanguage(language) }}
+              aria-pressed={language === activeLanguage}
+              aria-label={t('a11y.switchToLanguage', {
+                language: LANGUAGE_OPTIONS[language].nativeName,
+              })}
+            >
+              <span className="language-flag" aria-hidden="true">
+                {LANGUAGE_OPTIONS[language].flag}
+              </span>
+              <span aria-hidden="true">{LANGUAGE_OPTIONS[language].shortLabel}</span>
+            </button>
+          ))}
+        </div>
         {connected && publicKey ? (
           ready ? (
             <>
@@ -82,7 +181,7 @@ const TopNav: React.FC<TopNavProps> = ({
               </span>
               {connectionMethod && (
                 <span className="wallet-chip connected" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                  {connectionMethod === 'freighter' ? 'Freighter' : 'Secret Key'}
+                  {connectionMethod === 'freighter' ? t('wallet.freighter') : t('wallet.secretKey')}
                 </span>
               )}
               <button
@@ -90,7 +189,7 @@ const TopNav: React.FC<TopNavProps> = ({
                 onClick={disconnect}
                 id="btn-disconnect"
               >
-                Disconnect
+                {t('wallet.disconnect')}
               </button>
             </>
           ) : (
@@ -99,13 +198,13 @@ const TopNav: React.FC<TopNavProps> = ({
                 {truncateKey(publicKey)}
               </span>
               <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: '#fef3c7', color: '#92400e' }}>
-                Reconnect Required
+                {t('wallet.reconnectRequired')}
               </span>
             </>
           )
         ) : (
           <span className="wallet-chip disconnected" id="wallet-pubkey-display">
-            Not Connected
+            {t('wallet.notConnected')}
           </span>
         )}
       </div>

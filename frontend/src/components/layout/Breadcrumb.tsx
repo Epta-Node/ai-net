@@ -1,8 +1,10 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLocation, Link } from 'react-router-dom'
 import './Breadcrumb.css'
 
 const Breadcrumb: React.FC = () => {
+  const { t } = useTranslation()
   const location = useLocation()
   const pathnames = location.pathname.split('/').filter(Boolean)
 
@@ -10,14 +12,14 @@ const Breadcrumb: React.FC = () => {
     const fullPath = '/' + pathnames.slice(0, index + 1).join('/')
     
     switch (fullPath) {
-      case '/': return 'Dashboard'
-      case '/tasks': return 'Tasks'
-      case '/tasks/new': return 'New Task'
-      case '/agents': return 'Agents'
-      case '/wallet': return 'Wallet'
+      case '/': return t('nav.dashboard')
+      case '/tasks': return t('nav.tasks')
+      case '/tasks/new': return t('nav.newTask')
+      case '/agents': return t('nav.agents')
+      case '/wallet': return t('nav.wallet')
       default:
         if (fullPath.startsWith('/tasks/') && pathnames.length > 1) {
-          return `Task ${pathnames[1]}`
+          return t('nav.taskWithId', { id: pathnames[1] })
         }
         return path.charAt(0).toUpperCase() + path.slice(1)
     }
@@ -28,10 +30,10 @@ const Breadcrumb: React.FC = () => {
   }
 
   return (
-    <nav className="breadcrumb" aria-label="Breadcrumb">
+    <nav className="breadcrumb" aria-label={t('a11y.breadcrumb')}>
       <ol>
         <li>
-          <Link to="/">Dashboard</Link>
+          <Link to="/">{t('nav.dashboard')}</Link>
         </li>
         {pathnames.map((path, index) => {
           const fullPath = '/' + pathnames.slice(0, index + 1).join('/')

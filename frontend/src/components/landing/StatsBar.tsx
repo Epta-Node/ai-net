@@ -1,13 +1,7 @@
 import React from 'react'
+import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { Bot, Zap, Globe, CreditCard } from 'lucide-react'
-
-const stats = [
-  { label: 'AI Agents', value: '7+', icon: Bot, color: 'text-accent-cyan' },
-  { label: 'Per Task', value: '15 XLM', icon: Zap, color: 'text-accent-purple' },
-  { label: 'Network', value: 'Stellar', icon: Globe, color: 'text-accent-cyan' },
-  { label: 'Payment Rail', value: 'Soroban', icon: CreditCard, color: 'text-accent-purple' },
-]
 
 const containerVariants = {
   hidden: { opacity: 0, y: 30 },
@@ -15,6 +9,16 @@ const containerVariants = {
 }
 
 const StatsBar: React.FC = () => {
+  const { t } = useTranslation()
+
+  // Values are proper nouns and figures, so only the labels are translated.
+  const stats = [
+    { label: t('landing.stats.aiAgents'), value: '7+', icon: Bot, color: 'text-accent-cyan' },
+    { label: t('landing.stats.perTask'), value: '15 XLM', icon: Zap, color: 'text-accent-purple' },
+    { label: t('landing.stats.network'), value: 'Stellar', icon: Globe, color: 'text-accent-cyan' },
+    { label: t('landing.stats.paymentRail'), value: 'Soroban', icon: CreditCard, color: 'text-accent-purple' },
+  ]
+
   return (
     <motion.section
       className="px-4 max-w-[800px] mx-auto mb-20 w-full relative z-10"

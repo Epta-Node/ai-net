@@ -11,7 +11,7 @@ import { httpDispatch } from "../coordinator/dispatch";
 import type { AgentRegistry } from "../types/agent";
 import { getTask } from "../coordinator/taskStore";
 import { eventBus } from "../coordinator/eventBus";
-import { createEventStore, type EventStore } from "../coordinator/eventStore";
+import type { EventStore } from "../events/eventStore";
 import { attachTaskStream, type TaskStreamOptions } from "./routes/stream";
 import type { DAGNode } from "../types/task";
 import {
@@ -22,23 +22,45 @@ import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
+import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
 import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
+import { compressionMiddleware } from "./middleware/compression";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
 import { errorHandler } from "./middleware/errorHandler";
+import { versioningMiddleware } from "./middleware/versioning";
+import { createV1TasksRouter } from "./routes/v1/tasks";
+import { createV2TasksRouter } from "./routes/v2/tasks";
 import { createLogger } from "../utils/logger";
 import { createTaskDb, getTaskDb } from "../db/tasks";
 import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
 import { openapiSpec } from "./docs/openapi";
+import { createTaskJobHandler } from "../coordinator/coordinator";
+import {
+  getGlobalJobQueue,
+  createJobStore,
+  getJobDb,
+  closeJobDb,
+  JobWorker,
+  type JobQueue,
+} from "../queue";
+import { createAdminQueueRouter } from "./routes/admin";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
   dispatch?: DispatchFn;
   /** Called after each node completes; defaults to no-op (returns 'mock-hash') */
   releasePayment?: PaymentReleaseFn;
-  /** Event log for stream replay; defaults to an in-memory SQLite store */
+  /**
+   * Override the EventStore used for stream replay.  When omitted, the store
+   * owned by `eventBus` is used — which is the canonical single store that the
+   * EventBus persists to.  Only provide this in tests that need an isolated
+   * store; production code should leave it unset.
+   *
+   * @deprecated Pass a custom EventBus instance (with its own store) instead.
+   */
   eventStore?: EventStore;
   /** Heartbeat / auth timing for the WebSocket stream */
   stream?: TaskStreamOptions;
@@ -51,6 +73,16 @@ export interface AppOptions {
   enableHeartbeatCleanup?: boolean;
   /** Custom options for heartbeat cleanup service */
   heartbeatOptions?: HeartbeatServiceOptions;
+  /** Options for the payment reconciliation router */
+  reconciliation?: ReconciliationRouterOptions;
+  /** Disable response compression (useful in tests). Default: false. */
+  disableCompression?: boolean;
+  /** Custom job queue instance */
+  queue?: JobQueue;
+  /** Custom job worker instance */
+  jobWorker?: JobWorker;
+  /** Enable background queue worker (default: true) */
+  enableQueueWorker?: boolean;
 }
 
 /**
@@ -85,10 +117,32 @@ export function createApp(opts: AppOptions = {}): {
   app.use(createCorsMiddleware());
   app.use(requestId);
   app.use(requestLogger);
+  app.use(versioningMiddleware);
+
+  // ── Response compression ────────────────────────────────────────────────────
+  // Applied early so that all downstream route handlers benefit automatically.
+  // Disabled in tests (disableCompression: true) to keep assertions simple.
+  if (!opts.disableCompression && process.env.NODE_ENV !== "test") {
+    app.use(...compressionMiddleware());
+  }
 
   const dispatch: DispatchFn = opts.dispatch ?? makeHttpDispatch(opts.agentRegistry);
   const releasePayment: PaymentReleaseFn =
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
+
+  // ── Background Job Queue & Worker ──────────────────────────────────────────
+  const jobQueue = opts.queue ?? getGlobalJobQueue();
+  const jobWorker =
+    opts.jobWorker ??
+    new JobWorker({
+      jobStore: jobQueue.getStore(),
+      handler: createTaskJobHandler(dispatch, releasePayment),
+    });
+  jobQueue.setWorker(jobWorker);
+
+  if (opts.enableQueueWorker !== false) {
+    jobWorker.start();
+  }
 
   // ── Heartbeat Background Cleanup Service ────────────────────────────────────
   const heartbeatService = createHeartbeatService(opts.heartbeatOptions);
@@ -115,19 +169,40 @@ export function createApp(opts: AppOptions = {}): {
   });
 
   // ── Task routes ────────────────────────────────────────────────────────────
-  app.use("/api/tasks", createTasksRouter(dispatch, releasePayment));
+  // Create version-specific routers
+  const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
+  const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
+  
+  // Version-specific task routing based on negotiated API version
+  app.use("/api/tasks", (req, res, next) => {
+    const apiVersion = res.locals.apiVersion || "1.0";
+    
+    // Route to version-specific handler based on negotiated version
+    if (apiVersion.startsWith("1.")) {
+      return v1TasksRouter(req, res, next);
+    } else {
+      // Default to v2 for version 2.0 and above
+      return v2TasksRouter(req, res, next);
+    }
+  });
 
-  // ── HTTP server ────────────────────────────────────────────────────────────
+  // ── Admin Queue routes ─────────────────────────────────────────────────────
+  app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
+  app.use("/api/admin", createAdminQueueRouter(jobQueue));
+
+  // ── Payment reconciliation routes ──────────────────────────────────────────
+  app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
+
+  // ── HTTP server ────────────────────────────────────────────────────
   const httpServer = createServer(app);
 
   // ── Event persistence ──────────────────────────────────────────────────────
-  // Record every Coordinator event (with its EventBus-assigned per-task seq) so
-  // a (re)connecting client can replay history before live streaming begins —
-  // either the full history, or only events past a `?lastEventId` cursor.
-  const eventStore = opts.eventStore ?? createEventStore();
-  const stopRecording = eventBus.subscribeAll((event) =>
-    eventStore.append(event),
-  );
+  // The EventBus already persists every event to its own EventStore (wired in
+  // the EventBus constructor).  We use that same store as the single canonical
+  // source for stream replay so there is exactly one DB and one writer.
+  // opts.eventStore is kept for backward compatibility with tests that inject
+  // a custom store; in production it will always be undefined here.
+  const eventStore = opts.eventStore ?? eventBus.store;
 
   // ── WebSocket: /tasks/:id/stream ───────────────────────────────────────────
   const detachStream = attachTaskStream({
@@ -142,10 +217,9 @@ export function createApp(opts: AppOptions = {}): {
   app.use(errorHandler);
 
   function close(callback?: () => void): void {
+    jobWorker.stop();
     heartbeatService.stop();
     detachStream();
-    stopRecording();
-    eventStore.close();
     httpServer.close(callback);
   }
 

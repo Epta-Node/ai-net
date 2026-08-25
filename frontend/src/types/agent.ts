@@ -50,11 +50,25 @@ export interface ComponentNode {
   children?: ComponentNode[];
 }
 
+export interface DesignImage {
+  url?: string;
+  src?: string;
+  image?: string;
+  name?: string;
+  title?: string;
+  alt?: string;
+  description?: string;
+  type?: string;
+}
+
 export interface DesignResultObj {
   colors?: string[] | DesignColor[];
   palette?: string[] | DesignColor[];
   components?: ComponentNode;
   hierarchy?: ComponentNode;
+  images?: string[] | DesignImage[];
+  mockups?: string[] | DesignImage[];
+  wireframes?: string[] | DesignImage[];
 }
 
 export type DesignResult = DesignResultObj;

@@ -1,0 +1,135 @@
+.wizardWrapper {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 2rem;
+  background: var(--bg-card, #ffffff);
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.wizardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.skipButton {
+  background: none;
+  border: none;
+  color: var(--text-muted, #6b7280);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.skipButton:hover {
+  text-decoration: underline;
+}
+
+.progressContainer {
+  margin-bottom: 2rem;
+}
+
+.progressText {
+  font-size: 0.875rem;
+  color: var(--text-muted, #6b7280);
+  margin-bottom: 0.5rem;
+  text-align: right;
+}
+
+.progressBarBackground {
+  height: 8px;
+  background: var(--bg-muted, #e5e7eb);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progressBarFill {
+  height: 100%;
+  background: var(--primary, #3b82f6);
+  transition: width 0.3s ease;
+}
+
+.stepContainer {
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stepContent {
+  flex: 1;
+}
+
+.stepTitle {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: var(--text-main, #111827);
+}
+
+.stepDescription {
+  color: var(--text-muted, #4b5563);
+  margin-bottom: 2rem;
+  line-height: 1.5;
+}
+
+.illustration {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+.buttonGroup {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border, #e5e7eb);
+}
+
+.backButton {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-main, #374151);
+}
+
+.nextButton, .primaryButton {
+  padding: 0.5rem 1rem;
+  background: var(--primary, #3b82f6);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.nextButton:disabled, .primaryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.walletInfo {
+  background: var(--bg-muted, #f3f4f6);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  word-break: break-all;
+}
+
+.link {
+  color: var(--primary, #3b82f6);
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.error {
+  color: #ef4444;
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}

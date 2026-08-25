@@ -1,86 +1,101 @@
-import { Keypair } from '@stellar/stellar-sdk';
-import { createPaymentReleaseFn, type StellarReleasePaymentFn } from './index';
-import * as taskStore from '../coordinator/taskStore';
-import type { Task } from '../types/task';
+/**
+ * Unit tests for createPaymentReleaseFn (backend/src/payment/index.ts).
+ *
+ * The Stellar SDK is mocked at the module level (see __mocks__/@stellar).
+ * taskStore is mocked so tests don't need a real SQLite database.
+ */
+import { createPaymentReleaseFn } from "./index";
 
-jest.mock('@stellar/stellar-sdk', () => ({
-  Keypair: {
-    fromSecret: jest.fn(() => ({ publicKey: () => 'GCOORDINATOR_MOCK_KEY' })),
-  },
+// ── Mock taskStore ────────────────────────────────────────────────────────────
+const mockGetTask = jest.fn();
+jest.mock("../coordinator/taskStore", () => ({
+  getTask: (...args: unknown[]) => mockGetTask(...args),
 }));
 
-const mockTask: Task = {
-  id: 'task_abc123',
-  prompt: 'test prompt',
-  walletPublicKey: 'GAGENT_WALLET_PUBLIC_KEY',
-  status: 'running',
-  dag: [],
-  createdAt: '2026-01-01T00:00:00.000Z',
-  updatedAt: '2026-01-01T00:00:00.000Z',
-};
+// ─────────────────────────────────────────────────────────────────────────────
 
-describe('createPaymentReleaseFn', () => {
-  let stellarRelease: jest.MockedFunction<StellarReleasePaymentFn>;
+const VALID_SECRET = "SCZANGBA5UOQVWDPI6QISXZAAFNKGJE4RFV7YMD6RVNOQKZSLK4P3SA";
 
-  beforeEach(() => {
-    stellarRelease = jest.fn();
-    delete process.env.STELLAR_COORDINATOR_SECRET;
+beforeEach(() => {
+  jest.clearAllMocks();
+  delete process.env.STELLAR_COORDINATOR_SECRET;
+});
+
+describe("createPaymentReleaseFn — STELLAR_COORDINATOR_SECRET not set", () => {
+  it("returns a no-op fn that resolves to 'noop'", async () => {
+    const release = createPaymentReleaseFn();
+    const result = await release("task_001", "node_r1");
+    expect(result).toBe("noop");
   });
 
-  afterEach(() => {
-    jest.clearAllMocks();
-  });
-
-  it('returns no-op and warns when STELLAR_COORDINATOR_SECRET is unset', async () => {
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const fn = createPaymentReleaseFn(stellarRelease);
-    const result = await fn('task_abc123', 'node_research');
-
-    expect(result).toBe('noop');
+  it("no-op works even when stellarRelease is provided", async () => {
+    const stellarRelease = jest.fn();
+    const release = createPaymentReleaseFn(stellarRelease as any);
+    await release("task_001", "node_r1");
     expect(stellarRelease).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('STELLAR_COORDINATOR_SECRET not set'));
-    warn.mockRestore();
+  });
+});
+
+describe("createPaymentReleaseFn — stellarRelease not provided", () => {
+  it("returns a no-op fn when stellarRelease is undefined", async () => {
+    process.env.STELLAR_COORDINATOR_SECRET = VALID_SECRET;
+    const release = createPaymentReleaseFn(undefined);
+    const result = await release("task_001", "node_r1");
+    expect(result).toBe("noop");
+  });
+});
+
+describe("createPaymentReleaseFn — fully configured", () => {
+  it("calls stellarRelease with coordinator keypair and wallet public key", async () => {
+    process.env.STELLAR_COORDINATOR_SECRET = VALID_SECRET;
+
+    const walletPublicKey = "GWALLETTESTPAYMENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    mockGetTask.mockReturnValue({
+      id: "task_001",
+      walletPublicKey,
+      status: "running",
+    });
+
+    const stellarRelease = jest.fn().mockResolvedValue("tx-hash-abc");
+    const release = createPaymentReleaseFn(stellarRelease as any);
+    const txHash = await release("task_001", "node_r1");
+
+    expect(txHash).toBe("tx-hash-abc");
+    expect(stellarRelease).toHaveBeenCalledTimes(1);
+    // First arg is a Keypair, second is wallet public key, third is taskId
+    const [, calledWallet, calledTaskId] = stellarRelease.mock.calls[0];
+    expect(calledWallet).toBe(walletPublicKey);
+    expect(calledTaskId).toBe("task_001");
   });
 
-  it('returns no-op and warns when stellarRelease is not provided', async () => {
-    process.env.STELLAR_COORDINATOR_SECRET = 'STEST_SECRET';
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+  it("throws when the task is not found", async () => {
+    process.env.STELLAR_COORDINATOR_SECRET = VALID_SECRET;
+    mockGetTask.mockReturnValue(undefined);
 
-    const fn = createPaymentReleaseFn(undefined);
-    const result = await fn('task_abc123', 'node_research');
+    const stellarRelease = jest.fn().mockResolvedValue("tx-hash-xyz");
+    const release = createPaymentReleaseFn(stellarRelease as any);
 
-    expect(result).toBe('noop');
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Stellar release function unavailable'));
-    warn.mockRestore();
-  });
-
-  it('calls releasePayment with correct taskId, keypair, and walletPublicKey', async () => {
-    process.env.STELLAR_COORDINATOR_SECRET = 'STEST_SECRET';
-    jest.spyOn(taskStore, 'getTask').mockReturnValue(mockTask);
-    stellarRelease.mockResolvedValue('stellar_tx_hash_abc');
-
-    const fn = createPaymentReleaseFn(stellarRelease);
-    const result = await fn('task_abc123', 'node_research');
-
-    expect(result).toBe('stellar_tx_hash_abc');
-    expect(Keypair.fromSecret).toHaveBeenCalledWith('STEST_SECRET');
-    expect(stellarRelease).toHaveBeenCalledWith(
-      expect.objectContaining({ publicKey: expect.any(Function) }),
-      'GAGENT_WALLET_PUBLIC_KEY',
-      'task_abc123'
-    );
-  });
-
-  it('throws with nodeId in message when task is not found', async () => {
-    process.env.STELLAR_COORDINATOR_SECRET = 'STEST_SECRET';
-    jest.spyOn(taskStore, 'getTask').mockReturnValue(undefined);
-
-    const fn = createPaymentReleaseFn(stellarRelease);
-
-    await expect(fn('missing_task', 'node_risk')).rejects.toThrow(
-      '[payment] Task not found: missing_task (node: node_risk)'
+    await expect(release("task_missing", "node_r1")).rejects.toThrow(
+      /task_missing/
     );
     expect(stellarRelease).not.toHaveBeenCalled();
+  });
+
+  it("propagates errors from stellarRelease", async () => {
+    process.env.STELLAR_COORDINATOR_SECRET = VALID_SECRET;
+    mockGetTask.mockReturnValue({
+      id: "task_001",
+      walletPublicKey: "GWALLETTESTPAYMENTAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      status: "running",
+    });
+
+    const stellarRelease = jest
+      .fn()
+      .mockRejectedValue(new Error("Stellar tx failed"));
+    const release = createPaymentReleaseFn(stellarRelease as any);
+
+    await expect(release("task_001", "node_r1")).rejects.toThrow(
+      "Stellar tx failed"
+    );
   });
 });

@@ -5,6 +5,8 @@
  * Do NOT re-define TaskStatus, NodeStatus, or DAGEventType elsewhere.
  */
 
+import type { QualityScore } from "../services/qualityScorer.types";
+
 export type TaskStatus = "queued" | "running" | "completed" | "cancelled" | "failed";
 
 /** Node-level statuses used by the coordinator during DAG execution. */
@@ -19,6 +21,11 @@ export interface DAGNode {
   error?: string;
   prompt?: string;
   description?: string;
+  /**
+   * Quality scoring result attached after agent execution, persisted with the
+   * node's task execution record. Absent when scoring is disabled or fails.
+   */
+  quality?: QualityScore;
 }
 
 export interface Task {

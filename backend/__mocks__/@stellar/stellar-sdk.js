@@ -17,6 +17,14 @@ const Keypair = {
 const Server = jest.fn().mockImplementation(() => ({
   loadAccount: jest.fn().mockResolvedValue({ id: "GCOORDINATOR", sequence: "1" }),
   submitTransaction: jest.fn().mockResolvedValue({ hash: "txhash-001" }),
+  claimableBalances: jest.fn().mockReturnValue({
+    claimableBalance: jest.fn().mockReturnValue({
+      call: jest.fn().mockResolvedValue({ id: "cb-1", amount: "1.0000000", asset: "native", sponsor: "GCOORDINATOR", claimants: [{ destination: "GAGENT" }] }),
+    }),
+    forAsset: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    call: jest.fn().mockResolvedValue({ records: [] }),
+  }),
 }));
 
 const Horizon = { Server };

@@ -12,6 +12,8 @@ import { AgentCleanupService } from "./services/agentCleanup";
 import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
+import { closeJobDb } from "./queue";
+import { createDefaultReconciliationService } from "./services/reconciliation";
 
 async function main() {
   // ── Validate env config at startup ──────────────────────────────────────────
@@ -32,6 +34,10 @@ async function main() {
     const cleanupService = new AgentCleanupService();
     cleanupService.start();
 
+    // Start daily payment reconciliation
+    const reconciliationService = createDefaultReconciliationService();
+    reconciliationService.startDaily(config.RECONCILIATION_INTERVAL_MS);
+
     // Create and start the server
     const { httpServer, close } = createApp();
 
@@ -49,6 +55,8 @@ async function main() {
       console.log("  - GET  /api/agents                 - List all agents");
       console.log("  - GET  /api/agents/capability/:type - Find agents by capability");
       console.log("  - POST /api/agents/:id/heartbeat    - Agent heartbeat");
+      console.log("  - POST /api/reconciliation/run      - Run payment reconciliation");
+      console.log("  - GET  /api/reconciliation/report   - Latest reconciliation report");
     });
 
     // ── Graceful shutdown ──────────────────────────────────────────────────────
@@ -60,6 +68,7 @@ async function main() {
       }, 10_000);
 
       cleanupService.stop();
+      reconciliationService.stop();
       globalAgentRegistry.shutdown();
       stopAgentSync();
 
@@ -130,6 +139,7 @@ export function setupGracefulShutdown(
       closeDb();
       closeAgentDb();
       closeTaskDb();
+      closeJobDb();
 
       console.log("[ai-net-backend] Graceful shutdown complete. Exiting.");
       clearTimeout(forcedTimeout);

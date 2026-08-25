@@ -35,7 +35,7 @@ afterAll(() => {
 });
 
 const app = createApp();
-const WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHN";
+const WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN";
 
 describe("POST /api/tasks", () => {
   it("returns 201 with taskId and DAG with >= 1 node for valid prompt", async () => {
@@ -174,9 +174,9 @@ describe("GET /api/tasks/:id", () => {
 
 describe("GET /api/tasks (pagination)", () => {
   it("returns paginated results", async () => {
-    // Create 3 tasks for a fresh wallet
+    // Create 3 tasks for a fresh wallet (must be a valid Stellar public key format)
     const wallet =
-      "GCEZWKCA5PAGINATE000000000000000000000000000000000000000000";
+      "GDPAGINATETEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4H";
     for (let i = 0; i < 3; i++) {
       await request(app.httpServer)
         .post("/api/tasks")
@@ -555,7 +555,7 @@ describe("GET /api/tasks (filtering, sorting, search)", () => {
 
 describe("POST /api/tasks — daily quota enforcement", () => {
   const quotaWallet =
-    "GCEZWKCA5QUOTA000000000000000000000000000000000000000000000";
+    "GQUOTATEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HH";
 
   beforeEach(() => {
     // Clean tasks for the quota test wallet before each test
