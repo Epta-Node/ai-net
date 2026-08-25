@@ -3,5 +3,6 @@ members = [
     "contracts/agent_registry",
     "contracts/error-resolver",
     "contracts/error-registry",
+    "contracts/payment_router",
 ]
 resolver = "2"
