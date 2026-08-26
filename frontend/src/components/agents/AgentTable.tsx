@@ -1,18 +1,18 @@
 import { useTranslation } from 'react-i18next'
 import { ArrowDown, ArrowUp, ArrowUpDown, Inbox } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
-import type { SortDir, SortKey } from '../../utils/agentRegistry'
+import type { SortDir } from '../../utils/agentRegistry'
 import { ReputationStars } from './ReputationStars'
+import { AgentDetailModal } from './AgentDetailModal'
+import { useTableSort } from '../../hooks/useTableSort'
 import styles from './AgentTable.module.css'
 
 interface AgentTableProps {
   agents: AgentRecord[]
   loading: boolean
-  sortKey: SortKey | null
-  sortDir: SortDir
-  /** Toggle/apply sort on the given column. Reputation only sorts desc. */
-  onSort: (key: SortKey) => void
-  onRowClick: (agent: AgentRecord) => void
+  selectedIds: Set<string>
+  onToggleSelection: (id: string, shift: boolean) => void
+  onSelectAll: (selected: boolean) => void
 }
 
 const SKELETON_ROWS = 5
@@ -34,10 +34,9 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 export function AgentTable({
   agents,
   loading,
-  sortKey,
-  sortDir,
-  onSort,
-  onRowClick,
+  selectedIds,
+  onToggleSelection,
+  onSelectAll,
 }: AgentTableProps) {
   const { t } = useTranslation()
 
@@ -78,6 +77,9 @@ export function AgentTable({
           {loading ? (
             Array.from({ length: SKELETON_ROWS }, (_, i) => (
               <tr key={i} className={styles.skeletonRow} data-testid="agent-skeleton-row">
+                <td className={styles.checkboxCell}>
+                  <span className={styles.skeletonCell} />
+                </td>
                 {Array.from({ length: 6 }, (_, c) => (
                   <td key={c}>
                     <span className={styles.skeletonCell} />
@@ -87,13 +89,14 @@ export function AgentTable({
             ))
           ) : agents.length === 0 ? (
             <tr>
-              <td colSpan={6}>
+              <td colSpan={7}>
                 <div className={styles.emptyState} data-testid="agents-empty">
                   <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
                   <p className={styles.emptyTitle}>{t('agent.table.emptyTitle')}</p>
                   <p className={styles.emptySubtext}>
                     {t('agent.table.emptySubtext')}
                   </p>
+                  <button className={styles.ctaButton}>Register Agent</button>
                 </div>
               </td>
             </tr>

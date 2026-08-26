@@ -127,7 +127,7 @@ export function filtersToSearchParams(filters: AgentFilters): Record<string, str
   if (filters.status !== 'all') params.status = filters.status
   if (filters.sortKey) {
     params.sort = filters.sortKey
-    params.dir = filters.sortDir
+    params.order = filters.sortDir
   }
 
   return params
@@ -143,7 +143,7 @@ export function filtersFromSearchParams(params: URLSearchParams): AgentFilters {
   const caps = params.get('caps')
   const status = params.get('status')
   const sort = params.get('sort')
-  const dir = params.get('dir')
+  const dir = params.get('order')
 
   return {
     capabilities: caps ? caps.split(',').map((c) => c.trim()).filter(Boolean) : [],

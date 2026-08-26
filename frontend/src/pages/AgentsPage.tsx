@@ -14,7 +14,6 @@ import {
   filtersToSearchParams,
   priceDomain,
   type AgentFilters,
-  type SortKey,
 } from '../utils/agentRegistry'
 import styles from './AgentsPage.module.css'
 
@@ -63,7 +62,8 @@ function AgentsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [selected, setSelected] = useState<AgentRecord | null>(null)
 
-  // Filter/sort state is derived from the URL so views are shareable.
+  const { selectedIds, toggleSelection, selectAll, clearSelection } = useRowSelection(agents, (a) => a.id)
+
   const filters = useMemo(
     () => filtersFromSearchParams(searchParams),
     [searchParams]
@@ -80,18 +80,6 @@ function AgentsPage() {
   const resetFilters = useCallback(() => {
     setSearchParams({}, { replace: true })
   }, [setSearchParams])
-
-  const handleSort = useCallback(
-    (key: SortKey) => {
-      if (filters.sortKey !== key) {
-        // Reputation defaults to high-to-low; price to low-to-high.
-        updateFilters({ sortKey: key, sortDir: key === 'price' ? 'asc' : 'desc' })
-      } else {
-        updateFilters({ sortDir: filters.sortDir === 'asc' ? 'desc' : 'asc' })
-      }
-    },
-    [filters, updateFilters]
-  )
 
   const capabilities = useMemo(() => allCapabilities(agents), [agents])
   const domain = useMemo(() => priceDomain(agents), [agents])
@@ -133,15 +121,16 @@ function AgentsPage() {
             onChange={updateFilters}
             onReset={resetFilters}
             onRefresh={refetch}
+            selectedCount={selectedIds.size}
+            onClearSelection={clearSelection}
           />
 
           <AgentTable
             agents={visibleAgents}
             loading={loading}
-            sortKey={filters.sortKey}
-            sortDir={filters.sortDir}
-            onSort={handleSort}
-            onRowClick={setSelected}
+            selectedIds={selectedIds}
+            onToggleSelection={toggleSelection}
+            onSelectAll={selectAll}
           />
         </div>
       )}

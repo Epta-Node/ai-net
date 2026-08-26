@@ -218,3 +218,69 @@
   font-size: 0.85rem;
   color: var(--text-secondary);
 }
+
+.checkboxCell {
+  width: 48px;
+  text-align: center;
+}
+.checkboxCell input {
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.rowSelected td {
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.rowExpanded td {
+  border-bottom: none;
+}
+
+.expandButton {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  padding: 5px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expandButton:hover {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+  transform: none;
+  box-shadow: none;
+}
+
+.expandedRowContainer td {
+  padding: 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.expandedCell {
+  padding: 0;
+}
+
+.expandedContent {
+  overflow: hidden;
+}
+
+.ctaButton {
+  margin-top: 12px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+.ctaButton:hover {
+  opacity: 0.9;
+}

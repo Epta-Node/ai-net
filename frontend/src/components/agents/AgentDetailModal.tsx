@@ -10,23 +10,24 @@ const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 interface AgentDetailModalProps {
   agent: AgentRecord | null
   onClose: () => void
+  inline?: boolean
 }
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
 
   useEffect(() => {
-    if (!agent) return
+    if (!agent || inline) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [agent, onClose])
+  }, [agent, onClose, inline])
 
   if (!agent) return null
 
-  return (
+  const content = (
     <div
       className={styles.overlay}
       onClick={onClose}
@@ -34,18 +35,14 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
       aria-modal="true"
       aria-label={t('a11y.detailsFor', { name: agent.name })}
     >
-      <div
-        className={styles.modal}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="agent-detail-modal"
-      >
-        <header className={styles.header}>
-          <div>
-            <h2 className={styles.title}>{agent.name}</h2>
-            <code className={styles.id} title={agent.id}>
-              {agent.id}
-            </code>
-          </div>
+      <header className={styles.header}>
+        <div>
+          <h2 className={styles.title}>{agent.name}</h2>
+          <code className={styles.id} title={agent.id}>
+            {agent.id}
+          </code>
+        </div>
+        {!inline && (
           <button
             type="button"
             className={styles.closeButton}
@@ -54,7 +51,8 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
           >
             <X size={18} />
           </button>
-        </header>
+        )}
+      </header>
 
         <dl className={styles.grid}>
           <div className={styles.field}>
@@ -82,6 +80,7 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
             </dd>
           </div>
 
+        {agent.endpoint && (
           <div className={styles.fieldWide}>
             <dt>{t('common.capabilities')}</dt>
             <dd className={styles.pills}>
@@ -96,6 +95,30 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
               )}
             </dd>
           </div>
+        )}
+
+        <div className={styles.fieldWide}>
+          <dt>Registration Transaction</dt>
+          <dd>
+            {agent.registrationTxHash ? (
+              <a
+                className={styles.txLink}
+                href={`${STELLAR_EXPLORER}/tx/${agent.registrationTxHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="registration-tx-link"
+              >
+                <span className={styles.mono}>{agent.registrationTxHash}</span>
+                <ExternalLink size={14} aria-hidden="true" />
+              </a>
+            ) : (
+              <span className={styles.value}>Not available</span>
+            )}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  )
 
           {agent.endpoint && (
             <div className={styles.fieldWide}>

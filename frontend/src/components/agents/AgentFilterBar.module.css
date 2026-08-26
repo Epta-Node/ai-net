@@ -162,3 +162,36 @@
   transform: none;
   box-shadow: none;
 }
+
+.bulkBar {
+  align-items: center;
+  background: rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.bulkInfo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.selectedCount {
+  font-weight: 600;
+  color: #c7d2fe;
+}
+
+.bulkActionButton {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.bulkActionButton:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
