@@ -12,6 +12,7 @@ import { AgentCleanupService } from "./services/agentCleanup";
 import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
+import { closeJobDb } from "./queue";
 import { createDefaultReconciliationService } from "./services/reconciliation";
 
 async function main() {
@@ -138,6 +139,7 @@ export function setupGracefulShutdown(
       closeDb();
       closeAgentDb();
       closeTaskDb();
+      closeJobDb();
 
       console.log("[ai-net-backend] Graceful shutdown complete. Exiting.");
       clearTimeout(forcedTimeout);

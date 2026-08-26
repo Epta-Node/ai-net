@@ -10,6 +10,8 @@ import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
 
+import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
+
 // ── Validation config ────────────────────────────────────────────────────────
 // Read at module load time so the value is stable for the lifetime of the
 // process. Tests that need a different value should set process.env before
@@ -44,6 +46,7 @@ export const createTaskSchema = z.object({
   walletPublicKey: z.string().optional(),
   maxBudgetXLM: z.number().min(0.1).optional().default(1),
   agentPreferences: z.array(z.string()).optional(),
+  priority: z.enum(["low", "normal", "high", "critical"]).optional().default("normal"),
 });
 
 const TaskListSchema = z.object({
@@ -54,10 +57,17 @@ const TaskListSchema = z.object({
   q: z.string().optional(),
 });
 
-// ── Router factory ───────────────────────────────────────────────────────────
-
-export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentReleaseFn): Router {
+/**
+ * @deprecated Use version-specific routers instead: createV1TasksRouter or createV2TasksRouter
+ * This router is kept for backward compatibility and will be removed in a future version.
+ */
+export function createTasksRouter(
+  dispatch: DispatchFn,
+  releasePayment: PaymentReleaseFn,
+  queue?: JobQueue
+): Router {
   const tasksRouter = Router();
+  const jobQueue = queue ?? getGlobalJobQueue();
 
   /**
    * @openapi
@@ -86,6 +96,10 @@ export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentR
    *                 type: array
    *                 items:
    *                   type: string
+   *               priority:
+   *                 type: string
+   *                 enum: [low, normal, high, critical]
+   *                 default: normal
    *     responses:
    *       201:
    *         description: Task created and queued
@@ -117,7 +131,7 @@ export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentR
    */
   // POST /api/tasks — rate-limited, then Zod-validated
   tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
-    const { prompt } = req.body as z.infer<typeof createTaskSchema>;
+    const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     // Body first, then the header (both spellings accepted), then "anonymous".
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
@@ -155,13 +169,12 @@ export function createTasksRouter(dispatch: DispatchFn, releasePayment: PaymentR
 
     createTask(task);
 
-    const log = createLogger({ taskId });
-
-    // Run the DAG asynchronously — do not await
-    setImmediate(() => {
-      executeDAG(getTask(taskId)!, dispatch, releasePayment).catch((err) => {
-        log.error({ err }, "DAG execution error");
-      });
+    // Enqueue task into persistent background job queue
+    jobQueue.enqueue({
+      taskId: task.id,
+      type: "execute_task",
+      priority: (priority as JobPriority) ?? "normal",
+      payload: { taskId: task.id },
     });
 
     res.status(201).json({ taskId: task.id, dagPreview: dag, status: "queued" });

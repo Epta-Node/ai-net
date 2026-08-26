@@ -127,9 +127,10 @@ describe("Agents API route", () => {
     expect(response.body).toEqual({ error: "Agent not found" });
   });
 
-  it("returns 200 with the updated lastSeenAt on heartbeat", async () => {
+  it("returns 200 and updates lastSeenAt on heartbeat", async () => {
     const app = createTestApp([codingAgent]);
-    const before = new Date();
+    // SQLite's datetime('now') has second precision, so floor the baseline.
+    const before = new Date(Math.floor(Date.now() / 1000) * 1000);
 
     const response = await request(app).post("/api/agents/coding-1/heartbeat");
 
@@ -150,8 +151,7 @@ describe("Agents API route", () => {
 });
 
 describe("Stellar public key validation", () => {
-  // Must satisfy /^G[A-Z2-7]{55}$/ — 56 characters total.
-  const VALID_KEY = "GDPDTI4X27QVEKWCZ3XOOB2G5ZVBCQFF3LTUXPITCVYQQIHDK2DW6CG2";
+  const VALID_KEY = "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ";
 
   beforeAll(() => {
     process.env.SKIP_STELLAR_ACCOUNT_VERIFY = "true";
@@ -234,23 +234,25 @@ describe("Stellar public key validation", () => {
       return app;
     }
 
-    // walletPublicKey is optional by design (header or body, falling back to
-    // "anonymous") — see createTaskSchema in src/api/routes/tasks.ts.
-    it("accepts an invalid walletpublickey header as anonymous", async () => {
+    it("creates the task with an unvalidated walletpublickey header value", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .set("walletpublickey", "INVALID-KEY-123")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
       expect(response.status).toBe(201);
+      expect(response.body.status).toBe("queued");
+      expect(response.body.taskId).toBeDefined();
     });
 
-    it("accepts a missing walletpublickey header as anonymous", async () => {
+    it("creates the task with an anonymous wallet when the header is missing", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
       expect(response.status).toBe(201);
+      expect(response.body.status).toBe("queued");
+      expect(response.body.taskId).toBeDefined();
     });
   });
 });

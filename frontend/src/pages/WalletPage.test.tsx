@@ -8,7 +8,6 @@ const mockConnect = vi.fn()
 const mockDisconnect = vi.fn()
 const mockConnectFreighter = vi.fn()
 
-// Mock wallet state - will be overridden per test via mutable object
 let mockWalletState: {
   publicKey: string | null
   keypair: any
@@ -20,7 +19,6 @@ let mockWalletState: {
   connectFreighter: typeof mockConnectFreighter
   disconnect: typeof mockDisconnect
   hasCompletedWizard: boolean
-  completeWizard: typeof vi.fn
 } = {
   publicKey: null as string | null,
   keypair: null as any,
@@ -32,7 +30,6 @@ let mockWalletState: {
   connectFreighter: mockConnectFreighter,
   disconnect: mockDisconnect,
   hasCompletedWizard: true,
-  completeWizard: vi.fn(),
 }
 
 vi.mock('../context/WalletContext', () => ({
@@ -85,7 +82,6 @@ beforeEach(() => {
     connectFreighter: mockConnectFreighter,
     disconnect: mockDisconnect,
     hasCompletedWizard: true,
-    completeWizard: vi.fn(),
   }
 })
 
@@ -134,7 +130,6 @@ describe('WalletPage - Connected State', () => {
       connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
       hasCompletedWizard: true,
-      completeWizard: vi.fn(),
     }
   })
 
@@ -207,7 +202,6 @@ describe('SendXLMForm Validation', () => {
       connectFreighter: mockConnectFreighter,
       disconnect: mockDisconnect,
       hasCompletedWizard: true,
-      completeWizard: vi.fn(),
     }
   })
 

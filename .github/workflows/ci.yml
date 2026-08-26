@@ -76,8 +76,23 @@ jobs:
 
   contracts:
     name: smart-contracts
+    # Run after the lightweight Node jobs so that at most one Rust compilation
+    # is active at a time, preventing the runner (or a local dev laptop) from
+    # being overwhelmed by concurrent cargo builds.
+    needs: [backend, frontend]
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      # ── Rust resource limits ──────────────────────────────────────────
+      # Run only 1 cargo job at a time (one crate compiled in parallel max).
+      CARGO_BUILD_JOBS: "1"
+      # 1 codegen unit = lower peak RAM; rustc won't split crates into many
+      # parallel LLVM modules. Mirrors smart-contracts/.cargo/config.toml so
+      # the flag is enforced even if the config file is not picked up.
+      RUSTFLAGS: "-C codegen-units=1"
+      # Disable incremental compilation in CI — it saves time only on local
+      # re-builds; in CI it just wastes disk/RAM building the cache layer.
+      CARGO_INCREMENTAL: "0"
     defaults:
       run:
         working-directory: smart-contracts
@@ -92,10 +107,12 @@ jobs:
           cache: npm
           cache-dependency-path: smart-contracts/package-lock.json
 
-      - name: Install Rust toolchain
+      - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          # The Soroban contracts build for this target (see "Cargo build"
+          # below); installing the target is what makes `cargo build` work.
           targets: wasm32v1-none
 
       - name: Cache Rust build
@@ -142,6 +159,8 @@ jobs:
   e2e-fullstack:
     name: e2e-fullstack
     continue-on-error: true
+    # Sequence after backend so it doesn't overlap with the Rust contracts job.
+    needs: [backend]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

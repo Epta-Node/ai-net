@@ -2,10 +2,18 @@ import type pino from 'pino';
 import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
-import { updateNode, updateTask } from './taskStore';
+import { updateNode, updateTask, getTask } from './taskStore';
 import type { DAGNode, Task } from '../types/task';
+import {
+  QualityScorer,
+  recordQualityScore,
+  reputationDeltaForScore,
+  updateAgentReputation,
+} from '../services/qualityScorer';
+import type { QualityScore } from '../services/qualityScorer.types';
 import { createLogger } from '../utils/logger';
 import { tracingService } from '../services/tracing';
+import type { Job } from '../queue/jobStore';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -32,7 +40,9 @@ export interface CoordinatorOptions {
   dispatch?: DispatchFn;
   /** Structured logger bound with correlation context (e.g. { taskId, requestId }) */
   logger?: pino.Logger;
-  /** Correlation ID for distributed tracing — propagated to all sub-spans and agent HTTP calls. */
+  /** Custom quality scorer; defaults to the built-in scorer with per-type rules. */
+  qualityScorer?: QualityScorer;
+  /** Correlation ID propagated to downstream HTTP requests and used for tracing spans. */
   correlationId?: string;
 }
 
@@ -90,6 +100,7 @@ export class Coordinator {
   private readonly dispatchOverride?: DispatchFn;
   private readonly agentRegistry?: AgentRegistry;
   private readonly paymentService: PaymentService;
+  private readonly qualityScorer: QualityScorer;
   private readonly log: pino.Logger;
   private readonly correlationId: string;
 
@@ -101,17 +112,42 @@ export class Coordinator {
     this.dispatchOverride = options.dispatch;
     this.agentRegistry = options.agentRegistry;
     this.paymentService = options.paymentService ?? { release: async () => 'mock-hash' };
+    this.qualityScorer = options.qualityScorer ?? new QualityScorer();
     this.log = options.logger ?? createLogger();
     this.correlationId = options.correlationId ?? '';
   }
 
-  async executeDAG(taskId: string, dag: DAGNode[]): Promise<void> {
+  async executeDAG(
+    taskId: string,
+    dag: DAGNode[],
+    onProgress?: (percentage: number) => void
+  ): Promise<void> {
     const completed = new Set<string>();
     const failed = new Set<string>();
     const scheduled = new Set<string>();
+
+    // Account for any nodes that were already completed in a previous attempt
+    for (const node of dag) {
+      if (node.status === 'completed') {
+        completed.add(node.nodeId);
+        scheduled.add(node.nodeId);
+      }
+    }
+
     const nodeById = new Map(dag.map(node => [node.nodeId, node]));
     let inFlight = 0;
     let settled = false;
+
+    const reportProgress = () => {
+      if (dag.length === 0) {
+        onProgress?.(100);
+        return;
+      }
+      const pct = Math.round((completed.size / dag.length) * 100);
+      onProgress?.(pct);
+    };
+
+    reportProgress();
 
     this.log.info({ taskId, totalNodes: dag.length }, 'DAG execution started');
 
@@ -132,6 +168,9 @@ export class Coordinator {
 
         const status = failed.size === 0 ? 'completed' : 'failed';
         updateTaskIfPresent(taskId, { status, dag });
+        if (status === 'completed') {
+          onProgress?.(100);
+        }
         this.bus.emit(taskId, {
           type: status === 'completed' ? 'task_completed' : 'task_failed',
           taskId,
@@ -207,8 +246,12 @@ export class Coordinator {
           inFlight += 1;
           this.limiter.run(() => this.runNode(taskId, node, nodeById))
             .then(status => {
-              if (status === 'completed') completed.add(node.nodeId);
-              else failed.add(node.nodeId);
+              if (status === 'completed') {
+                completed.add(node.nodeId);
+                reportProgress();
+              } else {
+                failed.add(node.nodeId);
+              }
             })
             .catch(err => {
               console.error('[coordinator] runNode threw unexpectedly:', err);
@@ -306,11 +349,18 @@ export class Coordinator {
     );
 
     try {
-      const result = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
+      const { agentId, result } = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
 
       node.status = 'completed';
       node.result = result;
-      updateNode(taskId, node.nodeId, { status: 'completed', result });
+
+      // Quality score the output and feed it back into reputation. Best-effort:
+      // scoring never fails the node.
+      const quality = this.scoreOutput(taskId, node, result, agentId);
+      if (quality) {
+        node.quality = quality;
+      }
+      updateNode(taskId, node.nodeId, { status: 'completed', result, quality: node.quality });
       this.bus.emit(taskId, {
         type: 'node_completed',
         taskId,
@@ -320,7 +370,7 @@ export class Coordinator {
       });
 
       this.log.info(
-        { taskId, nodeId: node.nodeId, agentType: node.type },
+        { taskId, nodeId: node.nodeId, agentType: node.type, score: node.quality?.score },
         'node completed'
       );
 
@@ -372,9 +422,86 @@ export class Coordinator {
       .join('\n');
   }
 
-  private async dispatchWithRetry(taskId: string, node: DAGNode, context: string): Promise<unknown> {
+  /**
+   * Score a completed agent output, persist it with the task execution record,
+   * and feed it back into the agent's reputation. Best-effort: scoring failures
+   * are logged and never fail the node.
+   */
+  private scoreOutput(
+    taskId: string,
+    node: DAGNode,
+    result: unknown,
+    agentId?: string
+  ): QualityScore | undefined {
+    try {
+      const quality = this.qualityScorer.scoreForAgentType(result, node.prompt, node.type);
+      if (!quality) {
+        this.log.debug(
+          { taskId, nodeId: node.nodeId, agentType: node.type },
+          'quality scoring disabled for agent type'
+        );
+        return undefined;
+      }
+
+      if (agentId) {
+        recordQualityScore({
+          taskId,
+          nodeId: node.nodeId,
+          agentId,
+          agentType: node.type,
+          score: quality.score,
+          completeness: quality.completeness.score,
+          relevance: quality.relevance.score,
+          format: quality.format.score,
+          needsReview: quality.needsReview,
+          timestamp: quality.timestamp,
+        });
+        updateAgentReputation(agentId, reputationDeltaForScore(quality.score));
+      }
+
+      this.log.info(
+        {
+          taskId,
+          nodeId: node.nodeId,
+          agentId,
+          agentType: node.type,
+          score: quality.score,
+          needsReview: quality.needsReview,
+        },
+        'agent output quality scored'
+      );
+
+      if (quality.needsReview) {
+        this.log.warn(
+          {
+            taskId,
+            nodeId: node.nodeId,
+            agentId,
+            agentType: node.type,
+            score: quality.score,
+            threshold: this.qualityScorer.getRules(node.type).reviewThreshold,
+          },
+          'low quality output flagged for review'
+        );
+      }
+
+      return quality;
+    } catch (err) {
+      this.log.warn(
+        { taskId, nodeId: node.nodeId, agentType: node.type, err },
+        'quality scoring failed'
+      );
+      return undefined;
+    }
+  }
+
+  private async dispatchWithRetry(
+    taskId: string,
+    node: DAGNode,
+    context: string
+  ): Promise<{ agentId?: string; result: unknown }> {
     if (this.dispatchOverride) {
-      return this.dispatchOverride(taskId, node, context);
+      return { result: await this.dispatchOverride(taskId, node, context) };
     }
 
     const agents = await this.agentsFor(node.type);
@@ -383,7 +510,7 @@ export class Coordinator {
 
     for (let attempt = 1; attempt <= PRIMARY_ATTEMPTS; attempt += 1) {
       try {
-        return await this.dispatchNode(node, context, primary);
+        return { agentId: primary.id, result: await this.dispatchNode(node, context, primary) };
       } catch (err) {
         lastError = err;
         if (!isRetryable(err)) throw err;
@@ -401,7 +528,7 @@ export class Coordinator {
         'falling back to alternative agent'
       );
       try {
-        return await this.dispatchNode(node, context, fallback);
+        return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback) };
       } catch (err) {
         lastError = err;
       }
@@ -432,7 +559,8 @@ export class Coordinator {
 export async function executeDAG(
   task: Task,
   dispatch: DispatchFn,
-  releasePayment: PaymentReleaseFn
+  releasePayment: PaymentReleaseFn,
+  onProgress?: (percentage: number) => void
 ): Promise<void> {
   const log = createLogger({ taskId: task.id, requestId: task.requestId });
 
@@ -442,7 +570,48 @@ export async function executeDAG(
     logger: log,
   });
 
-  await coordinator.executeDAG(task.id, task.dag);
+  await coordinator.executeDAG(task.id, task.dag, onProgress);
+}
+
+/**
+ * Creates a job handler function suitable for JobWorker to execute tasks
+ * from the background job queue.
+ */
+export function createTaskJobHandler(
+  dispatch: DispatchFn,
+  releasePayment: PaymentReleaseFn
+): (job: Job, updateProgress: (percentage: number) => void) => Promise<void> {
+  return async (job: Job, updateProgress: (percentage: number) => void) => {
+    const task = getTask(job.taskId);
+    if (!task) {
+      throw new Error(`Task ${job.taskId} not found for job ${job.id}`);
+    }
+
+    if (task.status === "cancelled") {
+      return;
+    }
+
+    // Reset any failed nodes from a previous attempt so retry executes them
+    let hasReset = false;
+    for (const node of task.dag) {
+      if (node.status === "failed") {
+        node.status = "pending";
+        node.error = undefined;
+        hasReset = true;
+      }
+    }
+    if (hasReset) {
+      updateTaskIfPresent(task.id, { dag: task.dag });
+    }
+
+    await executeDAG(task, dispatch, releasePayment, updateProgress);
+
+    const refreshedTask = getTask(job.taskId);
+    if (refreshedTask && refreshedTask.status === "failed") {
+      const firstErrorNode = refreshedTask.dag.find((n) => n.status === "failed");
+      throw new Error(firstErrorNode?.error || "Task execution failed");
+    }
+  };
 }
 
 function updateTaskIfPresent(taskId: string, patch: Partial<Task>): void {
@@ -452,3 +621,4 @@ function updateTaskIfPresent(taskId: string, patch: Partial<Task>): void {
     // Unit tests can exercise the coordinator without creating a task first.
   }
 }
+

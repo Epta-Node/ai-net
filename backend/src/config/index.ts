@@ -56,6 +56,16 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .transform((v) => v === "true")
     .default("true"),
+
+  // ── API Versioning ──────────────────────────────────────────────────────────
+  /** Latest API version. Default: "2.0". */
+  API_LATEST_VERSION: z.string().default("2.0"),
+  /** Supported API versions (comma-separated). Default: "1.0,1.1,2.0". */
+  API_SUPPORTED_VERSIONS: z.string().default("1.0,1.1,2.0"),
+  /** Default API version when no header is provided. Default: "1.0" for backward compatibility. */
+  API_DEFAULT_VERSION: z.string().default("1.0"),
+  /** Sunset date for deprecated API versions (ISO 8601 format). Optional. */
+  API_V1_SUNSET_DATE: z.string().optional(),
 });
 
 
