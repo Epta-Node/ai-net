@@ -106,6 +106,20 @@ const envSchema = z.object({
   /** Max agent-registration requests per IP per window. Default: 10. */
   REGISTER_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(10),
 
+  // ── Per-group route rate limiting ───────────────────────────────────────────
+  /** Rolling window (ms) for public (unauthenticated) routes. Default: 60 000. */
+  RATE_LIMIT_PUBLIC_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  /** Max requests per IP per window for public routes. Default: 120. */
+  RATE_LIMIT_PUBLIC_MAX_REQUESTS: z.coerce.number().int().positive().default(120),
+  /** Rolling window (ms) for authenticated task routes. Default: 60 000. */
+  RATE_LIMIT_AUTHED_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  /** Max requests per IP per window for authenticated routes. Default: 30. */
+  RATE_LIMIT_AUTHED_MAX_REQUESTS: z.coerce.number().int().positive().default(30),
+  /** Rolling window (ms) for admin routes. Default: 60 000. */
+  RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  /** Max requests per IP per window for admin routes. Default: 20. */
+  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(20),
+
   // ── Per-wallet quotas ───────────────────────────────────────────────────────
   /** Maximum tasks a single wallet may create within a rolling 24-hour window.
    *  Set to 0 to disable the daily quota. Default: 100. */

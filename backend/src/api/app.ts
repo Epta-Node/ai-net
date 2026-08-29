@@ -122,7 +122,7 @@ import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
+import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
@@ -258,14 +258,15 @@ export function createApp(opts: AppOptions = {}): {
   }
 
   // ── Health routes ───────────────────────────────────────────────────────────
-  app.use("/health", healthRouter);
+  app.use("/health", publicLimiter.middleware, healthRouter);
 
   // ── Stats routes ───────────────────────────────────────────────────────────
-  app.use("/api/stats", createStatsRouter(getTaskDb()));
+  app.use("/api/stats", publicLimiter.middleware, createStatsRouter(getTaskDb()));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
-  // Apply a stricter rate limit specifically to the register endpoint to
-  // prevent registration floods (the full agentsRouter handles GET/DELETE etc.).
+  // Public reads use the public limiter; registration uses the stricter
+  // per-legacy register limiter (kept for backward compatibility).
+  app.use("/api/agents", publicLimiter.middleware);
   app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
@@ -287,26 +288,22 @@ export function createApp(opts: AppOptions = {}): {
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, swaggerUiOptions));
 
   // ── Task routes ────────────────────────────────────────────────────────────
-  // Create version-specific routers
+  // Authenticated task creation uses the tighter authed limiter.
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
-  
-  // Version-specific task routing based on negotiated API version
-  app.use("/api/tasks", (req, res, next) => {
+
+  app.use("/api/tasks", authedLimiter.middleware, (req, res, next) => {
     const apiVersion = res.locals.apiVersion || "1.0";
-    
-    // Route to version-specific handler based on negotiated version
     if (apiVersion.startsWith("1.")) {
       return v1TasksRouter(req, res, next);
     } else {
-      // Default to v2 for version 2.0 and above
       return v2TasksRouter(req, res, next);
     }
   });
 
   // ── Admin Queue routes ─────────────────────────────────────────────────────
-  app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
-  app.use("/api/admin", createAdminQueueRouter(jobQueue));
+  app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
+  app.use("/api/admin", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));

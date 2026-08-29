@@ -7,14 +7,9 @@ export interface RateLimitOptions {
   /** Maximum number of requests allowed within the window. Default: 20. */
   maxRequests?: number;
   /**
-   * Maximum number of distinct IPs tracked simultaneously **per limiter
-   * instance**. When this many entries are present, the least-recently-used
-   * IP is evicted on the next accepted request. Defaults to 10 000, which
-   * keeps the worst-case memory footprint predictable under IP-flood
-   * attacks (issue #154). Note: the module-instantiated default limiters
-   * (`rateLimitMiddleware` and `registerRateLimitMiddleware`) are separate
-   * instances, so two requests in flight can touch up to 2 × maxEntries
-   * entries combined.
+   * Maximum number of distinct IPs tracked simultaneously per limiter instance.
+   * When the limit is reached the least-recently-used IP is evicted on the
+   * next accepted request. Defaults to 10 000 (issue #154).
    */
   maxEntries?: number;
 }
@@ -26,39 +21,51 @@ interface Window {
 export interface RateLimiter {
   middleware: (req: Request, res: Response, next: NextFunction) => void;
   /**
-   * Fully clears tracked state. In this implementation there is no
-   * background eviction interval to halt, so `stop()` is essentially
-   * `cache.clear()` — kept for API compatibility with the original
-   * implementation and for tests / graceful shutdown hooks.
-   *
-   * **Behavior change vs the original implementation** (issue #154): the
-   * old `stop()` called `clearInterval()` on a background eviction sweep;
-   * the new `stop()` clears the cache. Anything that stored the factory
-   * return value and relied on the old semantic should migrate.
+   * Fully clears tracked state. Kept for API compatibility and graceful
+   * shutdown hooks.
    */
   stop: () => void;
   /**
-   * Current number of tracked IPs. Exposed primarily for tests and
-   * operational debugging — not part of the rate-limiting contract.
+   * Current number of tracked IPs. Exposed for tests and operational
+   * debugging — not part of the rate-limiting contract.
    * @internal
    */
   size: () => number;
 }
 
 /**
+ * Attach standard rate-limit headers to the response.
+ *
+ * Headers emitted on **every** response so clients can track their quota
+ * without waiting for a 429:
+ *  - `X-RateLimit-Limit`     — max requests allowed per window
+ *  - `X-RateLimit-Remaining` — requests remaining in the current window
+ *  - `X-RateLimit-Reset`     — Unix timestamp (seconds) when the window resets
+ *
+ * On 429 responses `Retry-After` is also set (seconds until reset).
+ */
+function setRateLimitHeaders(
+  res: Response,
+  limit: number,
+  remaining: number,
+  resetAtMs: number,
+): void {
+  const resetSec = Math.ceil(resetAtMs / 1000);
+  res.setHeader("X-RateLimit-Limit", String(limit));
+  res.setHeader("X-RateLimit-Remaining", String(Math.max(0, remaining)));
+  res.setHeader("X-RateLimit-Reset", String(resetSec));
+}
+
+/**
  * Create a configurable in-memory sliding-window rate limiter.
  *
- * Backing store is `lru-cache`, which provides both:
- *  - a hard cap on entry count (`max` / `maxEntries`) so the worst-case
- *    memory footprint is bounded against IP-flood attacks (issue #154 —
- *    the previous `Map`-only implementation grew unboundedly between the
- *    once-per-minute TTL sweeps); and
- *  - TTL-based eviction (`ttl` / `windowMs`) so quiet IPs drop out
- *    automatically after their window passes.
+ * Backing store is `lru-cache`, which provides:
+ *  - a hard cap on entry count (`maxEntries`) bounding memory under IP floods
+ *    (issue #154); and
+ *  - TTL-based eviction so quiet IPs drop out automatically.
  *
- * Active IPs stay cached because every accepted request calls
- * `windows.set(ip, win)`, which refreshes the entry's age; the
- * least-recently-used entry is evicted only when inserting past `max`.
+ * Standard rate-limit headers are emitted on every response so clients can
+ * proactively back off rather than only learning about limits on 429.
  */
 export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
   const windowMs = opts.windowMs ?? 60_000;
@@ -68,32 +75,28 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
   const windows = new LRUCache<string, Window>({
     max: maxEntries,
     ttl: windowMs,
-    // Don't refresh the age on read: a 429 must not let stale IPs linger.
+    // Don't refresh age on read: a 429 must not let stale IPs linger.
     updateAgeOnGet: false,
   });
 
   function middleware(req: Request, res: Response, next: NextFunction): void {
-    // NOTE: `req.ip` depends on Express's `trust proxy` setting. If the app
-    // ever sets `trust proxy = true`, attackers can rotate `X-Forwarded-For`
-    // to cheaply produce synthetic IPs; the cache remains bounded by
-    // `maxEntries` but each request still costs LRU insert/refresh work.
-    // Until trust proxy is configured, every untrusted request collapses to
-    // a single `"unknown"` entry, so the rate limiter is effectively a
-    // global cap — consider raising `maxRequests` or skipping rate-limiting
-    // for `ip === "unknown"` if you ever turn trust proxy on.
+    // NOTE: req.ip depends on Express's `trust proxy` setting. Until trust
+    // proxy is configured every untrusted request collapses to "unknown",
+    // making this effectively a global cap.
     const ip = req.ip ?? "unknown";
     const now = Date.now();
     const cutoff = now - windowMs;
 
     let win = windows.get(ip) ?? { timestamps: [] };
-    // Always trim the timestamps for this IP — even when the entry was
-    // pulled from the cache — so partial windows decay correctly across
-    // the rolling boundary.
     win.timestamps = win.timestamps.filter((t) => t > cutoff);
 
+    const oldest = win.timestamps[0];
+    const resetAtMs = oldest !== undefined ? oldest + windowMs : now + windowMs;
+    const remaining = maxRequests - win.timestamps.length;
+
     if (win.timestamps.length >= maxRequests) {
-      const oldest = win.timestamps[0]!;
-      const retryAfter = Math.ceil((oldest + windowMs - now) / 1000);
+      const retryAfter = Math.ceil((resetAtMs - now) / 1000);
+      setRateLimitHeaders(res, maxRequests, 0, resetAtMs);
       res.setHeader("Retry-After", String(retryAfter));
       res
         .status(429)
@@ -102,9 +105,11 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
     }
 
     win.timestamps.push(now);
-    // Re-set the entry to refresh its age so active IPs persist; this
-    // also keeps the LRU recency ordering accurate for eviction.
     windows.set(ip, win);
+
+    // Emit headers on every allowed response so clients can track quota.
+    setRateLimitHeaders(res, maxRequests, remaining - 1, resetAtMs);
+
     next();
   }
 
@@ -119,7 +124,67 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
   };
 }
 
-// ── Default instances ────────────────────────────────────────────────────────
+// ── Route-group limiters ─────────────────────────────────────────────────────
+//
+// Three groups with distinct limits, all configurable via env vars:
+//
+//   public    — unauthenticated endpoints (/api/stats, /api/agents GET, /health)
+//   authed    — authenticated task creation (/api/tasks)
+//   admin     — admin-only endpoints (/api/admin/*)
+//
+// Limits are intentionally conservative; operators should tune via env.
+
+function readEnvInt(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function readEnvWindowMs(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * Lazily-created group limiters.  Using factory functions so tests can reset
+ * process.env before the limiter is instantiated.
+ */
+export function createPublicLimiter(): RateLimiter {
+  return createRateLimiter({
+    windowMs: readEnvWindowMs("RATE_LIMIT_PUBLIC_WINDOW_MS", 60_000),
+    maxRequests: readEnvInt("RATE_LIMIT_PUBLIC_MAX_REQUESTS", 120),
+  });
+}
+
+export function createAuthedLimiter(): RateLimiter {
+  return createRateLimiter({
+    windowMs: readEnvWindowMs("RATE_LIMIT_AUTHED_WINDOW_MS", 60_000),
+    maxRequests: readEnvInt("RATE_LIMIT_AUTHED_MAX_REQUESTS", 30),
+  });
+}
+
+export function createAdminLimiter(): RateLimiter {
+  return createRateLimiter({
+    windowMs: readEnvWindowMs("RATE_LIMIT_ADMIN_WINDOW_MS", 60_000),
+    maxRequests: readEnvInt("RATE_LIMIT_ADMIN_MAX_REQUESTS", 20),
+  });
+}
+
+// ── Module-level singleton instances ─────────────────────────────────────────
+
+/** Public routes: generous limit for read-heavy unauthenticated traffic. */
+export const publicLimiter = createPublicLimiter();
+
+/** Authenticated routes: tighter limit for task creation. */
+export const authedLimiter = createAuthedLimiter();
+
+/** Admin routes: conservative limit for privileged operations. */
+export const adminLimiter = createAdminLimiter();
+
+// ── Legacy named exports (kept for backward compatibility) ───────────────────
 
 /**
  * Default rate limiter used by POST /api/tasks.
@@ -141,4 +206,3 @@ export const registerRateLimitMiddleware = registerLimiter.middleware;
  */
 const heartbeatLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
 export const heartbeatRateLimitMiddleware = heartbeatLimiter.middleware;
-
