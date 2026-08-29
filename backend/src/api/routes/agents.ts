@@ -3,6 +3,12 @@ import { z } from "zod";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
 import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
+import { validate } from "../middleware/validate";
+import {
+  listAgentsQuerySchema,
+  registerAgentSchema,
+  type ListAgentsQuery,
+} from "../../schemas/agent";
 import { NotFoundError, ValidationError, AuthenticationError } from "../../errors";
 
 export interface AgentsRouterOptions {
@@ -77,19 +83,22 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *               $ref: '#/components/schemas/InternalServerError'
    */
   // GET /api/agents
-  router.get("/", (req: Request, res: Response, next: NextFunction): void => {
-    const db = getDb();
-    const capability = req.query.capability as string | undefined;
-    const minReputation = req.query.minReputation ? parseFloat(req.query.minReputation as string) : undefined;
-    const maxPriceXLM = req.query.maxPriceXLM ? parseFloat(req.query.maxPriceXLM as string) : undefined;
-    
-    try {
-      const agents = db.list({ capability, minReputation, maxPriceXLM });
-      res.json(agents);
-    } catch (err) {
-      next(err);
-    }
-  });
+  router.get(
+    "/",
+    validate({ query: listAgentsQuerySchema }),
+    (req: Request, res: Response, next: NextFunction): void => {
+      const db = getDb();
+      const { capability, minReputation, maxPriceXLM, status } =
+        req.query as unknown as ListAgentsQuery;
+
+      try {
+        const agents = db.list({ capability, minReputation, maxPriceXLM, status });
+        res.json(agents);
+      } catch (err) {
+        next(err);
+      }
+    },
+  );
 
   /**
    * @openapi
@@ -283,7 +292,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   router.post("/register", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const correlationId = res.locals.correlationId as string | undefined;
-      const parse = RegisterAgentSchema.safeParse(req.body);
+      const parse = registerAgentSchema.safeParse(req.body);
       if (!parse.success) {
         throw new ValidationError(
           "Invalid agent registration data",
