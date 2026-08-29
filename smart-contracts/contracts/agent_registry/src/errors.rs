@@ -51,6 +51,16 @@ pub enum Error {
     SlaViolation = 25,
     /// Invalid SLA parameters.
     InvalidSla = 26,
+    /// Bridge proof has passed its expiry timestamp.
+    BridgeProofExpired = 27,
+    /// No bridge proof exists for this agent and target chain.
+    BridgeProofNotFound = 28,
+    /// Bridge proof does not match the record held by the registry.
+    BridgeProofMismatch = 29,
+    /// Requested proof lifetime is zero or beyond the permitted maximum.
+    InvalidBridgeExpiry = 30,
+    /// Audit log pagination arguments are out of range.
+    InvalidAuditRange = 31,
 }
 
 impl Error {
@@ -83,6 +93,11 @@ impl Error {
             24 => Some(Error::SlaNotFound),
             25 => Some(Error::SlaViolation),
             26 => Some(Error::InvalidSla),
+            27 => Some(Error::BridgeProofExpired),
+            28 => Some(Error::BridgeProofNotFound),
+            29 => Some(Error::BridgeProofMismatch),
+            30 => Some(Error::InvalidBridgeExpiry),
+            31 => Some(Error::InvalidAuditRange),
             _ => None,
         }
     }

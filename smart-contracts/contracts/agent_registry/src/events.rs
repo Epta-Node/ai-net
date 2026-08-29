@@ -32,6 +32,7 @@
 //! | `unfreeze_agent`    | `unfreeze`         | `agent_id`                                               |
 //! | `update_pricing`    | `price_upd`        | `(agent_id, new_price)`                                  |
 
+use crate::types::{AnomalyKind, TargetChain};
 use soroban_sdk::{contracttype, Address, BytesN, String, Symbol, Vec};
 
 // ─── Legacy structs (kept for ABI compatibility) ──────────────────────────────
@@ -461,4 +462,90 @@ pub struct SlaBonusAwardedEvent {
     pub agent_id: Symbol,
     /// Reputation boost awarded.
     pub reputation_boost: u32,
+}
+
+// ─── Cross-chain bridging events (issue #259) ────────────────────────────────
+
+/// Emitted when an agent identity is bridged to another chain.
+///
+/// topic: `("registry", "bridged")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct IdentityBridgedEvent {
+    /// Agent whose identity was bridged.
+    pub agent_id: Symbol,
+    /// Chain the proof is scoped to.
+    pub target_chain: TargetChain,
+    /// Digest an off-chain verifier checks the signature against.
+    pub digest: BytesN<32>,
+    /// Timestamp after which the proof stops being valid.
+    pub expiry: u64,
+}
+
+/// Emitted on every bridge-proof verification attempt.
+///
+/// Emitted for failures too, so a target chain repeatedly presenting stale
+/// proofs is visible to an indexer.
+///
+/// topic: `("registry", "brdg_vrfy")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BridgeProofVerifiedEvent {
+    /// Agent the proof refers to.
+    pub agent_id: Symbol,
+    /// Chain the proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Whether the proof was accepted.
+    pub valid: bool,
+}
+
+/// Emitted when a bridge proof is revoked before its expiry.
+///
+/// topic: `("registry", "brdg_revk")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BridgeProofRevokedEvent {
+    /// Agent whose proof was revoked.
+    pub agent_id: Symbol,
+    /// Chain the revoked proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Address that performed the revocation.
+    pub revoked_by: Address,
+}
+
+// ─── Security audit trail events (issue #261) ────────────────────────────────
+
+/// Emitted for every privileged operation recorded in the audit log.
+///
+/// topic: `("registry", "audit")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuditLogEntryEvent {
+    /// Sequence number of the entry written.
+    pub seq: u64,
+    /// Address that authorised the operation.
+    pub caller: Address,
+    /// Short operation name.
+    pub operation: Symbol,
+    /// Value moved, in stroops.
+    pub amount_stroops: i128,
+    /// Whether the operation crossed the high-value threshold.
+    pub high_value: bool,
+}
+
+/// Emitted when an operation trips one of the anomaly checks.
+///
+/// topic: `("registry", "anomaly")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnomalyDetectedEvent {
+    /// Audit entry the anomaly was detected on.
+    pub seq: u64,
+    /// Caller responsible for the operation.
+    pub caller: Address,
+    /// Which check fired.
+    pub kind: AnomalyKind,
+    /// Observed value: the operation count for a rate anomaly, the amount in
+    /// stroops for a high-value one, and zero for a first-seen caller.
+    pub observed: i128,
 }
