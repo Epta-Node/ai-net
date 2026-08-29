@@ -25,6 +25,7 @@ const log = createLogger({ component: 'reconciliation' });
 
 const DEFAULT_HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const DEFAULT_DAILY_INTERVAL_MS = 86_400_000; // 24h
+const DEFAULT_FREQUENT_INTERVAL_MS = 300_000; // 5 minutes — drift detection SLA
 const LIST_BALANCES_MAX_PAGES = 10;
 const LIST_BALANCES_PAGE_LIMIT = 200;
 
@@ -321,13 +322,75 @@ export class ReconciliationService {
     this.logger.info({ intervalMs }, 'Daily reconciliation scheduled');
   }
 
+  /** Schedule automated (frequent) reconciliation runs for drift detection (default 5 min). */
+  startFrequent(intervalMs: number = DEFAULT_FREQUENT_INTERVAL_MS): void {
+    if (this.timer) return;
+    const tick = async () => {
+      try {
+        await this.run('scheduled');
+      } catch (err) {
+        this.logger.error({ err }, 'Frequent reconciliation run failed');
+      }
+    };
+    this.timer = setInterval(tick, intervalMs);
+    this.timer.unref?.();
+    this.logger.info({ intervalMs }, 'Frequent reconciliation scheduled');
+  }
+
   /** Stop the automated scheduler. */
   stop(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      this.logger.info('Daily reconciliation stopped');
+      this.logger.info('Reconciliation scheduler stopped');
     }
+  }
+
+  /**
+   * Idempotent repair: for each discrepancy, update the local DB to match
+   * the on-chain reality. Safe to re-run — produces the same result.
+   *
+   * Repair actions:
+   * - `missing_on_chain` with status `locked` → mark as `released` (balance was claimed externally)
+   * - `amount_mismatch` with status `locked` and on-chain balance < local → mark as `released` (partial claim)
+   * - `missing_local` → no action (on-chain-only balances have no local source)
+   * - All other types → logged, no action (manual review needed)
+   */
+  async repair(triggeredBy: ReconciliationTrigger = 'manual'): Promise<ReconciliationReport> {
+    const report = await this.run(triggeredBy);
+    if (report.status === 'consistent') return report;
+
+    let repaired = 0;
+    for (const d of report.discrepancies) {
+      if (d.type === 'missing_on_chain' && d.taskId && d.nodeId) {
+        // Balance was claimed on-chain but local still says locked → sync to released
+        this.paymentDb.updateStatus(d.taskId, d.nodeId, 'released', 'reconciled-repair');
+        repaired++;
+        this.logger.info(
+          { balanceId: d.balanceId, taskId: d.taskId, nodeId: d.nodeId },
+          'Repair: updated local status locked → released (missing_on_chain)'
+        );
+      } else if (d.type === 'amount_mismatch' && d.taskId && d.nodeId && d.onChainAmountStroops === '0') {
+        // On-chain balance is 0 but local says locked → was claimed, sync status
+        this.paymentDb.updateStatus(d.taskId, d.nodeId, 'released', 'reconciled-repair');
+        repaired++;
+        this.logger.info(
+          { balanceId: d.balanceId, taskId: d.taskId, nodeId: d.nodeId },
+          'Repair: updated local status locked → released (amount_mismatch, on-chain=0)'
+        );
+      } else {
+        this.logger.warn(
+          { discrepancy: d },
+          'Repair: discrepancy requires manual review — no automatic repair applied'
+        );
+      }
+    }
+
+    if (repaired > 0) {
+      this.logger.info({ repaired, total: report.discrepancies.length }, 'Reconciliation repair complete');
+    }
+
+    return report;
   }
 
   /**
