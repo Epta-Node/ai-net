@@ -115,6 +115,8 @@
   "wallet.chart.noData": "No spending data yet",
   "wallet.chart.spent": "Spent",
 
+  "wallet.tokens.heading": "Tokens",
+
   "validation.invalidSecretKey": "Invalid Stellar secret key. Must start with S and be 56 characters.",
   "validation.destinationRequired": "Destination address is required",
   "validation.invalidStellarAddress": "Invalid Stellar address. Must start with G and be 56 characters.",
@@ -274,6 +276,7 @@
   "a11y.search": "Search",
   "a11y.closeSearch": "Close search",
   "a11y.copyPublicKey": "Copy public key",
+  "a11y.balanceChip": "{{code}} balance chip",
   "a11y.disconnectWallet": "Disconnect wallet",
   "a11y.copyOutput": "Copy Output",
   "a11y.loadingTaskDetails": "Loading task details",

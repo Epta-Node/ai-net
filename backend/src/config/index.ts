@@ -174,6 +174,22 @@ const envSchema = z.object({
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   /** Maximum request samples retained in memory. Default: 1 000. */
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
+
+  // ── SQLite database maintenance ────────────────────────────────────────────
+  /** How often the SQLite maintenance pass runs. Default: 21 600 000 (6 h). */
+  DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(21_600_000),
+  /** Free-page ratio above which an incremental VACUUM runs. Default: 0.2. */
+  DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().min(0).max(1).default(0.2),
+  /** Directory for SQLite backups. Default: <cwd>/backups. */
+  DB_BACKUP_DIR: z.string().default("backups"),
+  /** Maximum number of backups retained per database. Default: 14. */
+  DB_BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(14),
+
+  // ── Error-registry maintenance ─────────────────────────────────────────────
+  /** How often the error-registry sweep runs. Default: 3 600 000 (1 h). */
+  ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  /** Maximum live (non-expired) error entries an agent may hold. Default: 100. */
+  ERROR_REGISTRY_CAP_PER_AGENT: z.coerce.number().int().positive().default(100),
 });
 
 

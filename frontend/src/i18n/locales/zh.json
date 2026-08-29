@@ -115,6 +115,8 @@
   "wallet.chart.noData": "暂无支出数据",
   "wallet.chart.spent": "支出",
 
+  "wallet.tokens.heading": "代币",
+
   "validation.invalidSecretKey": "无效的 Stellar 私钥。必须以 S 开头且为 56 个字符。",
   "validation.destinationRequired": "目标地址为必填项",
   "validation.invalidStellarAddress": "无效的 Stellar 地址。必须以 G 开头且为 56 个字符。",
@@ -274,6 +276,7 @@
   "a11y.search": "搜索",
   "a11y.closeSearch": "关闭搜索",
   "a11y.copyPublicKey": "复制公钥",
+  "a11y.balanceChip": "{{code}} 余额标签",
   "a11y.disconnectWallet": "断开钱包连接",
   "a11y.copyOutput": "复制输出",
   "a11y.loadingTaskDetails": "正在加载任务详情",

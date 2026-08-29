@@ -236,9 +236,16 @@ function handleEvent(
     // These can be wired up once an errors table is added to the schema.
     case TOPICS.ERR_REPORTED: {
       const data = payload as ErrorReportedPayload;
+      db.upsertError?.({
+        id: data.error_id,
+        reporter: data.reporter,
+        resolved: false,
+        resolution: null,
+        reportedAt: new Date().toISOString(),
+      });
       logger.warn(
         { errorId: data.error_id, reporter: data.reporter },
-        "error reported (no DB schema for errors — logging only)"
+        "error reported and persisted to error registry"
       );
       break;
     }
@@ -246,9 +253,10 @@ function handleEvent(
     case TOPICS.ERR_RESOLVED: {
       const data = payload as ErrorResolvedPayload;
       const label = resolutionLabel(data.resolution_code);
+      db.resolveError?.(data.error_id, label);
       logger.info(
         { errorId: data.error_id, resolution: label },
-        "error resolved (no DB schema for errors — logging only)"
+        "error resolved and persisted to error registry"
       );
       break;
     }

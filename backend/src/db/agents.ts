@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import path from "path";
+import { createErrorRegistryStore, getErrorDb } from "./errorRegistry";
 
 export interface AgentRecord {
   id: string;
@@ -170,6 +171,27 @@ export function createAgentDb(db: Database.Database): AgentDb {
           AND datetime(lastSeenAt, '+' || ? || ' hours') < datetime('now')
       `).run(offlineThresholdHours);
       return result.changes;
+    },
+
+    upsertError(error: {
+      id: string;
+      reporter: string;
+      resolved: boolean;
+      resolution: string | null;
+      reportedAt: string;
+    }): void {
+      const errorsDb = getErrorDb();
+      errorsDb.prepare(
+        `INSERT OR IGNORE INTO errors
+          (id, errorCode, message, agentId, reporter, status, resolution, rentStroops, maintenanceAccount, createdAt, expiresAt, resolvedAt)
+         VALUES
+          (?, 0, '', '', ?, 'active', NULL, '0', '', ?, '', NULL)`,
+      ).run(error.id, error.reporter ?? "", error.reportedAt ?? new Date().toISOString());
+    },
+
+    resolveError(errorId: string, resolution: string): void {
+      const store = createErrorRegistryStore(getErrorDb());
+      store.resolve(errorId, resolution);
     }
   };
 }

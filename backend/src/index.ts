@@ -14,6 +14,8 @@ import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
 import { closeJobDb } from "./queue";
 import { createDefaultReconciliationService } from "./services/reconciliation";
+import { DbMaintenanceService, defaultMaintenanceDatabases } from "./services/dbMaintenance";
+import { ErrorRegistryMaintenanceService, closeErrorDb } from "./services/errorRegistryMaintenance";
 
 async function main() {
   // ── Validate env config at startup ──────────────────────────────────────────
@@ -37,6 +39,22 @@ async function main() {
     // Start daily payment reconciliation
     const reconciliationService = createDefaultReconciliationService();
     reconciliationService.startDaily(config.RECONCILIATION_INTERVAL_MS);
+
+    // Start SQLite maintenance (WAL checkpoint, vacuum, backup)
+    const maintenanceService = new DbMaintenanceService(defaultMaintenanceDatabases(), {
+      intervalMs: config.DB_MAINTENANCE_INTERVAL_MS,
+      vacuumThreshold: config.DB_MAINTENANCE_VACUUM_THRESHOLD,
+      backupDir: config.DB_BACKUP_DIR,
+      backupRetentionCount: config.DB_BACKUP_RETENTION_COUNT,
+    });
+    maintenanceService.start();
+
+    // Start error-registry maintenance (expiry sweep + per-agent cap)
+    const errorRegistryMaintenance = new ErrorRegistryMaintenanceService({
+      intervalMs: config.ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS,
+      capPerAgent: config.ERROR_REGISTRY_CAP_PER_AGENT,
+    });
+    errorRegistryMaintenance.start();
 
     // Create and start the server
     const { httpServer, close } = createApp();
@@ -69,6 +87,8 @@ async function main() {
 
       cleanupService.stop();
       reconciliationService.stop();
+      maintenanceService.stop();
+      errorRegistryMaintenance.stop();
       globalAgentRegistry.shutdown();
       stopAgentSync();
 
@@ -140,6 +160,7 @@ export function setupGracefulShutdown(
       closeAgentDb();
       closeTaskDb();
       closeJobDb();
+      closeErrorDb();
 
       console.log("[ai-net-backend] Graceful shutdown complete. Exiting.");
       clearTimeout(forcedTimeout);
