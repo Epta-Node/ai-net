@@ -1,5 +1,6 @@
 import { LRUCache } from "lru-cache";
 import type { Request, Response, NextFunction } from "express";
+import { getConfig } from "../../config";
 
 export interface RateLimitOptions {
   /** Rolling window in milliseconds. Default: 60 000 (1 minute). */
@@ -125,15 +126,47 @@ export function createRateLimiter(opts: RateLimitOptions = {}): RateLimiter {
  * Default rate limiter used by POST /api/tasks.
  * 20 requests per minute per IP.
  */
-const defaultLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
-export const rateLimitMiddleware = defaultLimiter.middleware;
+let defaultLimiter: RateLimiter | null = null;
+
+function getDefaultLimiter(): RateLimiter {
+  if (!defaultLimiter) {
+    const config = getConfig();
+    defaultLimiter = createRateLimiter({
+      windowMs: config.RATE_LIMIT_WINDOW_MS,
+      maxRequests: config.RATE_LIMIT_MAX_REQUESTS,
+    });
+  }
+  return defaultLimiter;
+}
+
+export const rateLimitMiddleware = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => getDefaultLimiter().middleware(req, res, next);
 
 /**
  * Stricter rate limiter used by POST /api/agents/register.
  * 10 requests per minute per IP — registration is an expensive operation.
  */
-const registerLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
-export const registerRateLimitMiddleware = registerLimiter.middleware;
+let registerLimiter: RateLimiter | null = null;
+
+function getRegisterLimiter(): RateLimiter {
+  if (!registerLimiter) {
+    const config = getConfig();
+    registerLimiter = createRateLimiter({
+      windowMs: config.RATE_LIMIT_WINDOW_MS,
+      maxRequests: config.REGISTER_RATE_LIMIT_MAX_REQUESTS,
+    });
+  }
+  return registerLimiter;
+}
+
+export const registerRateLimitMiddleware = (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void => getRegisterLimiter().middleware(req, res, next);
 
 /**
  * Rate limiter used by POST /api/agents/:id/heartbeat.
@@ -141,4 +174,3 @@ export const registerRateLimitMiddleware = registerLimiter.middleware;
  */
 const heartbeatLimiter = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
 export const heartbeatRateLimitMiddleware = heartbeatLimiter.middleware;
-

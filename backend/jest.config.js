@@ -2,20 +2,9 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  testMatch: ['**/src/**/*.test.ts', '**/tests/**/*.test.ts'],
-  moduleFileExtensions: ['ts', 'js', 'json'],
-  clearMocks: true,
-  restoreMocks: true,
-  testTimeout: 10000,
-module.exports = {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
   roots: ['<rootDir>/tests', '<rootDir>/src'],
   testMatch: ['**/?(*.)+(spec|test).[tj]s'],
   testTimeout: 130_000,
-  // Register a process 'exit' handler to close better-sqlite3 handles before
-  // the V8 isolate is torn down. Prevents SIGABRT / exit-134 on Node 24 when
-  // fake-timers in shutdown.test.ts interact with the native addon GC.
   setupFilesAfterEnv: ['<rootDir>/tests/jestSetup.ts'],
   globalTeardown: '<rootDir>/tests/global-teardown.ts',
   transform: {
@@ -40,11 +29,8 @@ module.exports = {
     '!src/**/*.spec.ts',
     '!src/**/index.ts',
     '!src/**/.gitkeep',
-    // Excluded from unit coverage — tested via Stellar E2E suite
     '!src/registry/sync.ts',
-    // WebSocket streaming layer — covered by E2E/integration tests
     '!src/api/routes/stream.ts',
-    // Bootstrap/entrypoint
     '!src/index.ts',
     '!src/checkSpec.ts',
   ],

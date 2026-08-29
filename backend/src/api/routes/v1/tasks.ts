@@ -9,21 +9,34 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { getConfig } from "../../../config";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
 // ── Validation config ────────────────────────────────────────────────────────
-const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH ?? 10_000);
-const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
+function promptSchema() {
+  return z
+    .string()
+    .min(1, "Prompt is required")
+    .superRefine((prompt, ctx) => {
+      const maxPromptLength = getConfig().MAX_PROMPT_LENGTH;
+      if (prompt.length > maxPromptLength) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.too_big,
+          type: "string",
+          maximum: maxPromptLength,
+          inclusive: true,
+          message: `Prompt too long (max ${maxPromptLength} characters)`,
+        });
+      }
+    })
+    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim());
+}
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
 export const createTaskSchema = z.object({
-  prompt: z
-    .string()
-    .min(1, "Prompt is required")
-    .max(MAX_PROMPT_LENGTH, `Prompt too long (max ${MAX_PROMPT_LENGTH} characters)`)
-    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim()),
+  prompt: promptSchema(),
   walletPublicKey: z.string().optional(),
   maxBudgetXLM: z.number().min(0.1).optional().default(1),
   agentPreferences: z.array(z.string()).optional(),
@@ -58,14 +71,15 @@ export function createV1TasksRouter(
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
 
-    if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
+    const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+    if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
       const db = createTaskDb(getTaskDb());
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-      if (total >= DAILY_TASK_LIMIT) {
+      if (total >= dailyTaskLimit) {
         res.status(429).json({
           error: {
-            message: `Daily task limit reached (max ${DAILY_TASK_LIMIT} per 24 hours)`,
+            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
             code: "DAILY_LIMIT_EXCEEDED",
           },
         });

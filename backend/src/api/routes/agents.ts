@@ -1,137 +1,9 @@
-/**
- * Agent registry API routes.
- *
- * GET  /api/agents         — list agents (cached, CACHE_TTL_AGENTS)
- * GET  /api/agents/:id     — get single agent (cached, CACHE_TTL_AGENTS)
- * POST /api/agents/register — register agent → INVALIDATES agents + stats cache
- * DELETE /api/agents/:id   — deregister agent → INVALIDATES agents + stats cache
- *
- * Full implementation tracked in Issue #24.  The routes are scaffolded here so
- * cache middleware and invalidation are fully exercised.
- */
-
-import { Router, Request, Response } from 'express';
-import { ttlForRoute } from '../../config/index';
-import { cacheMiddleware } from '../middleware/cache';
-import { invalidateOnAgentRegistration } from '../../cache/invalidation';
-
-const router = Router();
-
-// In-memory stub store until Issue #24 wires up the DB
-const agentStore = new Map<string, AgentRecord>();
-
-export interface AgentRecord {
-  id: string;
-  name: string;
-  capabilities: string[];
-  pricingXLM: number;
-  endpoint: string;
-  stellarPublicKey: string;
-  reputationScore: number;
-  lastSeenAt: string;
-}
-
-// ── GET /api/agents ──────────────────────────────────────────────────────────
-
-router.get(
-  '/',
-  cacheMiddleware({ ttl: ttlForRoute('agents') }),
-  (req: Request, res: Response) => {
-    let agents = Array.from(agentStore.values());
-
-    // Optional filters
-    if (req.query['capability']) {
-      agents = agents.filter((a) =>
-        a.capabilities.includes(req.query['capability'] as string),
-      );
-    }
-    if (req.query['minReputation']) {
-      const min = parseFloat(req.query['minReputation'] as string);
-      agents = agents.filter((a) => a.reputationScore >= min);
-    }
-    if (req.query['maxPriceXLM']) {
-      const max = parseFloat(req.query['maxPriceXLM'] as string);
-      agents = agents.filter((a) => a.pricingXLM <= max);
-    }
-
-    res.json(agents);
-  },
-);
-
-// ── GET /api/agents/:id ──────────────────────────────────────────────────────
-
-router.get(
-  '/:id',
-  cacheMiddleware({ ttl: ttlForRoute('agents') }),
-  (req: Request, res: Response) => {
-    const agent = agentStore.get(req.params['id']!);
-    if (!agent) {
-      res.status(404).json({ error: { message: 'Agent not found', code: 'AGENT_NOT_FOUND' } });
-      return;
-    }
-    res.json(agent);
-  },
-);
-
-// ── POST /api/agents/register ─────────────────────────────────────────────────
-// Must be before /:id to avoid matching 'register' as an id
-
-router.post('/register', async (req: Request, res: Response) => {
-  const { agentId, capabilities, pricingXLM, endpoint, stellarPublicKey } = req.body as {
-    agentId: string;
-    capabilities: string[];
-    pricingXLM: number;
-    endpoint: string;
-    stellarPublicKey: string;
-  };
-
-  if (!agentId || !capabilities?.length || !stellarPublicKey) {
-    res.status(400).json({
-      error: { message: 'agentId, capabilities, and stellarPublicKey are required', code: 'INVALID_BODY' },
-    });
-    return;
-  }
-
-  const record: AgentRecord = {
-    id: agentId,
-    name: agentId,
-    capabilities,
-    pricingXLM: pricingXLM ?? 1,
-    endpoint: endpoint ?? '',
-    stellarPublicKey,
-    reputationScore: 1,
-    lastSeenAt: new Date().toISOString(),
-  };
-  agentStore.set(agentId, record);
-
-  // Invalidate cached agent list and stats
-  await invalidateOnAgentRegistration();
-
-  res.status(201).json({ registered: true, agent: record });
-});
-
-// ── DELETE /api/agents/:id ────────────────────────────────────────────────────
-
-router.delete('/:id', async (req: Request, res: Response) => {
-  const id = req.params['id']!;
-  if (!agentStore.has(id)) {
-    res.status(404).json({ error: { message: 'Agent not found', code: 'AGENT_NOT_FOUND' } });
-    return;
-  }
-
-  agentStore.delete(id);
-  await invalidateOnAgentRegistration();
-
-  res.status(204).send();
-});
-
-export default router;
-import { Router, Request, Response, NextFunction } from "express";
-import { z } from "zod";
+import { Router, Request, Response, NextFunction, type RequestHandler } from "express";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
-import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
+import { getAgentDb, createAgentDb, type AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
-import { NotFoundError, ValidationError, AuthenticationError } from "../../errors";
+import { AgentListQuerySchema, RegisterAgentSchema } from "../schemas/agent.schema";
+import { getConfig } from "../../config";
 
 export interface AgentsRouterOptions {
   healthTimeoutMs?: number;
@@ -139,190 +11,35 @@ export interface AgentsRouterOptions {
 }
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
-const HORIZON_URL = process.env.STELLAR_HORIZON_URL || "https://horizon-testnet.stellar.org";
-const horizon = new Horizon.Server(HORIZON_URL);
 
 export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   const router = Router();
+  const config = getConfig();
+  const horizon = new Horizon.Server(config.STELLAR_HORIZON_URL);
   const healthTimeoutMs = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
-
   const getDb = () => options.db ?? createAgentDb(getAgentDb());
 
-  /**
-   * @openapi
-   * /api/agents:
-   *   get:
-   *     summary: List registered AI agents
-   *     description: Retrieves registered agents matching optional capability, minimum reputation, and maximum price filters.
-   *     operationId: listAgents
-   *     tags: [Agents]
-   *     security: []
-   *     parameters:
-   *       - in: query
-   *         name: capability
-   *         schema: { type: string }
-   *         description: Filter agents that support this capability
-   *         example: "research"
-   *       - in: query
-   *         name: minReputation
-   *         schema: { type: number }
-   *         description: Minimum reputation score threshold
-   *         example: 80.0
-   *       - in: query
-   *         name: maxPriceXLM
-   *         schema: { type: number }
-   *         description: Maximum price per task execution in XLM
-   *         example: 1.5
-   *     responses:
-   *       200:
-   *         description: Array of matching registered agents
-   *         headers:
-   *           X-RateLimit-Limit:
-   *             $ref: '#/components/headers/X-RateLimit-Limit'
-   *           X-RateLimit-Remaining:
-   *             $ref: '#/components/headers/X-RateLimit-Remaining'
-   *           X-RateLimit-Reset:
-   *             $ref: '#/components/headers/X-RateLimit-Reset'
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: array
-   *               items:
-   *                 $ref: '#/components/schemas/Agent'
-   *             example:
-   *               - id: "agent_crypto_analyst_01"
-   *                 capabilities: ["research", "report"]
-   *                 pricingXLM: 0.25
-   *                 endpoint: "https://agent-crypto.example.com/api"
-   *                 stellarPublicKey: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ"
-   *                 reputationScore: 98.5
-   *                 lastSeenAt: "2026-08-25T17:20:00.000Z"
-   *       500:
-   *         description: Internal server error
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/InternalServerError'
-   */
-  // GET /api/agents
-  router.get("/", (req: Request, res: Response, next: NextFunction): void => {
-    const db = getDb();
-    const capability = req.query.capability as string | undefined;
-    const minReputation = req.query.minReputation ? parseFloat(req.query.minReputation as string) : undefined;
-    const maxPriceXLM = req.query.maxPriceXLM ? parseFloat(req.query.maxPriceXLM as string) : undefined;
-    
+  router.get("/", (req: Request, res: Response): void => {
+    const parsed = AgentListQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten() });
+      return;
+    }
+
     try {
-      const agents = db.list({ capability, minReputation, maxPriceXLM });
+      const agents = getDb().list(parsed.data);
       res.json(agents);
-    } catch (err) {
-      next(err);
+    } catch {
+      res.status(500).json({ error: "Internal Server Error" });
     }
   });
 
-  /**
-   * @openapi
-   * /api/agents/{id}:
-   *   get:
-   *     summary: Get registered agent by ID
-   *     description: Fetches agent profile, capabilities, reputation score, and status by unique agentId.
-   *     operationId: getAgent
-   *     tags: [Agents]
-   *     security: []
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema: { type: string }
-   *         description: Unique agent identifier
-   *         example: "agent_crypto_analyst_01"
-   *     responses:
-   *       200:
-   *         description: Agent details retrieved successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/Agent'
-   *             example:
-   *               id: "agent_crypto_analyst_01"
-   *               capabilities: ["research", "report"]
-   *               pricingXLM: 0.25
-   *               endpoint: "https://agent-crypto.example.com/api"
-   *               stellarPublicKey: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ"
-   *               reputationScore: 98.5
-   *               lastSeenAt: "2026-08-25T17:20:00.000Z"
-   *       404:
-   *         description: Agent not found
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/NotFoundError'
-   *             example:
-   *               error: "Agent not found"
-   */
-  // GET /api/agents/:id
-  router.get("/:id", (req: Request, res: Response, next: NextFunction): void => {
-    try {
-      const correlationId = res.locals.correlationId as string | undefined;
-      const db = getDb();
-      const agent = db.findById(req.params.id);
-      if (!agent) {
-        throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
-      }
-      res.json(agent);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  /**
-   * @openapi
-   * /api/agents/{id}/health:
-   *   get:
-   *     summary: Check an agent's live health/reachability
-   *     description: >
-   *       Sends a GET request to the agent's registered endpoint and reports
-   *       whether it responded within the configured timeout. Always
-   *       returns 200 — reachability failures are reported in the body,
-   *       not via HTTP status.
-   *     tags: [Agents]
-   *     security: []
-   *     operationId: checkAgentHealth
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema: { type: string }
-   *         example: "agent_crypto_analyst_01"
-   *     responses:
-   *       200:
-   *         description: Health check result
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 status:
-   *                   type: string
-   *                   enum: [healthy, unreachable]
-   *                   example: "healthy"
-   *                 latencyMs:
-   *                   type: number
-   *                   example: 45
-   *       404:
-   *         description: Agent not found
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/NotFoundError'
-   */
-  // GET /api/agents/:id/health
   router.get("/:id/health", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const correlationId = res.locals.correlationId as string | undefined;
-      const db = getDb();
-      const agent = db.findById(req.params.id);
+      const agent = getDb().findById(req.params.id);
       if (!agent) {
-        throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
+        res.status(404).json({ error: "Agent not found" });
+        return;
       }
 
       const startedAt = Date.now();
@@ -334,7 +51,6 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
           method: "GET",
           signal: controller.signal,
         });
-
         res.status(200).json({
           status: response.ok ? "healthy" : "unreachable",
           latencyMs: Date.now() - startedAt,
@@ -347,104 +63,57 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       } finally {
         clearTimeout(timeout);
       }
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   });
 
-  /**
-   * @openapi
-   * /api/agents/register:
-   *   post:
-   *     summary: Register a new specialized agent
-   *     description: >
-   *       Registers an agent with specified capabilities and pricing. Verifies that the provided
-   *       Stellar public key corresponds to a valid funded account on Stellar Horizon.
-   *     tags: [Agents]
-   *     security: []
-   *     operationId: registerAgent
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             $ref: '#/components/schemas/RegisterAgentRequest'
-   *           examples:
-   *             crypto_research_agent:
-   *               summary: Crypto Research Agent
-   *               value:
-   *                 agentId: "agent_crypto_analyst_01"
-   *                 capabilities: ["research", "report"]
-   *                 pricingXLM: 0.25
-   *                 endpoint: "https://agent-crypto.example.com/api"
-   *                 stellarPublicKey: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ"
-   *     responses:
-   *       201:
-   *         description: Agent registered successfully
-   *         headers:
-   *           X-RateLimit-Limit:
-   *             $ref: '#/components/headers/X-RateLimit-Limit'
-   *           X-RateLimit-Remaining:
-   *             $ref: '#/components/headers/X-RateLimit-Remaining'
-   *           X-RateLimit-Reset:
-   *             $ref: '#/components/headers/X-RateLimit-Reset'
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/Agent'
-   *       400:
-   *         description: Validation error or Stellar account verification failure
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/ValidationError'
-   *             example:
-   *               error: "StellarAccountNotFound"
-   *       429:
-   *         description: Registration rate limit exceeded
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/RateLimitError'
-   */
-  // POST /api/agents/register
+  router.get("/:id", (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const agent = getDb().findById(req.params.id);
+      if (!agent) {
+        res.status(404).json({ error: "Agent not found" });
+        return;
+      }
+      res.json(agent);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/register", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const correlationId = res.locals.correlationId as string | undefined;
-      const parse = RegisterAgentSchema.safeParse(req.body);
-      if (!parse.success) {
-        throw new ValidationError(
-          "Invalid agent registration data",
-          { issues: parse.error.flatten() },
-          correlationId,
-        );
+      const parsed = RegisterAgentSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: "Invalid agent registration data",
+          details: parsed.error.flatten(),
+        });
+        return;
       }
-      
-      const data = parse.data;
-      
-      // Verify Stellar account exists
-      if (process.env.SKIP_STELLAR_ACCOUNT_VERIFY !== "true") {
+
+      const data = parsed.data;
+      if (!config.SKIP_STELLAR_ACCOUNT_VERIFY) {
         try {
           await horizon.loadAccount(data.stellarPublicKey);
-        } catch (err: any) {
-          if (err?.response?.status === 404) {
-            throw new ValidationError(
-              "Stellar account not found",
-              { stellarPublicKey: data.stellarPublicKey, code: "StellarAccountNotFound" },
-              correlationId,
-            );
+        } catch (error: any) {
+          if (error?.response?.status === 404) {
+            res.status(400).json({
+              error: "Stellar account not found",
+              code: "StellarAccountNotFound",
+            });
+            return;
           }
-          if (process.env.NODE_ENV !== "test") {
-            throw new ValidationError(
-              "Failed to verify Stellar account",
-              { reason: err.message },
-              correlationId,
-            );
+          if (config.NODE_ENV !== "test") {
+            res.status(400).json({
+              error: "Failed to verify Stellar account",
+              code: "StellarVerificationFailed",
+            });
+            return;
           }
         }
       }
-      
-      const db = getDb();
+
       const agent = {
         id: data.agentId,
         capabilities: data.capabilities,
@@ -453,166 +122,81 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
         stellarPublicKey: data.stellarPublicKey,
         reputationScore: 0,
         lastSeenAt: new Date().toISOString(),
-        status: 'online' as const
+        status: "online" as const,
       };
-      
-      db.upsert(agent);
-      
+
+      getDb().upsert(agent);
       res.status(201).json(agent);
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   });
 
-  /**
-   * @openapi
-   * /api/agents/{id}/heartbeat:
-   *   post:
-   *     summary: Agent heartbeat keep-alive
-   *     description: Updates the agent's lastSeenAt timestamp and keeps its online status active.
-   *     tags: [Agents]
-   *     security: []
-   *     operationId: agentHeartbeat
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema: { type: string }
-   *         example: "agent_crypto_analyst_01"
-   *     responses:
-   *       200:
-   *         description: Heartbeat recorded
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/AgentHeartbeatResponse'
-   *             example:
-   *               status: "ok"
-   *               lastSeenAt: "2026-08-25T17:30:00.000Z"
-   *       404:
-   *         description: Agent not found
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/NotFoundError'
-   *       429:
-   *         description: Heartbeat rate limit exceeded
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/RateLimitError'
-   */
-  // POST /api/agents/:id/heartbeat
   router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const correlationId = res.locals.correlationId as string | undefined;
       const db = getDb();
       const agent = db.findById(req.params.id);
       if (!agent) {
-        throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
+        res.status(404).json({ error: "Agent not found" });
+        return;
       }
 
-      db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: 'online' });
+      db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: "online" });
       const updated = db.findById(req.params.id);
       res.status(200).json({
         status: "ok",
         lastSeenAt: updated?.lastSeenAt ?? new Date().toISOString(),
       });
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   });
 
-  /**
-   * @openapi
-   * /api/agents/{id}:
-   *   delete:
-   *     summary: Deregister an agent
-   *     description: >
-   *       Removes an agent from the registry. Requires cryptographic verification of
-   *       an Ed25519 signature generated with the agent's registered Stellar secret key.
-   *     tags: [Agents]
-   *     security:
-   *       - AgentSignatureAuth: []
-   *       - AgentChallengeAuth: []
-   *     operationId: deleteAgent
-   *     parameters:
-   *       - in: path
-   *         name: id
-   *         required: true
-   *         schema: { type: string }
-   *         description: Unique agent identifier
-   *         example: "agent_crypto_analyst_01"
-   *       - in: header
-   *         name: x-signature
-   *         required: true
-   *         schema: { type: string }
-   *         description: Base64-encoded Ed25519 signature of the challenge
-   *       - in: header
-   *         name: x-challenge
-   *         required: true
-   *         schema: { type: string }
-   *         description: Plaintext challenge string matching the server challenge
-   *     responses:
-   *       200:
-   *         description: Agent deleted successfully
-   *         content:
-   *           application/json:
-   *             schema:
-   *               type: object
-   *               properties:
-   *                 message: { type: string, example: "Agent deleted successfully" }
-   *       401:
-   *         description: Missing or invalid signature/challenge
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/UnauthorizedError'
-   *             example:
-   *               error: "Invalid signature"
-   *       404:
-   *         description: Agent not found
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/NotFoundError'
-   */
-  // DELETE /api/agents/:id
   router.delete("/:id", (req: Request, res: Response, next: NextFunction): void => {
     try {
-      const correlationId = res.locals.correlationId as string | undefined;
       const db = getDb();
       const agent = db.findById(req.params.id);
       if (!agent) {
-        throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
+        res.status(404).json({ error: "Agent not found" });
+        return;
       }
-      
-      const signature = req.headers["x-signature"] as string;
-      const challenge = req.headers["x-challenge"] as string;
-      
+
+      const signature = req.headers["x-signature"] as string | undefined;
+      const challenge = req.headers["x-challenge"] as string | undefined;
       if (!signature || !challenge) {
-        throw new AuthenticationError("Missing challenge or signature", undefined, correlationId);
+        res.status(401).json({ error: "Missing challenge or signature" });
+        return;
       }
-      
+
       try {
         const keypair = Keypair.fromPublicKey(agent.stellarPublicKey);
         const isValid = keypair.verify(Buffer.from(challenge), Buffer.from(signature, "base64"));
         if (!isValid) {
-          throw new AuthenticationError("Invalid signature", undefined, correlationId);
+          res.status(401).json({ error: "Invalid signature" });
+          return;
         }
-      } catch (innerErr) {
-        if (innerErr instanceof AuthenticationError) throw innerErr;
-        throw new AuthenticationError("Invalid signature format", undefined, correlationId);
+      } catch {
+        res.status(401).json({ error: "Invalid signature format" });
+        return;
       }
-      
+
       db.delete(req.params.id);
       res.json({ message: "Agent deleted successfully" });
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   });
 
   return router;
 }
 
-export const agentsRouter = createAgentsRouter();
+let defaultAgentsRouter: Router | null = null;
+
+export const agentsRouter: RequestHandler = (req, res, next) => {
+  if (!defaultAgentsRouter) {
+    defaultAgentsRouter = createAgentsRouter();
+  }
+  return defaultAgentsRouter(req, res, next);
+};
+
+export default agentsRouter;
