@@ -3,25 +3,23 @@ import path from "path";
 import type { Task, TaskStatus } from "../types/task";
 import type { QualityScoreRecord } from "../services/qualityScorer.types";
 import { createLogger } from "../utils/logger";
+import { createPool, type SqlitePool } from "./pool";
+import { poolSettings } from "./poolConfig";
 
 const logger = createLogger({ component: "task-db" });
 
-let _taskDb: Database.Database | null = null;
+let _taskPool: SqlitePool | null = null;
 
-export function getTaskDb(dbPath?: string): Database.Database {
-  if (!_taskDb) {
-    const filePath = dbPath ?? path.join(process.cwd(), "tasks.db");
-    _taskDb = new Database(filePath);
-    _taskDb.pragma("busy_timeout = 5000");
-    _taskDb.pragma("journal_mode = WAL");
-    try {
-      (_taskDb as any).on("error", (err: Error) => {
-        logger.error({ err }, "task database error");
-      });
-    } catch {
-      // error events are emitted from node EventEmitter support in runtime
-    }
-    _taskDb.exec(`
+/** Create the task schema. Runs once, on the pool's writer connection. */
+function applyTaskSchema(db: Database.Database): void {
+  try {
+    (db as any).on("error", (err: Error) => {
+      logger.error({ err }, "task database error");
+    });
+  } catch {
+    // error events are emitted from node EventEmitter support in runtime
+  }
+  db.exec(`
       CREATE TABLE IF NOT EXISTS tasks (
         id              TEXT PRIMARY KEY,
         prompt          TEXT NOT NULL,
@@ -55,13 +53,43 @@ export function getTaskDb(dbPath?: string): Database.Database {
       );
       CREATE INDEX IF NOT EXISTS idx_quality_scores_agentId ON quality_scores (agentId);
     `);
+}
+
+/**
+ * The task database's connection pool: a queued writer plus a set of read-only
+ * connections that WAL mode lets run in parallel.
+ */
+export function getTaskPool(dbPath?: string): SqlitePool {
+  if (!_taskPool || _taskPool.closed) {
+    const filePath = dbPath ?? path.join(process.cwd(), "tasks.db");
+    _taskPool = createPool({
+      filePath,
+      ...poolSettings(),
+      onCreate: applyTaskSchema,
+    });
+    logger.info({ dbPath: filePath }, "task database pool opened");
   }
-  return _taskDb;
+  return _taskPool;
+}
+
+/**
+ * The writer connection, for the synchronous `createTaskDb` API.
+ *
+ * Kept so existing callers work unchanged; new code should prefer
+ * `getTaskPool().read(...)` so reads are spread across the pool.
+ */
+export function getTaskDb(dbPath?: string): Database.Database {
+  return getTaskPool(dbPath).writer;
+}
+
+/** The task pool if one is open, else null. Used by the metrics endpoint. */
+export function currentTaskPool(): SqlitePool | null {
+  return _taskPool && !_taskPool.closed ? _taskPool : null;
 }
 
 export function closeTaskDb(): void {
-  _taskDb?.close();
-  _taskDb = null;
+  void _taskPool?.close();
+  _taskPool = null;
 }
 
 export interface TaskEvent {

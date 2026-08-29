@@ -95,6 +95,19 @@ const envSchema = z.object({
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   /** Maximum request samples retained in memory. Default: 1 000. */
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
+
+  // ── SQLite connection pool ──────────────────────────────────────────────────
+  /** Reader connections opened eagerly when a pool is created. Default: 2. */
+  DB_POOL_MIN: z.coerce.number().int().positive().default(2),
+  /** Upper bound on reader connections a pool may open. Default: 10. */
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  /** How long an acquire waits for a reader before rejecting, in ms. Default: 5 000. */
+  DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  /** Run `SELECT 1` on a reader before handing it out. Default: true. */
+  DB_POOL_HEALTH_CHECK: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .default("true"),
 });
 
 

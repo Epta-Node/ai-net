@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
 import path from "path";
+import { createPool, type SqlitePool } from "./pool";
+import { poolSettings } from "./poolConfig";
 
 export interface AgentRecord {
   id: string;
@@ -12,13 +14,11 @@ export interface AgentRecord {
   status: 'online' | 'offline';
 }
 
-let _agentDb: Database.Database | null = null;
+let _agentPool: SqlitePool | null = null;
 
-export function getAgentDb(dbPath?: string): Database.Database {
-  if (!_agentDb) {
-    const filePath = dbPath ?? path.join(process.cwd(), "agents.db");
-    _agentDb = new Database(filePath);
-    _agentDb.exec(`
+/** Create the agent schema. Runs once, on the pool's writer connection. */
+function applyAgentSchema(db: Database.Database): void {
+    db.exec(`
       CREATE TABLE IF NOT EXISTS agents (
         id               TEXT PRIMARY KEY,
         capabilities     TEXT NOT NULL,
@@ -31,17 +31,42 @@ export function getAgentDb(dbPath?: string): Database.Database {
       )
     `);
     try {
-      _agentDb.exec("ALTER TABLE agents ADD COLUMN status TEXT NOT NULL DEFAULT 'offline'");
+      db.exec("ALTER TABLE agents ADD COLUMN status TEXT NOT NULL DEFAULT 'offline'");
     } catch (e) {
       // Ignored if column already exists
     }
+}
+
+/** The agent database's connection pool. */
+export function getAgentPool(dbPath?: string): SqlitePool {
+  if (!_agentPool || _agentPool.closed) {
+    const filePath = dbPath ?? path.join(process.cwd(), "agents.db");
+    _agentPool = createPool({
+      filePath,
+      ...poolSettings(),
+      onCreate: applyAgentSchema,
+    });
   }
-  return _agentDb;
+  return _agentPool;
+}
+
+/**
+ * The writer connection, for the synchronous `createAgentDb` API.
+ *
+ * New code should prefer `getAgentPool().read(...)`.
+ */
+export function getAgentDb(dbPath?: string): Database.Database {
+  return getAgentPool(dbPath).writer;
+}
+
+/** The agent pool if one is open, else null. Used by the metrics endpoint. */
+export function currentAgentPool(): SqlitePool | null {
+  return _agentPool && !_agentPool.closed ? _agentPool : null;
 }
 
 export function closeAgentDb(): void {
-  _agentDb?.close();
-  _agentDb = null;
+  void _agentPool?.close();
+  _agentPool = null;
 }
 
 export interface AgentDb {
