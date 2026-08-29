@@ -35,6 +35,10 @@
 mod errors;
 mod events;
 mod upgrade;
+mod types;
+
+pub use errors::Error;
+pub use types::*;
 
 #[cfg(test)]
 mod upgrade_tests;

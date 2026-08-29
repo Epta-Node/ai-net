@@ -32,7 +32,7 @@
 //! | `unfreeze_agent`    | `unfreeze`         | `agent_id`                                               |
 //! | `update_pricing`    | `price_upd`        | `(agent_id, new_price)`                                  |
 
-use soroban_sdk::{contracttype, Address, BytesN, Symbol, String};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol, Vec};
 
 // ─── Legacy structs (kept for ABI compatibility) ──────────────────────────────
 
@@ -57,6 +57,72 @@ pub struct ContractUpgradedEvent {
     pub wasm_hash: BytesN<32>,
     pub admin: Address,
     pub upgrade_ledger: u32,
+}
+
+/// Emitted when the registry's upgrade-manager address is set.
+///
+/// topic: `("upgrade", "mgr_set")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeManagerSetEvent {
+    /// Address of the registry contract the manager was set on.
+    pub contract: Address,
+    /// Address of the upgrade manager now responsible for this contract.
+    pub upgrade_manager: Address,
+    /// Admin that performed the change.
+    pub admin: Address,
+}
+
+/// Emitted after the pre-upgrade hook finishes its validation pass.
+///
+/// topic: `("upgrade", "pre_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreUpgradeHookEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded to.
+    pub version: String,
+    /// Human-readable outcome of each validation performed.
+    pub validation_results: Vec<String>,
+    /// Whether every validation passed.
+    pub success: bool,
+}
+
+/// Emitted after the post-upgrade hook finishes migrating data.
+///
+/// topic: `("upgrade", "post_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PostUpgradeHookEvent {
+    /// Address of the registry contract that was upgraded.
+    pub contract: Address,
+    /// Version the contract was upgraded from.
+    pub old_version: String,
+    /// Version the contract was upgraded to.
+    pub new_version: String,
+    /// Human-readable outcome of each migration step executed.
+    pub migration_results: Vec<String>,
+    /// Whether every migration step succeeded.
+    pub success: bool,
+}
+
+/// Emitted when an upgrade is initiated against the upgrade manager.
+///
+/// topic: `("upgrade", "initiated")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeInitiatedEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded from.
+    pub from_version: String,
+    /// Version the contract is being upgraded to.
+    pub to_version: String,
+    /// WASM hash of the new contract build.
+    pub wasm_hash: BytesN<32>,
+    /// Admin that initiated the upgrade.
+    pub initiator: Address,
 }
 
 /// Emitted when contract is rolled back to previous version
