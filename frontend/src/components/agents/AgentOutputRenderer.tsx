@@ -41,9 +41,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
         {t('agent.output.empty')}

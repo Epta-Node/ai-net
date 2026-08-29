@@ -511,7 +511,12 @@ impl AgentRegistryContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyExists);
         }
+        admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(
+            &DataKey::Agent(Symbol::new(&env, "version")),
+            &String::from_str(&env, "1.0.0"),
+        );
         env.storage().instance().set(&DataKey::Paused, &false);
 
         // Emit (registry, init) so indexers know exactly when the

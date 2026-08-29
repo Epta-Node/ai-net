@@ -4,7 +4,7 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--surface-black-muted);
   z-index: 1100;
   -webkit-tap-highlight-color: transparent;
 }
@@ -14,10 +14,10 @@
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg-primary, #ffffff);
-  border-top-left-radius: 20px;
-  border-top-right-radius: 20px;
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+  background: var(--bg-primary);
+  border-top-left-radius: var(--radius-2xl);
+  border-top-right-radius: var(--radius-2xl);
+  box-shadow: 0 -8px 32px var(--surface-black-subtle);
   z-index: 1200;
   max-height: 85vh;
   overflow: hidden;
@@ -43,7 +43,7 @@
 .drawer-drag-handle {
   width: 36px;
   height: 4px;
-  background: var(--border-color, #cbd5e1);
+  background: var(--border-color);
   border-radius: 2px;
   margin: 8px auto 0;
 }
@@ -53,13 +53,13 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px 16px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .drawer-header h2 {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary, #1a202c);
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -69,18 +69,18 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  background: var(--bg-secondary, #f1f5f9);
+  background: var(--bg-secondary);
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   cursor: pointer;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, var(--text-muted));
   font-size: 16px;
   transition: all 0.2s;
 }
 
 .close-btn:hover {
-  background: var(--bg-tertiary, #e2e8f0);
-  color: var(--text-primary, #1a202c);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
 }
 
 .drawer-nav {
@@ -107,11 +107,11 @@
   padding: 14px 16px;
   background: none;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   text-align: left;
   cursor: pointer;
   transition: background-color 0.15s ease, color 0.15s ease;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 16px;
   font-weight: 500;
@@ -119,17 +119,17 @@
 }
 
 .drawer-nav .nav-item:hover {
-  background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-primary, #1a202c);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .drawer-nav .nav-item:active {
-  background: var(--bg-tertiary, #e2e8f0);
+  background: var(--surface-elevated);
 }
 
 .drawer-nav .nav-item.active {
-  background: var(--primary-light, rgba(59, 130, 246, 0.1));
-  color: var(--primary, #3b82f6);
+  background: var(--accent-surface);
+  color: var(--primary);
 }
 
 .drawer-nav .nav-icon {

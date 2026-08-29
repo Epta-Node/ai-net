@@ -35,7 +35,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
 
       <div className="flex items-start justify-between mb-4 relative">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-[0_0_12px_rgba(56,189,248,0.15)] transition-all duration-300">
+          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-info-glow transition-all duration-300">
             {agent.icon}
           </div>
           <div className="flex flex-col">
@@ -47,7 +47,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
             </span>
           </div>
         </div>
-        <div className="w-2 h-2 rounded-full bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)] relative" />
+        <div className="w-2 h-2 rounded-full bg-accent-green shadow-success-glow relative" />
       </div>
 
       <p className="text-sm text-text-secondary mb-6 flex-grow line-clamp-3 relative leading-relaxed">

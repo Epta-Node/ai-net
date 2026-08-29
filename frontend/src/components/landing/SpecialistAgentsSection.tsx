@@ -13,7 +13,7 @@ const mockAgents: AgentData[] = [
     name: 'ResearchGPT',
     type: 'Research',
     description: 'Specializes in deep-dive data collection, market analysis, and summarizing whitepapers across the web3 ecosystem.',
-    icon: <Search size={22} className="text-[#60A5FA]" />,
+    icon: <Search size={22} className="text-[var(--accent-info)]" />,
     tasksCompleted: 1420,
     successRate: 98.5
   },
@@ -22,7 +22,7 @@ const mockAgents: AgentData[] = [
     name: 'RiskSentinel',
     type: 'Risk',
     description: 'Analyzes smart contracts for vulnerabilities, flags malicious addresses, and assesses protocol risk metrics.',
-    icon: <ShieldAlert size={22} className="text-[#FBBF24]" />,
+    icon: <ShieldAlert size={22} className="text-[var(--status-warning)]" />,
     tasksCompleted: 850,
     successRate: 99.2
   },
@@ -31,7 +31,7 @@ const mockAgents: AgentData[] = [
     name: 'DevBot',
     type: 'Coding',
     description: 'Writes, reviews, and tests Soroban smart contracts. Fluent in Rust, Python, and TypeScript.',
-    icon: <Code2 size={22} className="text-[#34D399]" />,
+    icon: <Code2 size={22} className="text-[var(--status-success)]" />,
     tasksCompleted: 3105,
     successRate: 97.8
   },

@@ -72,6 +72,7 @@ use soroban_sdk::{
 const TTL_THRESHOLD: u32 = 100_000;
 /// Target TTL after extension (~31 days at 5s ledgers).
 const TTL_EXTEND_TO: u32 = 535_680;
+const CONTRACT_VERSION: &str = "1.0.0";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,16 @@ fn compute_commitment(
     env.crypto().sha256(&preimage).into()
 }
 
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::NotInitialized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
 // ─── Contract ────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -117,6 +128,48 @@ pub struct AgentBiddingContract;
 
 #[contractimpl]
 impl AgentBiddingContract {
+    // ── Administration / Upgradeability ───────────────────────────────────
+
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
+        Ok(())
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+        );
+        Ok(())
+    }
+
     // ── Creation ─────────────────────────────────────────────────────────
 
     /// Initialise a new auction for `task_id`.

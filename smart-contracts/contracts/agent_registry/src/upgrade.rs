@@ -6,7 +6,7 @@
 //! This module provides the implementation of the Upgradeable trait for the agent registry.
 
 use soroban_sdk::{
-    contractimpl, symbol_short, Address, BytesN, Env, String, Vec,
+    contractimpl, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
 };
 
 use upgrade_manager::{
@@ -35,7 +35,10 @@ pub enum UpgradeDataKey {
 #[contractimpl]
 impl Upgradeable for AgentRegistryContract {
     fn get_version(env: Env) -> String {
-        String::from_str(&env, CURRENT_VERSION)
+        env.storage()
+            .instance()
+            .get(&DataKey::Agent(Symbol::new(&env, "version")))
+            .unwrap_or_else(|| String::from_str(&env, CURRENT_VERSION))
     }
 
     fn get_wasm_hash(env: Env) -> BytesN<32> {
@@ -288,6 +291,45 @@ impl AgentRegistryContract {
         }
     }
 
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        <Self as Upgradeable>::get_version(env)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "version")), &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "last_upgrade")), &env.ledger().sequence());
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("upgraded")),
+            crate::events::ContractUpgradedEvent {
+                old_version,
+                new_version,
+                wasm_hash: new_wasm_hash,
+                admin,
+                upgrade_ledger: env.ledger().sequence(),
+            },
+        );
+
+        Ok(())
+    }
+
     /// Upgrade the contract with new WASM hash (admin only)
     pub fn upgrade_contract(
         env: Env,
@@ -301,12 +343,12 @@ impl AgentRegistryContract {
         let pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
             env.clone(),
             new_version.clone(),
-            new_wasm_hash,
+            new_wasm_hash.clone(),
         )
         .map_err(|_| Error::NotAdmin)?; // Convert upgrade error to contract error
 
         // Update the contract WASM
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
 
         // Execute post-upgrade hook
         let old_version = String::from_str(&env, CURRENT_VERSION);

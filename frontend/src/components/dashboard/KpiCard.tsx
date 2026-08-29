@@ -56,14 +56,14 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, l
           <AreaChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id={`spark-${title}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#8884d8" stopOpacity={0.4} />
-                <stop offset="100%" stopColor="#8884d8" stopOpacity={0} />
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
               </linearGradient>
             </defs>
             <Area
               type="monotone"
               dataKey="y"
-              stroke="#8884d8"
+              stroke="var(--accent)"
               fill={`url(#spark-${title})`}
               strokeWidth={2}
               dot={false}

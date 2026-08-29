@@ -2,9 +2,9 @@
   max-width: 600px;
   margin: 0 auto;
   padding: 2rem;
-  background: var(--bg-card, #ffffff);
-  border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  background: var(--bg-card, var(--text-inverse));
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
 }
 
 .wizardHeader {
@@ -17,7 +17,7 @@
 .skipButton {
   background: none;
   border: none;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted, var(--text-muted));
   cursor: pointer;
   font-size: 0.9rem;
 }
@@ -32,21 +32,21 @@
 
 .progressText {
   font-size: 0.875rem;
-  color: var(--text-muted, #6b7280);
+  color: var(--text-muted, var(--text-muted));
   margin-bottom: 0.5rem;
   text-align: right;
 }
 
 .progressBarBackground {
   height: 8px;
-  background: var(--bg-muted, #e5e7eb);
-  border-radius: 4px;
+  background: var(--bg-muted, var(--border-subtle));
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
 .progressBarFill {
   height: 100%;
-  background: var(--primary, #3b82f6);
+  background: var(--primary, var(--accent-info));
   transition: width 0.3s ease;
 }
 
@@ -64,11 +64,11 @@
   font-size: 1.5rem;
   font-weight: 600;
   margin-bottom: 1rem;
-  color: var(--text-main, #111827);
+  color: var(--text-main, var(--text-primary));
 }
 
 .stepDescription {
-  color: var(--text-muted, #4b5563);
+  color: var(--text-muted, var(--text-secondary));
   margin-bottom: 2rem;
   line-height: 1.5;
 }
@@ -83,25 +83,25 @@
   justify-content: space-between;
   margin-top: 2rem;
   padding-top: 1rem;
-  border-top: 1px solid var(--border, #e5e7eb);
+  border-top: 1px solid var(--border, var(--border-subtle));
 }
 
 .backButton {
   padding: 0.5rem 1rem;
   background: none;
-  border: 1px solid var(--border, #e5e7eb);
-  border-radius: 6px;
+  border: 1px solid var(--border, var(--border-subtle));
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 500;
-  color: var(--text-main, #374151);
+  color: var(--text-main, var(--border-strong));
 }
 
 .nextButton, .primaryButton {
   padding: 0.5rem 1rem;
-  background: var(--primary, #3b82f6);
+  background: var(--primary, var(--accent-info));
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 500;
 }
@@ -112,15 +112,15 @@
 }
 
 .walletInfo {
-  background: var(--bg-muted, #f3f4f6);
+  background: var(--surface-raised);
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   margin-bottom: 1rem;
   word-break: break-all;
 }
 
 .link {
-  color: var(--primary, #3b82f6);
+  color: var(--primary, var(--accent-info));
   text-decoration: none;
 }
 
@@ -129,7 +129,7 @@
 }
 
 .error {
-  color: #ef4444;
+  color: var(--status-danger);
   font-size: 0.875rem;
   margin-top: 0.5rem;
 }

@@ -23,9 +23,9 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
         {t('agent.coding.empty')}
@@ -51,8 +51,8 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
         position: 'relative',
         borderRadius: '8px',
         overflow: 'hidden',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        backgroundColor: '#1e1e1e',
+        border: '1px solid var(--white-alpha-10)',
+        backgroundColor: 'var(--surface-black)',
       }}
     >
       <button
@@ -64,9 +64,9 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           top: '12px',
           right: '12px',
           zIndex: 10,
-          background: copied ? 'var(--success)' : 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          color: '#fff',
+          background: copied ? 'var(--success)' : 'var(--white-alpha-08)',
+          border: '1px solid var(--white-alpha-15)',
+          color: 'var(--text-inverse)',
           padding: '6px 12px',
           borderRadius: '6px',
           cursor: 'pointer',

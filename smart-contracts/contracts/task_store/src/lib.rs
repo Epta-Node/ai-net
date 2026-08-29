@@ -7,9 +7,10 @@ pub use types::{
     DEFAULT_TTL_DAYS, LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TTL_DAYS,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, Vec};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
 
 const SECONDS_PER_DAY: u64 = 86_400;
+const CONTRACT_VERSION: &str = "1.0.0";
 
 fn ttl_ledgers(ttl_days: u32) -> u32 {
     ttl_days.saturating_mul(LEDGERS_PER_DAY)
@@ -55,11 +56,61 @@ fn can_transition(from: TaskStatus, to: TaskStatus) -> bool {
     )
 }
 
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::NotInitialized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
 #[contract]
 pub struct TaskStoreContract;
 
 #[contractimpl]
 impl TaskStoreContract {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
+        Ok(())
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("task_str"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+        );
+        Ok(())
+    }
+
     pub fn store_task_metadata(
         env: Env,
         submitter: Address,

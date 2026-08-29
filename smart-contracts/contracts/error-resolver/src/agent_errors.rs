@@ -1,6 +1,9 @@
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String,
+    Symbol, Vec,
 };
+
+const CONTRACT_VERSION: &str = "1.0.0";
 
 /// On-chain per-agent error ledger. Distinct from the off-chain
 /// `ErrorResolver` lookup table (see `lookup.rs`): this contract tracks how
@@ -9,6 +12,7 @@ use soroban_sdk::{
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Version,
     AuthorizedCallers,
     AgentErrorCount(Symbol),
 }
@@ -19,6 +23,7 @@ pub enum ContractError {
     AlreadyInitialized = 1,
     NotInitialized = 2,
     Unauthorized = 3,
+    UpgradeFailed = 4,
 }
 
 #[contract]
@@ -62,7 +67,11 @@ impl ErrorResolverContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
+        admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
         env.storage()
             .instance()
             .set(&DataKey::AuthorizedCallers, &Vec::<Address>::new(&env));
@@ -71,6 +80,34 @@ impl ErrorResolverContract {
 
     pub fn get_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        Self::get_admin(env)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), ContractError> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("errres"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+        );
+        Ok(())
     }
 
     /// Allowlists a contract address (e.g. agent-registry) to call

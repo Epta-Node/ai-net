@@ -220,6 +220,9 @@ npm run test:e2e
 
 ## Documentation
 
+- [Documentation Index](docs/README.md): Navigation for architecture, design, API, operations, and testing docs.
+- [Architecture](docs/architecture/index.md): Authoritative system context, component diagrams, task lifecycle, payment/escrow sequence, layer responsibilities, and test map.
+- [Design System](docs/design-system.md): Semantic tokens, theme model, and frontend component conventions.
 - [REST API Reference](docs/API_REFERENCE.md): Comprehensive per-endpoint documentation, error codes taxonomy, authentication headers, and runnable curl examples.
 - [Node Operators Guide](docs/NODE_OPERATORS_GUIDE.md): Step-by-step instructions for provisioning, configuring secrets, deploying smart contracts, funding accounts, operating nodes, monitoring metrics, and troubleshooting common errors.
 - [Smart Contract Deployment Guide](smart-contracts/docs/DEPLOYMENT_GUIDE.md): Complete deployment and upgrade workflows on Soroban.
