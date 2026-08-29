@@ -34,18 +34,22 @@
 
 mod errors;
 mod events;
+mod types;
 mod upgrade;
 
 #[cfg(test)]
 mod upgrade_tests;
 
+pub use errors::Error;
+pub use types::*;
 pub use upgrade::*;
 
 use events::{
-    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, ErrorReportedEvent,
-    ErrorResolvedEvent, OperationApproved, OperationCancelled, OperationExecuted,
-    OperationProposed, RegistryInitializedEvent, AnalyticsRecordedEvent,
-    LeaderboardUpdatedEvent, SlaSetEvent, SlaViolationDetectedEvent, SlaBonusAwardedEvent,
+    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, AnalyticsRecordedEvent,
+    ErrorReportedEvent, ErrorResolvedEvent, LeaderboardUpdatedEvent, OperationApproved,
+    OperationCancelled, OperationExecuted, OperationProposed, PaymentProcessedEvent,
+    RegistryInitializedEvent, SlaBonusAwardedEvent, SlaSetEvent, SlaViolationDetectedEvent,
+    SubscriptionCancelledEvent, SubscriptionCreatedEvent, SubscriptionRenewedEvent,
 };
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
@@ -117,6 +121,11 @@ pub const SLA_BONUS_REPUTATION_BOOST: u32 = 5;
 pub const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum upper bound on page size to guarantee execution within one ledger footprint budget.
 pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Billing period applied when `create_subscription` is called with `0` (30 days).
+pub const DEFAULT_SUBSCRIPTION_PERIOD_SECS: u64 = 2_592_000;
+/// Minimum accepted subscription billing period (1 hour).
+pub const MIN_SUBSCRIPTION_PERIOD_SECS: u64 = 3_600;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -275,6 +284,8 @@ pub enum DataKey {
     // Pagination keys (issue #339)
     AgentByIndex(u32),
     RegistrationSequence,
+    // Subscription keys (issue #258): one record per (client, agent) pair.
+    Subscription(Address, Symbol),
 }
 
 /// Per-item outcome for batch registration (`Ok(agent_id)` / `Err(code)`).
@@ -503,6 +514,16 @@ fn min_bond(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::MinBond)
         .unwrap_or(DEFAULT_MIN_BOND_STROOPS)
+}
+
+/// Prorated refund for cancelling `sub` at `now`: the payment for the unused
+/// remainder of the current billing period, capped at one full period.
+fn prorated_refund(sub: &Subscription, now: u64) -> i128 {
+    if sub.period_secs == 0 || now >= sub.end_time {
+        return 0;
+    }
+    let window = (sub.end_time - now).min(sub.period_secs);
+    sub.payment_amount.saturating_mul(window as i128) / (sub.period_secs as i128)
 }
 
 #[contractimpl]
@@ -1916,19 +1937,19 @@ impl AgentRegistryContract {
         earnings: i128,
     ) -> Result<(), Error> {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        let mut analytics: AgentAnalytics = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(AgentAnalytics {
-                agent_id: agent_id.clone(),
-                total_tasks: 0,
-                successful_tasks: 0,
-                failed_tasks: 0,
-                total_earnings: 0,
-                avg_response_time: 0,
-                last_updated: env.ledger().sequence() as u64,
-            });
+        let mut analytics: AgentAnalytics =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(AgentAnalytics {
+                    agent_id: agent_id.clone(),
+                    total_tasks: 0,
+                    successful_tasks: 0,
+                    failed_tasks: 0,
+                    total_earnings: 0,
+                    avg_response_time: 0,
+                    last_updated: env.ledger().sequence() as u64,
+                });
 
         let old_total = analytics.total_tasks;
         analytics.total_tasks += 1;
@@ -1979,15 +2000,18 @@ impl AgentRegistryContract {
     /// Get aggregated analytics for an agent.
     pub fn get_analytics(env: Env, agent_id: Symbol) -> AgentAnalytics {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        env.storage().persistent().get(&key).unwrap_or(AgentAnalytics {
-            agent_id,
-            total_tasks: 0,
-            successful_tasks: 0,
-            failed_tasks: 0,
-            total_earnings: 0,
-            avg_response_time: 0,
-            last_updated: 0,
-        })
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(AgentAnalytics {
+                agent_id,
+                total_tasks: 0,
+                successful_tasks: 0,
+                failed_tasks: 0,
+                total_earnings: 0,
+                avg_response_time: 0,
+                last_updated: 0,
+            })
     }
 
     /// Get top N agents by a configurable metric.
@@ -2035,8 +2059,7 @@ impl AgentRegistryContract {
             let mut j = i + 1;
             let mut max_idx = i;
             while j < entries.len() {
-                if entries.get(j).unwrap().metric_value
-                    > entries.get(max_idx).unwrap().metric_value
+                if entries.get(j).unwrap().metric_value > entries.get(max_idx).unwrap().metric_value
                 {
                     max_idx = j;
                 }
@@ -2256,6 +2279,296 @@ impl AgentRegistryContract {
         };
 
         Some((sla, compliance))
+    }
+
+    // ── Agent Subscriptions & Recurring Payments (issue #258) ───────────────
+
+    /// Subscribe `client` to `agent_id`'s service with a recurring payment.
+    ///
+    /// Creating the subscription pays for the first billing period of
+    /// `period_secs` (`0` → [`DEFAULT_SUBSCRIPTION_PERIOD_SECS`], 30 days). The
+    /// agent must be registered and no active subscription may already exist for
+    /// this `(client, agent_id)` pair. `auto_renew` opts the subscription into
+    /// permissionless auto-renewal at term end.
+    ///
+    /// Emits `(registry, sub_creat)` and `(registry, pay_proc)`.
+    pub fn create_subscription(
+        env: Env,
+        client: Address,
+        agent_id: Symbol,
+        payment_amount: i128,
+        period_secs: u64,
+        auto_renew: bool,
+    ) -> Result<(), Error> {
+        client.require_auth();
+        require_not_paused(&env)?;
+
+        if payment_amount <= 0 {
+            return Err(Error::InvalidSubscription);
+        }
+        let period = if period_secs == 0 {
+            DEFAULT_SUBSCRIPTION_PERIOD_SECS
+        } else {
+            period_secs
+        };
+        if period < MIN_SUBSCRIPTION_PERIOD_SECS {
+            return Err(Error::InvalidSubscription);
+        }
+
+        // The agent being subscribed to must exist in the registry.
+        if !env
+            .storage()
+            .persistent()
+            .has(&DataKey::Agent(agent_id.clone()))
+        {
+            return Err(Error::NotFound);
+        }
+
+        let now = env.ledger().timestamp();
+        let key = DataKey::Subscription(client.clone(), agent_id.clone());
+        if let Some(existing) = env.storage().persistent().get::<_, Subscription>(&key) {
+            if existing.status == SubscriptionStatus::Active && now < existing.end_time {
+                return Err(Error::SubscriptionAlreadyExists);
+            }
+        }
+
+        let end_time = now.saturating_add(period);
+        let sub = Subscription {
+            client: client.clone(),
+            agent_id: agent_id.clone(),
+            payment_amount,
+            period_secs: period,
+            start_time: now,
+            end_time,
+            periods_paid: 1,
+            total_paid: payment_amount,
+            last_payment_at: now,
+            auto_renew,
+            status: SubscriptionStatus::Active,
+        };
+        env.storage().persistent().set(&key, &sub);
+        extend_ttl_for_key(&env, &key);
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("sub_creat")),
+            SubscriptionCreatedEvent {
+                client: client.clone(),
+                agent_id: agent_id.clone(),
+                payment_amount,
+                period_secs: period,
+                start_time: now,
+                end_time,
+                auto_renew,
+            },
+        );
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("pay_proc")),
+            PaymentProcessedEvent {
+                client,
+                agent_id,
+                amount: payment_amount,
+                period: 1,
+                paid_at: now,
+            },
+        );
+        Ok(())
+    }
+
+    /// Renew a subscription with another payment, extending its term by one
+    /// billing period. If the subscription is still within its term the new
+    /// period is appended to `end_time`; if it has lapsed the new term starts
+    /// from now. Cancelled subscriptions cannot be renewed.
+    ///
+    /// Emits `(registry, pay_proc)` and `(registry, sub_renew)`.
+    pub fn renew_subscription(env: Env, client: Address, agent_id: Symbol) -> Result<(), Error> {
+        client.require_auth();
+        require_not_paused(&env)?;
+
+        let key = DataKey::Subscription(client.clone(), agent_id.clone());
+        let mut sub: Subscription = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::SubscriptionNotFound)?;
+
+        if sub.status == SubscriptionStatus::Cancelled {
+            return Err(Error::SubscriptionAlreadyCancelled);
+        }
+
+        let now = env.ledger().timestamp();
+        let base = now.max(sub.end_time);
+        sub.end_time = base.saturating_add(sub.period_secs);
+        sub.periods_paid = sub.periods_paid.saturating_add(1);
+        sub.total_paid = sub.total_paid.saturating_add(sub.payment_amount);
+        sub.last_payment_at = now;
+        sub.status = SubscriptionStatus::Active;
+        env.storage().persistent().set(&key, &sub);
+        extend_ttl_for_key(&env, &key);
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("pay_proc")),
+            PaymentProcessedEvent {
+                client: client.clone(),
+                agent_id: agent_id.clone(),
+                amount: sub.payment_amount,
+                period: sub.periods_paid,
+                paid_at: now,
+            },
+        );
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("sub_renew")),
+            SubscriptionRenewedEvent {
+                client,
+                agent_id,
+                payment_amount: sub.payment_amount,
+                new_end_time: sub.end_time,
+                periods_paid: sub.periods_paid,
+                auto: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// Cancel an active subscription, returning the prorated refund owed for
+    /// the unused remainder of the current billing period.
+    ///
+    /// Emits `(registry, sub_canc)`. Returns the refund amount in stroops.
+    pub fn cancel_subscription(env: Env, client: Address, agent_id: Symbol) -> Result<i128, Error> {
+        client.require_auth();
+
+        let key = DataKey::Subscription(client.clone(), agent_id.clone());
+        let mut sub: Subscription = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::SubscriptionNotFound)?;
+
+        if sub.status == SubscriptionStatus::Cancelled {
+            return Err(Error::SubscriptionAlreadyCancelled);
+        }
+
+        let now = env.ledger().timestamp();
+        let refund = prorated_refund(&sub, now);
+
+        sub.status = SubscriptionStatus::Cancelled;
+        sub.end_time = now;
+        env.storage().persistent().set(&key, &sub);
+        extend_ttl_for_key(&env, &key);
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("sub_canc")),
+            SubscriptionCancelledEvent {
+                client,
+                agent_id,
+                refund_stroops: refund,
+                cancelled_at: now,
+            },
+        );
+        Ok(refund)
+    }
+
+    /// Return `true` if the `(client, agent_id)` subscription is active and
+    /// still within its paid term.
+    pub fn check_subscription(env: Env, client: Address, agent_id: Symbol) -> bool {
+        env.storage()
+            .persistent()
+            .get::<_, Subscription>(&DataKey::Subscription(client, agent_id))
+            .is_some_and(|s| {
+                s.status == SubscriptionStatus::Active && env.ledger().timestamp() < s.end_time
+            })
+    }
+
+    /// Fetch the full subscription record for `(client, agent_id)`, if any.
+    pub fn get_subscription(env: Env, client: Address, agent_id: Symbol) -> Option<Subscription> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Subscription(client, agent_id))
+    }
+
+    /// Enable or disable auto-renewal for a subscription (client opt-in).
+    pub fn set_auto_renew(
+        env: Env,
+        client: Address,
+        agent_id: Symbol,
+        enabled: bool,
+    ) -> Result<(), Error> {
+        client.require_auth();
+
+        let key = DataKey::Subscription(client.clone(), agent_id.clone());
+        let mut sub: Subscription = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::SubscriptionNotFound)?;
+        if sub.status == SubscriptionStatus::Cancelled {
+            return Err(Error::SubscriptionAlreadyCancelled);
+        }
+        sub.auto_renew = enabled;
+        env.storage().persistent().set(&key, &sub);
+        extend_ttl_for_key(&env, &key);
+        Ok(())
+    }
+
+    /// Process an auto-renewal for a subscription whose term has elapsed.
+    ///
+    /// Permissionless — anyone (typically the agent or a keeper bot) may call
+    /// it — but it only succeeds when the subscription opted into `auto_renew`,
+    /// is not cancelled, and its current term has ended.
+    ///
+    /// Emits `(registry, pay_proc)` and `(registry, sub_renew)` with `auto = true`.
+    pub fn process_auto_renewal(env: Env, client: Address, agent_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
+        let key = DataKey::Subscription(client.clone(), agent_id.clone());
+        let mut sub: Subscription = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::SubscriptionNotFound)?;
+
+        if sub.status == SubscriptionStatus::Cancelled {
+            return Err(Error::SubscriptionAlreadyCancelled);
+        }
+        if !sub.auto_renew {
+            return Err(Error::InvalidSubscription);
+        }
+
+        let now = env.ledger().timestamp();
+        if now < sub.end_time {
+            return Err(Error::SubscriptionActive);
+        }
+
+        let base = now.max(sub.end_time);
+        sub.end_time = base.saturating_add(sub.period_secs);
+        sub.periods_paid = sub.periods_paid.saturating_add(1);
+        sub.total_paid = sub.total_paid.saturating_add(sub.payment_amount);
+        sub.last_payment_at = now;
+        sub.status = SubscriptionStatus::Active;
+        env.storage().persistent().set(&key, &sub);
+        extend_ttl_for_key(&env, &key);
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("pay_proc")),
+            PaymentProcessedEvent {
+                client: client.clone(),
+                agent_id: agent_id.clone(),
+                amount: sub.payment_amount,
+                period: sub.periods_paid,
+                paid_at: now,
+            },
+        );
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("sub_renew")),
+            SubscriptionRenewedEvent {
+                client,
+                agent_id,
+                payment_amount: sub.payment_amount,
+                new_end_time: sub.end_time,
+                periods_paid: sub.periods_paid,
+                auto: true,
+            },
+        );
+        Ok(())
     }
 }
 

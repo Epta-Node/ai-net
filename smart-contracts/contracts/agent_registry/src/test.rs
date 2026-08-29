@@ -1722,9 +1722,15 @@ fn get_leaderboard_by_total_tasks() {
     let leaderboard = client.get_leaderboard(&metric, &3);
 
     assert_eq!(leaderboard.len(), 3);
-    assert_eq!(leaderboard.get(0).unwrap().agent_id, Symbol::new(&env, "a3"));
+    assert_eq!(
+        leaderboard.get(0).unwrap().agent_id,
+        Symbol::new(&env, "a3")
+    );
     assert_eq!(leaderboard.get(0).unwrap().metric_value, 3);
-    assert_eq!(leaderboard.get(1).unwrap().agent_id, Symbol::new(&env, "a1"));
+    assert_eq!(
+        leaderboard.get(1).unwrap().agent_id,
+        Symbol::new(&env, "a1")
+    );
     assert_eq!(leaderboard.get(1).unwrap().metric_value, 2);
 }
 
@@ -1752,12 +1758,7 @@ fn set_sla_success() {
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "sla_agent", "research", owner));
 
-    client.set_sla(
-        &Symbol::new(&env, "sla_agent"),
-        &200,
-        &95,
-        &80,
-    );
+    client.set_sla(&Symbol::new(&env, "sla_agent"), &200, &95, &80);
 
     let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent"));
     assert!(sla.is_some());
@@ -1832,7 +1833,9 @@ fn check_sla_compliance_pass() {
     );
     assert!(compliant);
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.total_checks, 1);
     assert_eq!(sla.0.violations, 0);
     assert_eq!(sla.1, 100);
@@ -1854,7 +1857,9 @@ fn check_sla_compliance_violation() {
     );
     assert!(!compliant);
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.violations, 1);
     assert_eq!(sla.1, 0); // 0% compliance with 1 check and 1 violation
 }
@@ -1869,8 +1874,8 @@ fn check_sla_compliance_uptime_violation() {
 
     let compliant = client.check_sla_compliance(
         &Symbol::new(&env, "sla_agent"),
-        &100,  // ok
-        &80,   // uptime < 95 - violation!
+        &100, // ok
+        &80,  // uptime < 95 - violation!
         &90,
     );
     assert!(!compliant);
@@ -1923,15 +1928,12 @@ fn sla_bonus_awarded_after_consistent_compliance() {
 
     // Record 10 compliant checks
     for _ in 0..10 {
-        client.check_sla_compliance(
-            &Symbol::new(&env, "sla_agent"),
-            &100,
-            &99,
-            &95,
-        );
+        client.check_sla_compliance(&Symbol::new(&env, "sla_agent"), &100, &99, &95);
     }
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.total_checks, 10);
     assert_eq!(sla.0.violations, 0);
     assert_eq!(sla.1, 100); // 100% compliance
@@ -2018,25 +2020,46 @@ fn test_get_agents_cursor_pagination() {
     assert_eq!(page1.agents.len(), 3);
     assert_eq!(page1.total_count, 7);
     assert_eq!(page1.next_cursor, Some(3));
-    assert_eq!(page1.agents.get(0).unwrap().id, Symbol::new(&env, "agent_1"));
-    assert_eq!(page1.agents.get(1).unwrap().id, Symbol::new(&env, "agent_2"));
-    assert_eq!(page1.agents.get(2).unwrap().id, Symbol::new(&env, "agent_3"));
+    assert_eq!(
+        page1.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_1")
+    );
+    assert_eq!(
+        page1.agents.get(1).unwrap().id,
+        Symbol::new(&env, "agent_2")
+    );
+    assert_eq!(
+        page1.agents.get(2).unwrap().id,
+        Symbol::new(&env, "agent_3")
+    );
 
     // Page 2: cursor 3, limit 3
     let page2 = client.get_agents(&page1.next_cursor, &Some(3));
     assert_eq!(page2.agents.len(), 3);
     assert_eq!(page2.total_count, 7);
     assert_eq!(page2.next_cursor, Some(6));
-    assert_eq!(page2.agents.get(0).unwrap().id, Symbol::new(&env, "agent_4"));
-    assert_eq!(page2.agents.get(1).unwrap().id, Symbol::new(&env, "agent_5"));
-    assert_eq!(page2.agents.get(2).unwrap().id, Symbol::new(&env, "agent_6"));
+    assert_eq!(
+        page2.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_4")
+    );
+    assert_eq!(
+        page2.agents.get(1).unwrap().id,
+        Symbol::new(&env, "agent_5")
+    );
+    assert_eq!(
+        page2.agents.get(2).unwrap().id,
+        Symbol::new(&env, "agent_6")
+    );
 
     // Page 3: cursor 6, limit 3 -> last remaining agent
     let page3 = client.get_agents(&page2.next_cursor, &Some(3));
     assert_eq!(page3.agents.len(), 1);
     assert_eq!(page3.total_count, 7);
     assert_eq!(page3.next_cursor, None);
-    assert_eq!(page3.agents.get(0).unwrap().id, Symbol::new(&env, "agent_7"));
+    assert_eq!(
+        page3.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_7")
+    );
 }
 
 #[test]
@@ -2086,3 +2109,305 @@ fn test_get_agents_batch_registered_pagination() {
     assert_eq!(page2.total_count, 4);
 }
 
+// ─── Agent Subscriptions & Recurring Payments (issue #258) ────────────────────
+
+/// Register an agent and return its id symbol, for subscription tests.
+fn setup_agent(env: &Env, client: &AgentRegistryContractClient<'static>, id: &str) -> Symbol {
+    let owner = Address::generate(env);
+    client.register_agent(&make_record(env, id, "research", owner));
+    Symbol::new(env, id)
+}
+
+const DAY: u64 = 86_400;
+
+#[test]
+fn create_subscription_stores_record() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a1");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
+
+    let sub = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(sub.client, sub_client);
+    assert_eq!(sub.agent_id, agent);
+    assert_eq!(sub.payment_amount, 1_000_000);
+    assert_eq!(sub.period_secs, 30 * DAY);
+    assert_eq!(sub.periods_paid, 1);
+    assert_eq!(sub.total_paid, 1_000_000);
+    assert_eq!(sub.status, SubscriptionStatus::Active);
+    assert_eq!(sub.end_time, sub.start_time + 30 * DAY);
+    assert!(!sub.auto_renew);
+    assert!(client.check_subscription(&sub_client, &agent));
+}
+
+#[test]
+fn create_subscription_defaults_period_when_zero() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a2");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &500_000, &0, &false);
+    let sub = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(sub.period_secs, DEFAULT_SUBSCRIPTION_PERIOD_SECS);
+}
+
+#[test]
+fn create_subscription_unknown_agent_fails() {
+    let (env, client) = setup();
+    let sub_client = Address::generate(&env);
+    let ghost = Symbol::new(&env, "ghost");
+    let err = client.try_create_subscription(&sub_client, &ghost, &1_000_000, &(30 * DAY), &false);
+    assert_eq!(err.err(), Some(Ok(Error::NotFound)));
+}
+
+#[test]
+fn create_subscription_rejects_bad_params() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a3");
+    let sub_client = Address::generate(&env);
+
+    let e1 = client.try_create_subscription(&sub_client, &agent, &0, &(30 * DAY), &false);
+    assert_eq!(e1.err(), Some(Ok(Error::InvalidSubscription)));
+
+    let e2 = client.try_create_subscription(&sub_client, &agent, &1_000, &60, &false);
+    assert_eq!(e2.err(), Some(Ok(Error::InvalidSubscription)));
+}
+
+#[test]
+fn create_subscription_duplicate_active_fails() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a4");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
+    let err = client.try_create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
+    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyExists)));
+}
+
+#[test]
+fn check_subscription_expires_with_time() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a5");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
+    assert!(client.check_subscription(&sub_client, &agent));
+
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 7 * DAY + 1);
+    assert!(!client.check_subscription(&sub_client, &agent));
+}
+
+#[test]
+fn renew_subscription_extends_term() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a6");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
+    let before = client.get_subscription(&sub_client, &agent).unwrap();
+
+    client.renew_subscription(&sub_client, &agent);
+    let after = client.get_subscription(&sub_client, &agent).unwrap();
+
+    assert_eq!(after.end_time, before.end_time + 30 * DAY);
+    assert_eq!(after.periods_paid, 2);
+    assert_eq!(after.total_paid, 2_000_000);
+}
+
+#[test]
+fn renew_after_expiry_starts_from_now() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a7");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
+    let t = env.ledger().timestamp() + 30 * DAY;
+    env.ledger().set_timestamp(t);
+
+    client.renew_subscription(&sub_client, &agent);
+    let sub = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(sub.end_time, t + 7 * DAY);
+    assert!(client.check_subscription(&sub_client, &agent));
+}
+
+#[test]
+fn cancel_subscription_prorated_refund() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a8");
+    let sub_client = Address::generate(&env);
+
+    // 10-day period, 1_000_000 stroops.
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
+    // Consume 4 of 10 days → 6 days unused → 60% refund.
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 4 * DAY);
+
+    let refund = client.cancel_subscription(&sub_client, &agent);
+    assert_eq!(refund, 600_000);
+
+    let sub = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(sub.status, SubscriptionStatus::Cancelled);
+    assert!(!client.check_subscription(&sub_client, &agent));
+}
+
+#[test]
+fn cancel_after_expiry_zero_refund() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a9");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 20 * DAY);
+
+    let refund = client.cancel_subscription(&sub_client, &agent);
+    assert_eq!(refund, 0);
+}
+
+#[test]
+fn cancel_twice_fails() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a10");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
+    client.cancel_subscription(&sub_client, &agent);
+    let err = client.try_cancel_subscription(&sub_client, &agent);
+    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyCancelled)));
+}
+
+#[test]
+fn renew_cancelled_subscription_fails() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a11");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
+    client.cancel_subscription(&sub_client, &agent);
+    let err = client.try_renew_subscription(&sub_client, &agent);
+    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyCancelled)));
+}
+
+#[test]
+fn cancel_unknown_subscription_fails() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a12");
+    let sub_client = Address::generate(&env);
+    let err = client.try_cancel_subscription(&sub_client, &agent);
+    assert_eq!(err.err(), Some(Ok(Error::SubscriptionNotFound)));
+}
+
+#[test]
+fn auto_renewal_opt_in_extends_term() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a13");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &true);
+    let before = client.get_subscription(&sub_client, &agent).unwrap();
+
+    env.ledger().set_timestamp(before.end_time + 1);
+    client.process_auto_renewal(&sub_client, &agent);
+
+    let after = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(after.periods_paid, 2);
+    assert_eq!(after.total_paid, 2_000_000);
+    assert!(after.end_time > before.end_time);
+    assert!(client.check_subscription(&sub_client, &agent));
+}
+
+#[test]
+fn auto_renewal_requires_opt_in() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a14");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp() + 7 * DAY + 1);
+
+    let err = client.try_process_auto_renewal(&sub_client, &agent);
+    assert_eq!(err.err(), Some(Ok(Error::InvalidSubscription)));
+}
+
+#[test]
+fn auto_renewal_before_term_end_fails() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a15");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &true);
+    let err = client.try_process_auto_renewal(&sub_client, &agent);
+    assert_eq!(err.err(), Some(Ok(Error::SubscriptionActive)));
+}
+
+#[test]
+fn set_auto_renew_toggles_flag() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a16");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
+    client.set_auto_renew(&sub_client, &agent, &true);
+    assert!(
+        client
+            .get_subscription(&sub_client, &agent)
+            .unwrap()
+            .auto_renew
+    );
+
+    client.set_auto_renew(&sub_client, &agent, &false);
+    assert!(
+        !client
+            .get_subscription(&sub_client, &agent)
+            .unwrap()
+            .auto_renew
+    );
+}
+
+#[test]
+fn subscription_lifecycle_emits_events() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a17");
+    let sub_client = Address::generate(&env);
+
+    let _ = env.events().all();
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
+    assert!(
+        env.events().all().len() >= 2,
+        "expected created + payment events"
+    );
+
+    let _ = env.events().all();
+    client.renew_subscription(&sub_client, &agent);
+    assert!(
+        env.events().all().len() >= 2,
+        "expected payment + renewed events"
+    );
+
+    let _ = env.events().all();
+    client.cancel_subscription(&sub_client, &agent);
+    assert!(!env.events().all().is_empty(), "expected cancelled event");
+}
+
+#[test]
+fn full_subscription_flow_recreate_after_cancel() {
+    let (env, client) = setup();
+    let agent = setup_agent(&env, &client, "sub_a18");
+    let sub_client = Address::generate(&env);
+
+    client.create_subscription(&sub_client, &agent, &2_000_000, &(30 * DAY), &true);
+    client.renew_subscription(&sub_client, &agent);
+    let refund = client.cancel_subscription(&sub_client, &agent);
+    assert!(refund >= 0);
+    assert!(!client.check_subscription(&sub_client, &agent));
+
+    // A fresh subscription can be created once the previous one is cancelled.
+    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
+    let sub = client.get_subscription(&sub_client, &agent).unwrap();
+    assert_eq!(sub.status, SubscriptionStatus::Active);
+    assert_eq!(sub.periods_paid, 1);
+    assert_eq!(sub.payment_amount, 1_000_000);
+}

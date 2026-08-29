@@ -51,6 +51,18 @@ pub enum Error {
     SlaViolation = 25,
     /// Invalid SLA parameters.
     InvalidSla = 26,
+    /// Referenced subscription does not exist.
+    SubscriptionNotFound = 27,
+    /// An active subscription already exists for this (client, agent) pair.
+    SubscriptionAlreadyExists = 28,
+    /// The subscription term has expired.
+    SubscriptionExpired = 29,
+    /// The subscription is still within its paid term.
+    SubscriptionActive = 30,
+    /// Subscription parameters are invalid (non-positive amount or zero period).
+    InvalidSubscription = 31,
+    /// The subscription has already been cancelled.
+    SubscriptionAlreadyCancelled = 32,
 }
 
 impl Error {
@@ -83,6 +95,12 @@ impl Error {
             24 => Some(Error::SlaNotFound),
             25 => Some(Error::SlaViolation),
             26 => Some(Error::InvalidSla),
+            27 => Some(Error::SubscriptionNotFound),
+            28 => Some(Error::SubscriptionAlreadyExists),
+            29 => Some(Error::SubscriptionExpired),
+            30 => Some(Error::SubscriptionActive),
+            31 => Some(Error::InvalidSubscription),
+            32 => Some(Error::SubscriptionAlreadyCancelled),
             _ => None,
         }
     }

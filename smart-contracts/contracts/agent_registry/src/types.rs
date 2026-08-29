@@ -190,3 +190,51 @@ pub struct DiscoveryStats {
     /// Number of queries served from in-memory / temporary storage cache.
     pub cache_hits: u64,
 }
+
+// ─── Agent Subscriptions (issue #258) ────────────────────────────────────────
+
+/// Lifecycle state of an agent-service subscription.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum SubscriptionStatus {
+    /// Subscription is paid; it provides service while `now < end_time`.
+    Active = 0,
+    /// The client cancelled the subscription before its term ended.
+    Cancelled = 1,
+    /// The term elapsed without renewal.
+    Expired = 2,
+}
+
+/// On-chain subscription letting a client pay an agent for recurring service.
+///
+/// Billing happens in fixed windows of `period_secs`. Creating the subscription
+/// pays for the first window; `renew_subscription` (or opt-in auto-renewal)
+/// pays for and appends another. The subscription is "active" while its
+/// `status` is [`SubscriptionStatus::Active`] and `now < end_time`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Subscription {
+    /// The subscriber who funds the recurring payments.
+    pub client: Address,
+    /// The agent providing the subscribed service.
+    pub agent_id: Symbol,
+    /// Payment charged for each billing period, in stroops.
+    pub payment_amount: i128,
+    /// Length of one billing period, in ledger-seconds.
+    pub period_secs: u64,
+    /// Timestamp at which the subscription was first created.
+    pub start_time: u64,
+    /// Timestamp at which the currently-paid term ends.
+    pub end_time: u64,
+    /// Number of billing periods paid for over the subscription's lifetime.
+    pub periods_paid: u32,
+    /// Cumulative stroops paid into the subscription.
+    pub total_paid: i128,
+    /// Timestamp of the most recent processed payment.
+    pub last_payment_at: u64,
+    /// Whether the subscription auto-renews at term end (opt-in).
+    pub auto_renew: bool,
+    /// Current lifecycle state.
+    pub status: SubscriptionStatus,
+}

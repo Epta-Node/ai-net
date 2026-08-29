@@ -32,7 +32,7 @@
 //! | `unfreeze_agent`    | `unfreeze`         | `agent_id`                                               |
 //! | `update_pricing`    | `price_upd`        | `(agent_id, new_price)`                                  |
 
-use soroban_sdk::{contracttype, Address, BytesN, Symbol, String};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 // ─── Legacy structs (kept for ABI compatibility) ──────────────────────────────
 
@@ -395,4 +395,78 @@ pub struct SlaBonusAwardedEvent {
     pub agent_id: Symbol,
     /// Reputation boost awarded.
     pub reputation_boost: u32,
+}
+
+// ─── Subscription Event Data Structs (issue #258) ────────────────────────────
+
+/// Data payload for `(registry, sub_creat)`.
+/// Published when a client subscribes to an agent's service.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionCreatedEvent {
+    /// Subscriber who funds the subscription.
+    pub client: Address,
+    /// Agent providing the service.
+    pub agent_id: Symbol,
+    /// Recurring payment per billing period, in stroops.
+    pub payment_amount: i128,
+    /// Length of one billing period, in seconds.
+    pub period_secs: u64,
+    /// Subscription start timestamp.
+    pub start_time: u64,
+    /// Timestamp the first paid term ends.
+    pub end_time: u64,
+    /// Whether auto-renewal was opted into at creation.
+    pub auto_renew: bool,
+}
+
+/// Data payload for `(registry, sub_renew)`.
+/// Published when a subscription's term is extended by a new payment.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionRenewedEvent {
+    /// Subscriber.
+    pub client: Address,
+    /// Agent providing the service.
+    pub agent_id: Symbol,
+    /// Payment applied for this renewal, in stroops.
+    pub payment_amount: i128,
+    /// The subscription's new end timestamp.
+    pub new_end_time: u64,
+    /// Total billing periods paid after this renewal.
+    pub periods_paid: u32,
+    /// `true` if triggered by auto-renewal rather than an explicit client call.
+    pub auto: bool,
+}
+
+/// Data payload for `(registry, sub_canc)`.
+/// Published when a client cancels a subscription.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SubscriptionCancelledEvent {
+    /// Subscriber.
+    pub client: Address,
+    /// Agent providing the service.
+    pub agent_id: Symbol,
+    /// Prorated refund owed for the unused remainder of the current period.
+    pub refund_stroops: i128,
+    /// Cancellation timestamp.
+    pub cancelled_at: u64,
+}
+
+/// Data payload for `(registry, pay_proc)`.
+/// Published for every recurring payment (initial, renewal, or auto-renewal).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PaymentProcessedEvent {
+    /// Subscriber who paid.
+    pub client: Address,
+    /// Agent receiving the payment.
+    pub agent_id: Symbol,
+    /// Amount paid, in stroops.
+    pub amount: i128,
+    /// 1-based index of the billing period this payment covers.
+    pub period: u32,
+    /// Payment timestamp.
+    pub paid_at: u64,
 }
