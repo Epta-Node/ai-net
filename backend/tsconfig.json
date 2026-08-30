@@ -13,20 +13,5 @@
     "types": ["node", "jest"]
   },
   "include": ["src"],
-    "module": "node16",
-    "moduleResolution": "node16",
-    "strict": true,
-    "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
-    "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": ".",
-    "resolveJsonModule": true,
-    "sourceMap": true,
-    "typeRoots": ["./node_modules/@types"],
-    "types": ["jest", "node"],
-    "baseUrl": "."
-  },
-  "include": ["src", "tests"],
   "exclude": ["node_modules", "dist"]
 }

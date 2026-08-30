@@ -2,14 +2,6 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  testMatch: ['**/src/**/*.test.ts', '**/tests/**/*.test.ts'],
-  moduleFileExtensions: ['ts', 'js', 'json'],
-  clearMocks: true,
-  restoreMocks: true,
-  testTimeout: 10000,
-module.exports = {
-  preset: 'ts-jest',
-  testEnvironment: 'node',
   roots: ['<rootDir>/tests', '<rootDir>/src'],
   testMatch: ['**/?(*.)+(spec|test).[tj]s'],
   testTimeout: 130_000,

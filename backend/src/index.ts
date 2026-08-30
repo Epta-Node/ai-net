@@ -9,10 +9,11 @@ import { initializeAgents, globalAgentRegistry } from "./agents";
 import { startAgentSync, stopAgentSync } from "./registry/sync";
 import { loadConfig, getConfig } from "./config";
 import { AgentCleanupService } from "./services/agentCleanup";
-import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
+import { closeTaskDb } from "./db/tasks";
 import { closeJobDb } from "./queue";
+import { eventBus } from "./coordinator/eventBus";
 import { createDefaultReconciliationService } from "./services/reconciliation";
 
 async function main() {
@@ -39,7 +40,9 @@ async function main() {
     reconciliationService.startDaily(config.RECONCILIATION_INTERVAL_MS);
 
     // Create and start the server
-    const { httpServer, close } = createApp();
+    const { httpServer, close } = createApp({
+      jobWorkerStopTimeoutMs: config.GRACEFUL_SHUTDOWN_TIMEOUT * 1000,
+    });
 
     const port = config.PORT;
 
@@ -47,6 +50,8 @@ async function main() {
       console.log(`[ai-net-backend] Server running on http://localhost:${port}`);
       console.log("[ai-net-backend] Available endpoints:");
       console.log("  - GET  /health                    - Health check");
+      console.log("  - GET  /health/live                - Liveness check");
+      console.log("  - GET  /health/ready               - Readiness check (DB, queue, WS, providers)");
       console.log("  - GET  /health/deep               - Deep health check");
       console.log("  - POST /api/tasks                 - Submit new tasks");
       console.log("  - GET  /api/tasks/:id              - Get task status");
@@ -60,38 +65,41 @@ async function main() {
     });
 
     // ── Graceful shutdown ──────────────────────────────────────────────────────
-    const shutdown = (signal: string) => {
-      console.log(`[ai-net-backend] Received ${signal}, shutting down gracefully...`);
-      const timeout = setTimeout(() => {
-        console.error("[ai-net-backend] Forced shutdown after 10s timeout");
-        process.exit(1);
-      }, 10_000);
-
-      cleanupService.stop();
-      reconciliationService.stop();
-      globalAgentRegistry.shutdown();
-      stopAgentSync();
-
-      httpServer.close(() => {
-        clearTimeout(timeout);
-        console.log("[ai-net-backend] Server closed.");
-        process.exit(0);
-      });
-    };
-
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-    process.on("SIGINT", () => shutdown("SIGINT"));
-
+    setupGracefulShutdown(httpServer, close, config, {
+      cleanupService,
+      reconciliationService,
+      globalAgentRegistry,
+    });
   } catch (error) {
     console.error("[ai-net-backend] Failed to start server:", error);
     process.exit(1);
   }
 }
 
+export interface GracefulShutdownExtras {
+  cleanupService?: { stop(): void };
+  reconciliationService?: { stop(): void };
+  globalAgentRegistry?: { shutdown(): void };
+}
+
+/**
+ * SIGTERM/SIGINT handler: stop accepting new work, drain in-flight jobs and
+ * the WebSocket stream, flush the event store, close every database
+ * connection, then exit 0 — or force-exit 1 if any of that takes longer
+ * than `config.GRACEFUL_SHUTDOWN_TIMEOUT` seconds.
+ *
+ * In-flight tasks are drained (via `closeApp`, which awaits the job
+ * worker's stop()) rather than force-failed: anything still running when
+ * the drain window elapses stays "active" in the job store and is resumed
+ * by the next `JobWorker.start()` (`recoverIncompleteJobs()` resets it to
+ * "pending" for retry) — see `docs/e2e-testing.md` and
+ * `tests/shutdown.test.ts` for the restart-mid-stream scenario.
+ */
 export function setupGracefulShutdown(
   httpServer: any,
   closeApp: (callback?: () => void) => void,
-  config: { GRACEFUL_SHUTDOWN_TIMEOUT?: number }
+  config: { GRACEFUL_SHUTDOWN_TIMEOUT?: number },
+  extras: GracefulShutdownExtras = {},
 ) {
   let isShuttingDown = false;
 
@@ -108,7 +116,7 @@ export function setupGracefulShutdown(
     }, timeoutDuration);
 
     try {
-      console.log("[ai-net-backend] Phase 1: Closing HTTP/WS server and stopping new connections...");
+      console.log("[ai-net-backend] Phase 1: Draining in-flight jobs and closing HTTP/WS server...");
       await new Promise<void>((resolve) => {
         closeApp(() => {
           console.log("[ai-net-backend] HTTP/WS server successfully closed.");
@@ -116,18 +124,13 @@ export function setupGracefulShutdown(
         });
       });
 
-      console.log("[ai-net-backend] Phase 2: Stopping agent sync service...");
+      console.log("[ai-net-backend] Phase 2: Stopping background services...");
       stopAgentSync();
+      extras.cleanupService?.stop();
+      extras.reconciliationService?.stop();
+      extras.globalAgentRegistry?.shutdown();
 
-      console.log("[ai-net-backend] Phase 3: Failing all running tasks...");
-      try {
-        const taskDb = createTaskDb(getTaskDb());
-        taskDb.failRunningTasks();
-      } catch (err) {
-        console.error("[ai-net-backend] Failed to mark tasks as failed during shutdown:", err);
-      }
-
-      console.log("[ai-net-backend] Phase 4: Marking all online agents as offline...");
+      console.log("[ai-net-backend] Phase 3: Marking all online agents as offline...");
       try {
         const agentDb = createAgentDb(getAgentDb());
         agentDb.markAllOffline();
@@ -135,7 +138,12 @@ export function setupGracefulShutdown(
         console.error("[ai-net-backend] Failed to mark agents offline during shutdown:", err);
       }
 
-      console.log("[ai-net-backend] Phase 5: Closing database connections...");
+      console.log("[ai-net-backend] Phase 4: Flushing event store and closing database connections...");
+      try {
+        eventBus.store.close();
+      } catch (err) {
+        console.error("[ai-net-backend] Failed to close event store during shutdown:", err);
+      }
       closeDb();
       closeAgentDb();
       closeTaskDb();
