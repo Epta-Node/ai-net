@@ -5,78 +5,6 @@
  * Fails fast (throws) if any required var is missing or malformed.
  */
 
-import { z } from 'zod';
-
-// ---------------------------------------------------------------------------
-// Schema
-// ---------------------------------------------------------------------------
-
-const envSchema = z.object({
-  // Server
-  PORT: z.coerce.number().int().positive().default(3001),
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-
-  // Stellar
-  STELLAR_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),
-  STELLAR_HORIZON_URL: z
-    .string()
-    .url()
-    .default('https://horizon-testnet.stellar.org'),
-
-  // Venice AI
-  VENICE_API_KEY: z.string().min(1, 'VENICE_API_KEY is required'),
-
-  // Database
-  DATABASE_URL: z.string().min(1).default('./data/ai-net.db'),
-
-  // Cache
-  CACHE_DRIVER: z.enum(['lru', 'redis']).default('lru'),
-  REDIS_URL: z.string().default('redis://localhost:6379'),
-  CACHE_LRU_MAX_SIZE: z.coerce.number().int().positive().default(500),
-
-  // Per-endpoint TTLs (seconds)
-  CACHE_TTL_AGENTS: z.coerce.number().int().nonnegative().default(60),
-  CACHE_TTL_STATS: z.coerce.number().int().nonnegative().default(30),
-  CACHE_TTL_HEALTH: z.coerce.number().int().nonnegative().default(10),
-});
-
-// ---------------------------------------------------------------------------
-// Parse — throws ZodError on missing/invalid vars
-// ---------------------------------------------------------------------------
-
-function loadConfig() {
-  const result = envSchema.safeParse(process.env);
-
-  if (!result.success) {
-    const messages = result.error.errors
-      .map((e) => `  ${e.path.join('.')}: ${e.message}`)
-      .join('\n');
-    throw new Error(`[config] Invalid environment variables:\n${messages}`);
-  }
-
-  return result.data;
-}
-
-// Singleton — evaluated once at import time
-export const config = loadConfig();
-
-// ---------------------------------------------------------------------------
-// Convenience helpers
-// ---------------------------------------------------------------------------
-
-/** TTL in seconds for a given route group */
-export function ttlForRoute(group: 'agents' | 'stats' | 'health'): number {
-  switch (group) {
-    case 'agents':
-      return config.CACHE_TTL_AGENTS;
-    case 'stats':
-      return config.CACHE_TTL_STATS;
-    case 'health':
-      return config.CACHE_TTL_HEALTH;
-  }
-}
-
-export type Config = typeof config;
 import { z } from "zod";
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -84,6 +12,7 @@ const pkg = require("../../package.json");
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   STELLAR_NETWORK: z.enum(["testnet", "mainnet", "local", "futurenet"]).default("testnet"),
   STELLAR_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
   VENICE_API_KEY: z.string().min(1, "VENICE_API_KEY is required"),
@@ -93,6 +22,18 @@ const envSchema = z.object({
   ALLOWED_ORIGINS: z.string().default("http://localhost:3000"),
   NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? "0.1.0"),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
+
+  // ── Venice AI — fallback provider chain & resilience ────────────────────────
+  /** Primary base URL for Venice AI. Default: https://api.venice.ai/api/v1 */
+  VENICE_BASE_URL: z.string().url().default("https://api.venice.ai/api/v1"),
+  /** Comma-separated list of fallback Venice API keys (same order as fallback URLs). */
+  VENICE_FALLBACK_API_KEYS: z.string().optional(),
+  /** Comma-separated list of fallback base URLs (must align with fallback keys). */
+  VENICE_FALLBACK_BASE_URLS: z.string().optional(),
+  /** Per-call timeout in ms. Default: 10 000 (10s). */
+  VENICE_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  /** Retries per provider with exponential backoff. Default: 3. */
+  VENICE_PROVIDER_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(3),
 
   // ── Input validation ────────────────────────────────────────────────────────
   /** Maximum allowed length (characters) for a task prompt. Default: 10 000. */
@@ -174,8 +115,15 @@ const envSchema = z.object({
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   /** Maximum request samples retained in memory. Default: 1 000. */
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
-});
 
+  // ── Cache (legacy — kept for backwards compat, Venice cache uses its own) ──
+  CACHE_DRIVER: z.enum(["lru", "redis"]).default("lru"),
+  REDIS_URL: z.string().default("redis://localhost:6379"),
+  CACHE_LRU_MAX_SIZE: z.coerce.number().int().positive().default(500),
+  CACHE_TTL_AGENTS: z.coerce.number().int().nonnegative().default(60),
+  CACHE_TTL_STATS: z.coerce.number().int().nonnegative().default(30),
+  CACHE_TTL_HEALTH: z.coerce.number().int().nonnegative().default(10),
+});
 
 let _config: z.infer<typeof envSchema> | null = null;
 
@@ -199,3 +147,31 @@ export function getConfig(): z.infer<typeof envSchema> {
   if (!_config) throw new Error("Config not loaded. Call loadConfig() first.");
   return _config;
 }
+
+// Legacy export for modules that imported `config` directly
+export const config = (() => {
+  try {
+    return loadConfig();
+  } catch {
+    // In test environments where required env vars are not set, return a minimal
+    // fallback so that modules can still be imported. Real startup will call
+    // loadConfig() explicitly and fail fast.
+    return envSchema.parse({
+      VENICE_API_KEY: process.env.VENICE_API_KEY ?? "test-key",
+      DATABASE_URL: process.env.DATABASE_URL ?? "./data/ai-net.db",
+    });
+  }
+})();
+
+export function ttlForRoute(group: "agents" | "stats" | "health"): number {
+  switch (group) {
+    case "agents":
+      return _config?.CACHE_TTL_AGENTS ?? 60;
+    case "stats":
+      return _config?.CACHE_TTL_STATS ?? 30;
+    case "health":
+      return _config?.CACHE_TTL_HEALTH ?? 10;
+  }
+}
+
+export type Config = z.infer<typeof envSchema>;
