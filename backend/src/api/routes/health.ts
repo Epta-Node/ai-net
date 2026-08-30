@@ -1,82 +1,3 @@
-/**
- * GET /api/health       — shallow health check
- * GET /api/health/deep  — checks Venice + Stellar Horizon reachability
- *
- * Cache TTL: CACHE_TTL_HEALTH (default 10s)
- */
-
-import { Router } from 'express';
-import { config, ttlForRoute } from '../../config/index';
-import { cacheMiddleware } from '../middleware/cache';
-
-const router = Router();
-
-const startTime = Date.now();
-
-// GET /api/health
-router.get(
-  '/',
-  cacheMiddleware({ ttl: ttlForRoute('health') }),
-  (_req, res) => {
-    res.json({
-      status: 'ok',
-      uptime: Math.floor((Date.now() - startTime) / 1000),
-      version: process.env['npm_package_version'] ?? '0.1.0',
-      stellarNetwork: config.STELLAR_NETWORK,
-    });
-  },
-);
-
-// GET /api/health/deep
-router.get(
-  '/deep',
-  cacheMiddleware({ ttl: ttlForRoute('health') }),
-  async (_req, res) => {
-    const [veniceStatus, horizonStatus] = await Promise.all([
-      checkVenice(),
-      checkHorizon(),
-    ]);
-
-    const allOk = veniceStatus === 'ok' && horizonStatus === 'ok';
-    res.status(allOk ? 200 : 503).json({
-      status: allOk ? 'ok' : 'degraded',
-      services: {
-        venice: veniceStatus,
-        horizon: horizonStatus,
-      },
-    });
-  },
-);
-
-async function checkVenice(): Promise<'ok' | 'unreachable'> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const url = 'https://api.venice.ai/api/v1/models';
-    const resp = await fetch(url, {
-      signal: controller.signal,
-      headers: { Authorization: `Bearer ${config.VENICE_API_KEY}` },
-    });
-    clearTimeout(timer);
-    return resp.ok || resp.status === 401 ? 'ok' : 'unreachable';
-  } catch {
-    return 'unreachable';
-  }
-}
-
-async function checkHorizon(): Promise<'ok' | 'unreachable'> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const resp = await fetch(config.STELLAR_HORIZON_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    return resp.ok ? 'ok' : 'unreachable';
-  } catch {
-    return 'unreachable';
-  }
-}
-
-export default router;
 import { Router, Request, Response } from "express";
 import { getConfig } from "../../config";
 import { adminAuthMiddleware } from "../middleware/auth";
@@ -115,7 +36,7 @@ let startTime = Date.now();
  *                 stellarNetwork:
  *                   type: string
  */
-router.get("/", (_req: Request, res: Response) => {
+function livenessHandler(_req: Request, res: Response): void {
   const config = getConfig();
   res.json({
     status: "ok",
@@ -123,7 +44,24 @@ router.get("/", (_req: Request, res: Response) => {
     version: config.NPM_PACKAGE_VERSION,
     stellarNetwork: config.STELLAR_NETWORK,
   });
-});
+}
+
+router.get("/", livenessHandler);
+
+/**
+ * @openapi
+ * /health/live:
+ *   get:
+ *     summary: Basic liveness check
+ *     operationId: getLive
+ *     description: Alias for `GET /health` — process-only liveness, no dependency checks.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Service is up
+ */
+router.get("/live", livenessHandler);
 
 /**
  * @openapi
@@ -156,10 +94,11 @@ router.get("/", (_req: Request, res: Response) => {
 router.get("/deep", async (_req: Request, res: Response) => {
   const config = getConfig();
   const horizonUrl = config.STELLAR_HORIZON_URL;
+  const timeoutMs = config.HEALTH_PROBE_TIMEOUT_MS;
 
   const [veniceStatus, horizonStatus] = await Promise.all([
-    checkVenice(config.VENICE_API_KEY),
-    checkHorizon(horizonUrl),
+    checkVenice(config.VENICE_API_KEY, timeoutMs),
+    checkHorizon(horizonUrl, timeoutMs),
   ]);
 
   res.json({
@@ -174,7 +113,16 @@ router.get("/deep", async (_req: Request, res: Response) => {
  *   get:
  *     summary: Readiness probe
  *     operationId: getReadiness
- *     description: Verifies database connectivity for task and payment subsystems. Returns 200 when ready to serve traffic, 500/503 otherwise.
+ *     description: >
+ *       Verifies every dependency the backend needs to actually serve
+ *       traffic: the task/payment/job-queue SQLite databases, the Venice AI
+ *       and Stellar Horizon providers, and (if attached) the WebSocket
+ *       stream server. Provider probes time out after
+ *       `HEALTH_PROBE_TIMEOUT_MS` (default 5s, configurable via env).
+ *       Returns 200 when ready to serve traffic, 500 otherwise. A missing
+ *       WebSocket probe is reported as "unknown" (valid — the stream layer
+ *       may not be attached) and does not by itself fail readiness; every
+ *       other dependency being unavailable does.
  *     tags: [Health]
  *     security: []
  *     responses:
@@ -189,6 +137,10 @@ router.get("/deep", async (_req: Request, res: Response) => {
  *               checks:
  *                 tasks: "ok"
  *                 payments: "ok"
+ *                 queue: "ok"
+ *                 venice: "ok"
+ *                 horizon: "ok"
+ *                 websocket: "ok"
  *       500:
  *         description: One or more subsystems failed readiness checks
  *         content:
@@ -200,16 +152,25 @@ router.get("/deep", async (_req: Request, res: Response) => {
  *               checks:
  *                 tasks: "ok"
  *                 payments: "error"
+ *                 queue: "ok"
+ *                 venice: "ok"
+ *                 horizon: "ok"
+ *                 websocket: "unknown"
  */
 router.get("/ready", async (_req: Request, res: Response) => {
-  const checks: Record<string, "ok" | "error"> = {
+  const checks: Record<string, "ok" | "error" | "unknown"> = {
     tasks: "ok",
     payments: "ok",
+    queue: "ok",
+    venice: "ok",
+    horizon: "ok",
+    websocket: "ok",
   };
 
   try {
     const tasksModule = await import("../../db/tasks.js");
     const paymentsModule = await import("../../db/index.js");
+    const queueModule = await import("../../queue/jobStore.js");
 
     try {
       const taskDb = (tasksModule.getTaskDb as Function)();
@@ -228,13 +189,44 @@ router.get("/ready", async (_req: Request, res: Response) => {
     } finally {
       (paymentsModule.closeDb as Function)();
     }
+
+    try {
+      const jobDb = (queueModule.getJobDb as Function)();
+      jobDb.prepare("SELECT 1").get();
+    } catch (error) {
+      (checks as any).queue = "error";
+    } finally {
+      (queueModule.closeJobDb as Function)();
+    }
   } catch (error) {
     res.status(500).json({ status: "error", checks, error: String(error) });
     return;
   }
 
-  const allOk = Object.values(checks).every((status) => status === "ok");
-  res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
+  const config = getConfig();
+  const timeoutMs = config.HEALTH_PROBE_TIMEOUT_MS;
+  const [veniceStatus, horizonStatus] = await Promise.all([
+    checkVenice(config.VENICE_API_KEY, timeoutMs),
+    checkHorizon(config.STELLAR_HORIZON_URL, timeoutMs),
+  ]);
+  checks.venice = veniceStatus === "ok" ? "ok" : "error";
+  checks.horizon = horizonStatus === "ok" ? "ok" : "error";
+
+  const websocketStatus = metricsService.getWebSocketStatus();
+  checks.websocket =
+    websocketStatus.status === "unknown"
+      ? "unknown"
+      : websocketStatus.status === "ok"
+        ? "ok"
+        : "error";
+
+  // A missing WebSocket probe ("unknown") is a valid configuration — the
+  // stream layer may simply not be attached — so it alone does not fail
+  // readiness. A probe that *is* attached and reports "error" (not
+  // listening) does, same as every other dependency.
+  const failing = Object.values(checks).filter((status) => status === "error");
+  const ready = failing.length === 0;
+  res.status(ready ? 200 : 500).json({ status: ready ? "ok" : "error", checks });
 });
 
 /**
@@ -362,10 +354,10 @@ router.get("/traces/:correlationId", (req: Request, res: Response) => {
   res.json(trace);
 });
 
-async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
+async function checkVenice(apiKey: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch("https://api.venice.ai/api/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: ctrl.signal,
@@ -377,10 +369,10 @@ async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
   }
 }
 
-async function checkHorizon(url: string): Promise<"ok" | "unreachable"> {
+async function checkHorizon(url: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
     const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
+    const t = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(url, { signal: ctrl.signal });
     clearTimeout(t);
     return res.ok ? "ok" : "unreachable";

@@ -14,6 +14,22 @@ const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;
 
 const logger = createLogger({ module: 'ws-stream' });
 
+/**
+ * Every WebSocketServer created by attachTaskStream(), tracked so
+ * getStreamConnectionCount() can report a live total across all of them
+ * (normally just one, per HTTP server) for the health/metrics dashboard.
+ */
+const activeStreamServers = new Set<WebSocketServer>();
+
+/** Total connected WebSocket clients across every attached stream server. */
+export function getStreamConnectionCount(): number {
+  let count = 0;
+  for (const wss of activeStreamServers) {
+    count += wss.clients.size;
+  }
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // Wire-format normalisation
 // ---------------------------------------------------------------------------
