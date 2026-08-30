@@ -50,4 +50,10 @@ pub enum Error {
     WinnerNotDetermined = 16,
     /// The escrow for this auction has already been created.
     EscrowAlreadyCreated = 17,
+    /// `claim_refund` was called for a bid whose bond was already refunded
+    /// (either via a prior claim, or automatically by `award_contract`).
+    AlreadyRefunded = 18,
+    /// `claim_refund` was called after its resolution deadline
+    /// (`auction.deadline + CLAIM_WINDOW_SECS`) elapsed.
+    ClaimWindowExpired = 19,
 }
