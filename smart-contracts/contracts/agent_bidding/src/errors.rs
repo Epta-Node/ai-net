@@ -5,7 +5,7 @@
 //! callers can branch on the numeric code without coupling to a specific SDK
 //! build.
 //!
-//! The code range used here (`1..=17`) is local to this contract. Codes are
+//! The code range used here (`1..=19`) is local to this contract. Codes are
 //! chosen to read naturally in logs while remaining stable across releases:
 //! **never renumber an existing variant** once the contract is deployed.
 
@@ -50,4 +50,8 @@ pub enum Error {
     WinnerNotDetermined = 16,
     /// The escrow for this auction has already been created.
     EscrowAlreadyCreated = 17,
+    /// Winners cannot use the unsuccessful-bidder refund path.
+    WinnerCannotClaimRefund = 18,
+    /// The bidder's bond has already been marked as refunded.
+    RefundAlreadyClaimed = 19,
 }

@@ -26,6 +26,7 @@
 //! | `submit_bid`      | `bid_submitted`       | `BidSubmittedEvent`                 |
 //! | `reveal_bid`      | `bid_revealed`        | `BidRevealedEvent`                  |
 //! | `reveal_bids`     | `bids_revealed`       | `BidsRevealedEvent`                 |
+//! | `claim_bid_refund`| `refund_claimed`      | `BondRefundClaimedEvent`            |
 //! | `award_contract`  | `contract_awarded`    | `ContractAwardedEvent`              |
 
 use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
@@ -218,6 +219,15 @@ pub struct BidsRevealedEvent {
     pub winning_score: i128,
     /// Winner's bid price in stroops.
     pub winning_price: i128,
+}
+
+/// Emitted when an unsuccessful bidder claims their bid bond refund.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BondRefundClaimedEvent {
+    pub task_id: Symbol,
+    pub bidder: Address,
+    pub bond: i128,
 }
 
 /// Emitted when `award_contract` creates the escrow and refunds bonds.
