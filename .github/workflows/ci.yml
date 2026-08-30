@@ -47,6 +47,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Performance latency budgets
+        run: npm run test:performance
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest

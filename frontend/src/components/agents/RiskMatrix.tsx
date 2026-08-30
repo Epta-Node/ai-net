@@ -32,7 +32,7 @@ const heatmapColors = {
 const RiskMatrix: React.FC<Props> = ({ result }) => {
   const { t } = useTranslation();
   const risks = getRisksList(result);
-  const [hoveredRisk, setHoveredRisk] = useState<{ risk: RiskItem; cx: number; cy: number } | null>(null);
+  const [hoveredRisk, setHoveredRisk] = useState<{ risk: RiskItem; cx: number; cy: number; index: number } | null>(null);
 
   if (!risks || risks.length === 0) {
     return (
@@ -226,7 +226,16 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           const color = severityColors[severity] || severityColors.low;
 
           return (
-            <g key={`risk-group-${index}`}>
+            <g
+              key={`risk-group-${index}`}
+              className="risk-point"
+              tabIndex={0}
+              role="img"
+              aria-label={`${risk.description}. Likelihood ${L}, impact ${I}, severity ${severity}.`}
+              aria-describedby={hoveredRisk?.index === index ? 'risk-tooltip' : undefined}
+              onFocus={() => setHoveredRisk({ risk, cx, cy, index })}
+              onBlur={() => setHoveredRisk(null)}
+            >
               {/* Outer glow ring */}
               <circle
                 cx={cx}
@@ -247,7 +256,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
                 className="risk-dot"
                 data-testid={`risk-dot-${index}`}
                 style={{ cursor: 'pointer', transition: 'all 0.2s ease' }}
-                onMouseEnter={() => setHoveredRisk({ risk, cx, cy })}
+                onMouseEnter={() => setHoveredRisk({ risk, cx, cy, index })}
                 onMouseLeave={() => setHoveredRisk(null)}
               />
             </g>
@@ -260,6 +269,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
         <div
           id="risk-tooltip"
           data-testid="risk-tooltip"
+          role="tooltip"
           style={{
             position: 'absolute',
             top: `${(hoveredRisk.cy / svgHeight) * 100}%`,

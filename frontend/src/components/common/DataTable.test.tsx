@@ -30,4 +30,25 @@ describe('DataTable', () => {
     const cells = screen.getAllByRole('cell');
     expect(cells[1]).toHaveTextContent('2');
   });
+
+  it('moves row focus with arrow keys and activates clickable rows', async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+
+    render(
+      <DataTable
+        columns={[{ key: 'name', header: 'Name' }]}
+        rows={rows}
+        getRowKey={(row) => row.id}
+        onRowClick={onRowClick}
+      />
+    );
+
+    const [, firstRow, secondRow] = screen.getAllByRole('row');
+    firstRow.focus();
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(secondRow).toHaveFocus();
+    expect(onRowClick).toHaveBeenCalledWith(rows[1]);
+  });
 });
