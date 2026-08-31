@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
@@ -6,21 +6,23 @@ import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
-import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
-import LandingPage from './pages/LandingPage'
-import AgentsPage from './pages/AgentsPage'
-import NewTaskPage from './pages/tasks/NewTaskPage'
-import TaskHistoryPage from './pages/tasks/TaskHistoryPage'
-import TaskDetailPage from './pages/TaskDetailPage'
-import RendererDemoPage from './pages/RendererDemoPage'
-import WalletPage from './pages/WalletPage'
-import DashboardPage from './pages/dashboard'
+import { NotFoundPage } from './pages/NotFoundPage'
+import RouteLoader from './components/common/RouteLoader'
+
+// Lazy-loaded pages (route-based code-splitting)
+const LandingPage = lazy(() => import('./pages/LandingPage'))
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
+const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
+const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
+const WalletPage = lazy(() => import('./pages/WalletPage'))
+const DashboardPage = lazy(() => import('./pages/dashboard'))
 import ErrorBoundary from './components/common/ErrorBoundary'
-import { ProtectedRoute } from './components/common/ProtectedRoute'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import './components/common/Toast.css'
 
 /**
@@ -29,17 +31,83 @@ import './components/common/Toast.css'
  * `useNavigate`.
  */
 const AppContent: React.FC = () => {
+  // Prefetch mapping: path -> dynamic import used to fetch chunk on hover
+  useEffect(() => {
+    const prefetchers: Record<string, () => Promise<any>> = {
+      '/': () => import('./pages/LandingPage'),
+      '/dashboard': () => import('./pages/dashboard'),
+      '/wallet': () => import('./pages/WalletPage'),
+      '/agents': () => import('./pages/AgentsPage'),
+      '/tasks/new': () => import('./pages/tasks/NewTaskPage'),
+      '/tasks/history': () => import('./pages/tasks/TaskHistoryPage'),
+      '/renderer-demo': () => import('./pages/RendererDemoPage'),
+    }
+
+    const onHover = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target) return
+      const anchor = target.closest('a') as HTMLAnchorElement | null
+      if (!anchor || !anchor.href) return
+      try {
+        const url = new URL(anchor.href)
+        const path = url.pathname
+
+        // Prefetch exact matches
+        const pre = prefetchers[path]
+        if (pre) pre()
+
+        // Prefetch task details page for /tasks/:id pattern
+        if (path.startsWith('/tasks/') && !path.endsWith('/new') && path.split('/').length === 3) {
+          import('./pages/TaskDetailPage')
+        }
+      } catch (_) {
+        // ignore cross-origin or malformed hrefs
+      }
+    }
+
+    document.addEventListener('mouseover', onHover)
+    return () => document.removeEventListener('mouseover', onHover)
+  }, [])
+
   return (
     <Router>
       <AppShell>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
+          <Route path="/" element={
+            <Suspense fallback={<RouteLoader />}>
+              <LandingPage />
+            </Suspense>
+          } />
+          <Route path="/dashboard" element={
+            <Suspense fallback={<RouteLoader />}>
+              <ProtectedRoute><DashboardPage /></ProtectedRoute>
+            </Suspense>
+          } />
+          <Route path="/wallet" element={
+            <Suspense fallback={<RouteLoader />}>
+              <WalletPage />
+            </Suspense>
+          } />
+          <Route path="/agents" element={
+            <Suspense fallback={<RouteLoader />}>
+              <AgentsPage />
+            </Suspense>
+          } />
+          <Route path="/tasks/new" element={
+            <Suspense fallback={<RouteLoader />}>
+              <ProtectedRoute><NewTaskPage /></ProtectedRoute>
+            </Suspense>
+          } />
+          <Route path="/tasks/:id" element={
+            <Suspense fallback={<RouteLoader />}>
+              <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
+            </Suspense>
+          } />
+          <Route path="/renderer-demo" element={
+            <Suspense fallback={<RouteLoader />}>
+              <RendererDemoPage />
+            </Suspense>
+          } />
         </Routes>
       </AppShell>
     <NotificationProvider>
@@ -57,30 +125,50 @@ const RoutedContent: React.FC = () => {
   return (
     <>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={
+          <Suspense fallback={<RouteLoader />}>
+            <LandingPage />
+          </Suspense>
+        } />
         <Route path="/*" element={
           <AppShell>
             <Routes>
               <Route path="/dashboard" element={
-                <ProtectedRoute><DashboardPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><DashboardPage /></ProtectedRoute>
+                </Suspense>
               } />
               <Route path="/wallet" element={
-                <ProtectedRoute><WalletPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><WalletPage /></ProtectedRoute>
+                </Suspense>
               } />
               <Route path="/agents" element={
-                <ProtectedRoute><AgentsPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><AgentsPage /></ProtectedRoute>
+                </Suspense>
               } />
               <Route path="/tasks/new" element={
-                <ProtectedRoute><NewTaskPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><NewTaskPage /></ProtectedRoute>
+                </Suspense>
               } />
               <Route path="/tasks/history" element={
-                <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
+                </Suspense>
               } />
               <Route path="/tasks/:id" element={
-                <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
+                <Suspense fallback={<RouteLoader />}>
+                  <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
+                </Suspense>
               } />
               {import.meta.env.DEV && (
-                <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                <Route path="/renderer-demo" element={
+                  <Suspense fallback={<RouteLoader />}>
+                    <RendererDemoPage />
+                  </Suspense>
+                } />
               )}
               <Route path="*" element={<NotFoundPage />} />
             </Routes>
