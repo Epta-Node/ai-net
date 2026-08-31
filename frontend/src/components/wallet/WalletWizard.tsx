@@ -9,7 +9,7 @@ import styles from './WalletWizard.module.css'
 
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
-  const { balance } = useWalletBalance(publicKey)
+  const { balance, balances } = useWalletBalance(publicKey)
   const { currentStep, nextStep, prevStep } = useOnboarding(4)
 
   const [connecting, setConnecting] = useState(false)
@@ -148,8 +148,23 @@ export const WalletWizard: React.FC = () => {
           
           <div className={styles.illustration}>
             <div className={styles.walletInfo}>
-              <p>Current Balance: <strong>{balance ? parseFloat(balance).toFixed(2) : '0.00'} XLM</strong></p>
+              <p>Current Balance: <strong>{balance ? parseFloat(balance).toFixed(7) : '0.0000000'} XLM</strong></p>
+              {balances.length > 0 && (
+                <div className={styles.balanceChips}>
+                  {balances.map((entry) => {
+                    const code = entry.asset_type === 'native' ? 'XLM' : (entry.asset_code ?? '')
+                    return (
+                      <span key={code} className={styles.balanceChip}>
+                        {new Intl.NumberFormat(undefined, { maximumFractionDigits: 7 }).format(parseFloat(entry.balance) || 0)} {code}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
+            <p className={styles.stepDescription} style={{ marginBottom: '1rem' }}>
+              Once funded, you can send XLM to other agents from your wallet.
+            </p>
             <a 
               href={`https://laboratory.stellar.org/#create-account?network=test`}
               target="_blank" 

@@ -187,6 +187,29 @@
   word-break: break-all;
 }
 
+.balanceChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 0.75rem;
+  justify-content: center;
+}
+
+.balanceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #ffffff;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-main, #111827);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, monospace);
+}
+
 .link {
   color: var(--primary, var(--accent-info));
   text-decoration: none;

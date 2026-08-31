@@ -41,6 +41,22 @@ async function main() {
     const reconciliationService = createDefaultReconciliationService();
     reconciliationService.startDaily(config.RECONCILIATION_INTERVAL_MS);
 
+    // Start SQLite maintenance (WAL checkpoint, vacuum, backup)
+    const maintenanceService = new DbMaintenanceService(defaultMaintenanceDatabases(), {
+      intervalMs: config.DB_MAINTENANCE_INTERVAL_MS,
+      vacuumThreshold: config.DB_MAINTENANCE_VACUUM_THRESHOLD,
+      backupDir: config.DB_BACKUP_DIR,
+      backupRetentionCount: config.DB_BACKUP_RETENTION_COUNT,
+    });
+    maintenanceService.start();
+
+    // Start error-registry maintenance (expiry sweep + per-agent cap)
+    const errorRegistryMaintenance = new ErrorRegistryMaintenanceService({
+      intervalMs: config.ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS,
+      capPerAgent: config.ERROR_REGISTRY_CAP_PER_AGENT,
+    });
+    errorRegistryMaintenance.start();
+
     // Create and start the server
     const { httpServer, close } = createApp();
 
@@ -60,6 +76,8 @@ async function main() {
 
       cleanupService.stop();
       reconciliationService.stop();
+      maintenanceService.stop();
+      errorRegistryMaintenance.stop();
       globalAgentRegistry.shutdown();
       stopAgentSync();
 

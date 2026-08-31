@@ -233,6 +233,58 @@
   opacity: 0.75;
 }
 
+/* Balance chips (XLM + token trustlines) */
+.balanceChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.balanceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  font-size: 0.875rem;
+  color: inherit;
+}
+
+.balanceChipNative {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.balanceChipAmount {
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.balanceChipCode {
+  font-weight: 600;
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.75rem;
+}
+
+.tokensSection {
+  margin-bottom: 20px;
+}
+
+.tokensHeading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.85;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .publicKeySection {
   display: flex;
   align-items: center;
