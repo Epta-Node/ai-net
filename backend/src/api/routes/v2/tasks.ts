@@ -9,30 +9,24 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { getConfig } from "../../../config";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
 // ── Validation config ────────────────────────────────────────────────────────
-const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH ?? 10_000);
 const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
-export const createTaskSchema = z.object({
-  prompt: z
-    .string()
-    .min(1, "Prompt is required")
-    .max(MAX_PROMPT_LENGTH, `Prompt too long (max ${MAX_PROMPT_LENGTH} characters)`)
-    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim()),
-  walletPublicKey: z.string().optional(),
-  maxBudgetXLM: z.number().min(0.1).optional().default(1),
-  agentPreferences: z.array(z.string()).optional(),
-  priority: z.enum(["low", "normal", "high", "critical"]).optional().default("normal"),
-});
+// Both schemas now live in src/schemas/task.ts so the three task routers, and
+// the frontend, share one definition. Re-exported to keep existing importers
+// of `createTaskSchema` working.
+export { createTaskSchema } from "../../../schemas/task";
+import { createTaskSchema, listTasksQuerySchema } from "../../../schemas/task";
 
-const TaskListSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
+const TaskCursorListSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
   status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
   sort: z.enum(["createdAt:desc", "createdAt:asc"]).default("createdAt:desc"),
   q: z.string().optional(),
@@ -58,14 +52,15 @@ export function createV2TasksRouter(
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
 
-    if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
+    const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+    if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
       const db = createTaskDb(getTaskDb());
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-      if (total >= DAILY_TASK_LIMIT) {
+      if (total >= dailyTaskLimit) {
         res.status(429).json({
           error: {
-            message: `Daily task limit reached (max ${DAILY_TASK_LIMIT} per 24 hours)`,
+            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
             code: "DAILY_LIMIT_EXCEEDED",
           },
           _meta: {
@@ -119,17 +114,65 @@ export function createV2TasksRouter(
     });
   });
 
-  // GET /api/tasks — v2 format with enhanced response
+  // GET /api/tasks — v2 format: cursor pagination when ?cursor or ?limit present, offset otherwise
   tasksRouter.get("/", (req: Request, res: Response): void => {
     const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
+    const now = new Date().toISOString();
+
+    // Use cursor mode when an explicit cursor or limit (without page) is provided
+    const useCursor = "cursor" in req.query || ("limit" in req.query && !("page" in req.query));
+
+    if (useCursor) {
+      const parse = TaskCursorListSchema.safeParse(req.query);
+      if (!parse.success) {
+        res.status(400).json({
+          error: parse.error.flatten(),
+          _meta: { version: "2.0", timestamp: now },
+        });
+        return;
+      }
+
+      const { cursor, limit, status, sort, q } = parse.data;
+      const db = createTaskDb(getTaskDb());
+      const page = db.listCursor(walletPublicKey, {
+        cursor,
+        limit,
+        status,
+        sort,
+        q: q && q.length > 0 ? q : undefined,
+      });
+
+      res.json({
+        data: {
+          items: page.items,
+          pagination: {
+            limit,
+            nextCursor: page.nextCursor ?? null,
+            hasNextPage: !!page.nextCursor,
+          },
+        },
+        _meta: {
+          version: "2.0",
+          timestamp: now,
+          requestId: res.locals.requestId || null,
+          apiVersion: res.locals.apiVersion || "2.0",
+        },
+        _links: {
+          self: `/api/tasks`,
+          ...(page.nextCursor
+            ? { next: `/api/tasks?cursor=${encodeURIComponent(page.nextCursor)}&limit=${limit}` }
+            : {}),
+        },
+      });
+      return;
+    }
+
+    // Offset fallback (backward-compatible)
     const parse = TaskListSchema.safeParse(req.query);
     if (!parse.success) {
       res.status(400).json({
         error: parse.error.flatten(),
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
+        _meta: { version: "2.0", timestamp: now },
       });
       return;
     }
@@ -142,9 +185,6 @@ export function createV2TasksRouter(
       q: q && q.length > 0 ? q : undefined,
     });
 
-    const now = new Date().toISOString();
-
-    // v2 enhanced response format
     res.json({
       data: {
         tasks,

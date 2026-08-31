@@ -9,7 +9,7 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
-import { NotFoundError, ValidationError, RateLimitError, AppError } from "../../errors";
+import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 
@@ -17,7 +17,6 @@ import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue"
 // Read at module load time so the value is stable for the lifetime of the
 // process. Tests that need a different value should set process.env before
 // importing (or use jest.resetModules() + re-require).
-const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH ?? 10_000);
 const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
@@ -36,27 +35,11 @@ const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 // maxBudgetXLM when it was present and below the minimum, and accepted
 // walletPublicKey from the body; requiring them here silently broke every
 // caller that omitted them, including the e2e suite.
-export const createTaskSchema = z.object({
-  prompt: z
-    .string()
-    .min(1, "Prompt is required")
-    .max(MAX_PROMPT_LENGTH, `Prompt too long (max ${MAX_PROMPT_LENGTH} characters)`)
-    // Strip C0 control characters (except tab \x09, newline \x0A, carriage return \x0D)
-    // to prevent prompt injection via embedded invisible control sequences.
-    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim()),
-  walletPublicKey: z.string().optional(),
-  maxBudgetXLM: z.number().min(0.1).optional().default(1),
-  agentPreferences: z.array(z.string()).optional(),
-  priority: z.enum(["low", "normal", "high", "critical"]).optional().default("normal"),
-});
-
-const TaskListSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
-  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
-  sort: z.enum(["createdAt:desc", "createdAt:asc"]).default("createdAt:desc"),
-  q: z.string().optional(),
-});
+// Both schemas now live in src/schemas/task.ts so the three task routers, and
+// the frontend, share one definition. Re-exported to keep existing importers
+// of `createTaskSchema` working.
+export { createTaskSchema } from "../../schemas/task";
+import { createTaskSchema, listTasksQuerySchema } from "../../schemas/task";
 
 /**
  * @deprecated Use version-specific routers instead: createV1TasksRouter or createV2TasksRouter
@@ -156,15 +139,16 @@ export function createTasksRouter(
         "anonymous";
 
       // ── Per-wallet daily quota ───────────────────────────────────────────────
-      if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
+      const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+      if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
         const db = createTaskDb(getTaskDb());
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-        if (total >= DAILY_TASK_LIMIT) {
+        if (total >= dailyTaskLimit) {
           const correlationId = res.locals.correlationId as string | undefined;
           throw new RateLimitError(
-            `Daily task limit reached (max ${DAILY_TASK_LIMIT} per 24 hours)`,
-            { code: "DAILY_LIMIT_EXCEEDED", limit: DAILY_TASK_LIMIT, window: "24h" },
+            `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
+            { code: "DAILY_LIMIT_EXCEEDED", limit: dailyTaskLimit, window: "24h" },
             correlationId,
           );
         }
@@ -281,7 +265,7 @@ export function createTasksRouter(
   tasksRouter.get("/", (req: Request, res: Response, next: NextFunction): void => {
     try {
       const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
-      const parse = TaskListSchema.safeParse(req.query);
+      const parse = listTasksQuerySchema.safeParse(req.query);
       if (!parse.success) {
         const correlationId = res.locals.correlationId as string | undefined;
         throw new ValidationError(

@@ -14,7 +14,7 @@
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--surface-black-strong);
   backdrop-filter: blur(4px);
 }
 
@@ -28,7 +28,7 @@
   border-radius: 18px;
   width: 100%;
   max-width: 1120px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-popover);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -108,11 +108,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(139, 92, 246, 0.15);
-  border: 1px solid rgba(139, 92, 246, 0.35);
-  color: #c4b5fd;
+  background: var(--accent-surface);
+  border: 1px solid var(--accent-border-strong);
+  color: var(--accent-text);
   padding: 7px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.78rem;
   font-weight: 600;
   box-shadow: none;
@@ -121,7 +121,7 @@
 }
 
 .exportBtn:hover {
-  background: rgba(139, 92, 246, 0.28);
+  background: var(--accent-surface-strong);
   transform: none;
   box-shadow: none;
 }
@@ -132,9 +132,9 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-alpha-04);
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   color: var(--text-secondary);
   box-shadow: none;
   transition: background 0.15s, color 0.15s;
@@ -142,9 +142,9 @@
 }
 
 .closeBtn:hover {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-surface-strong);
+  color: var(--status-danger-text);
   transform: none;
   box-shadow: none;
 }
@@ -195,18 +195,18 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  background: rgba(139, 92, 246, 0.2);
-  border: 1px solid rgba(139, 92, 246, 0.4);
-  border-radius: 8px;
+  background: var(--accent-surface-strong);
+  border: 1px solid var(--accent-border-strong);
+  border-radius: var(--radius-lg);
   font-size: 0.85rem;
   font-weight: 800;
-  color: #c4b5fd;
+  color: var(--accent-text);
 }
 
 .columnB .colLabel {
-  background: rgba(56, 189, 248, 0.15);
-  border-color: rgba(56, 189, 248, 0.35);
-  color: #7dd3fc;
+  background: var(--info-surface);
+  border-color: var(--info-border);
+  color: var(--accent-info);
 }
 
 .colMeta {
@@ -257,9 +257,9 @@
 }
 
 .sectionBody {
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--surface-glass-subtle);
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 12px;
 }
 
@@ -280,9 +280,9 @@
 }
 
 .statCell {
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--surface-glass-subtle);
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
@@ -315,7 +315,7 @@
   font-weight: 700;
   text-transform: capitalize;
   padding: 2px 8px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   border: 1px solid;
   background: transparent;
 }
@@ -330,7 +330,7 @@
 
 .outputNode {
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -339,7 +339,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-hover-subtle);
   border-bottom: 1px solid var(--panel-border);
   gap: 8px;
 }
@@ -383,16 +383,16 @@
   gap: 6px;
   padding: 8px 12px;
   font-size: 0.76rem;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.06);
+  color: var(--status-danger);
+  background: var(--status-danger-surface-muted);
 }
 
 /* ─── Diff highlight ─────────────────────────────────────────────── */
 
 .diffMark {
-  background: rgba(245, 158, 11, 0.2);
+  background: var(--status-warning-surface-strong);
   border-radius: 3px;
-  color: #fde68a;
+  color: var(--status-warning-text);
   text-decoration: none;
   padding: 0 2px;
 }

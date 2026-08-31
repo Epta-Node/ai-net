@@ -2,6 +2,7 @@ import React from 'react'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, test, expect, beforeEach, vi } from 'vitest'
+import i18n from 'i18next'
 import MobileDrawer, { NAV_ITEMS } from './MobileDrawer'
 
 vi.mock('framer-motion', async () => {
@@ -64,7 +65,7 @@ describe('MobileDrawer rendering', () => {
     expect(screen.getByRole('dialog', { name: /mobile navigation/i })).toBeInTheDocument()
     expect(screen.getByText('Navigation')).toBeInTheDocument()
     NAV_ITEMS.forEach((item) => {
-      expect(screen.getByText(item.label)).toBeInTheDocument()
+      expect(screen.getByText(i18n.t(item.labelKey))).toBeInTheDocument()
     })
   })
 
@@ -118,7 +119,7 @@ describe('MobileDrawer close behavior', () => {
   test('calls onNavigate and onClose flow via nav item click', () => {
     const { onNavigate } = renderDrawer()
     fireEvent.click(screen.getByRole('button', { name: /dashboard/i }))
-    expect(onNavigate).toHaveBeenCalledWith('/')
+    expect(onNavigate).toHaveBeenCalledWith('/dashboard')
   })
 })
 
@@ -201,11 +202,13 @@ describe('NAV_ITEMS', () => {
     expect(NAV_ITEMS).toHaveLength(5)
   })
 
-  test('each item has path, icon, and label', () => {
+  test('each item has path, icon, and a translatable label', () => {
     NAV_ITEMS.forEach((item) => {
       expect(item).toHaveProperty('path')
       expect(item).toHaveProperty('icon')
-      expect(item).toHaveProperty('label')
+      expect(item).toHaveProperty('labelKey')
+      // A key that resolves to itself means the translation is missing.
+      expect(i18n.t(item.labelKey)).not.toBe(item.labelKey)
     })
   })
 })

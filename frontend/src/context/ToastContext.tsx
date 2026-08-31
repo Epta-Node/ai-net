@@ -1,15 +1,19 @@
-import { createContext, useCallback, useEffect, useMemo, useState, useContext } from 'react'
-import type { ReactNode } from 'react'
-import { ToastContainer } from '../components/common/Toast'
-import { useTranslation } from 'react-i18next'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ToastContainer } from '../components/common/Toast';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Toast {
-  id: string
-  message: string
-  type: ToastType
-  duration: number
+  id: string;
+  message: string;
+  type: ToastType;
+  duration: number;
 }
 
 interface ToastContextValue {
@@ -25,7 +29,7 @@ const defaultDurations: Record<ToastType, number> = {
   error: 10000,
 }
 
-export const ToastContext = createContext<ToastContextValue | undefined>(undefined)
+export const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -36,42 +40,56 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const showToast = useCallback(
     (message: string, type: ToastType = 'info', duration = defaultDurations[type]) => {
-      const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2);
 
       setToasts((prev) => [...prev, { id, message, type, duration }])
 
       if (duration > 0) {
         window.setTimeout(() => dismissToast(id), duration)
       }
+
+      return id
     },
     [dismissToast],
   )
 
+  // External dispatch support (used by services/api.ts notifyToast)
   useEffect(() => {
     const handleExternalToast = (event: Event) => {
-      const customEvent = event as CustomEvent<{ message?: string; type?: ToastType; duration?: number }>
-      const message = customEvent.detail?.message
-      if (!message) return
+      const customEvent = event as CustomEvent<{
+        message?: string;
+        type?: ToastType;
+        duration?: number;
+      }>;
+      const message = customEvent.detail?.message;
+      if (!message) return;
 
-      showToast(message, customEvent.detail?.type ?? 'info', customEvent.detail?.duration ?? defaultDurations[customEvent.detail?.type ?? 'info'])
-    }
+      const type = customEvent.detail?.type ?? 'info';
+      showToast(message, type, customEvent.detail?.duration ?? defaultDurations[type]);
+    };
 
     window.addEventListener('app-toast', handleExternalToast as EventListener)
     return () => window.removeEventListener('app-toast', handleExternalToast as EventListener)
   }, [showToast])
 
-  const value = useMemo<ToastContextValue>(() => ({ toasts, showToast, dismissToast }), [toasts, showToast, dismissToast])
+  const value = useMemo<ToastContextValue>(
+    () => ({ toasts, showToast, dismissToast }),
+    [toasts, showToast, dismissToast],
+  );
 
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ToastContainer toasts={activeToasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
   )
 }
 
 export function useToast() {
-  const context = useContext(ToastContext)
-  if (!context) throw new Error('useToast must be used within ToastProvider')
-  return context
+  const context = useContext(ToastContext);
+  if (!context) throw new Error('useToast must be used within ToastProvider');
+  return context;
 }
