@@ -1,9 +1,9 @@
 .sidebar {
   position: fixed;
-  top: 64px;
+  top: var(--topnav-height, 64px);
   left: 0;
-  width: 280px;
-  height: calc(100vh - 64px);
+  width: var(--sidebar-width, 280px);
+  height: calc(100vh - var(--topnav-height, 64px));
   background: var(--bg-primary, #ffffff);
   border-right: 1px solid var(--border-color, #e2e8f0);
   transition: width 0.3s ease;
@@ -12,11 +12,47 @@
 }
 
 .sidebar.collapsed {
-  width: 80px;
+  width: var(--sidebar-width-collapsed, 80px);
 }
 
 .sidebar-nav {
   padding: 16px 0 24px;
+  overflow-y: auto;
+  max-height: 100%;
+}
+
+.nav-group + .nav-group {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.nav-group-label {
+  margin: 0;
+  padding: 8px 24px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+  opacity: 0.6;
+}
+
+/*
+ * Hidden from sight, kept in the accessibility tree. Used for the group
+ * headings and item labels while the rail is collapsed, so screen-reader users
+ * keep the structure that sighted users trade away for the narrow rail.
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .sidebar-nav ul {
@@ -30,6 +66,7 @@
 }
 
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   width: 100%;
@@ -54,8 +91,34 @@
 }
 
 .nav-item.active {
-  background: var(--primary-light, rgba(59, 130, 246, 0.1));
   color: var(--primary, #3b82f6);
+}
+
+/*
+ * The active pill is a single shared element that framer-motion slides between
+ * items (see `layoutId` in Sidebar.tsx), so it sits behind the content rather
+ * than being a background on the button itself.
+ */
+.nav-item-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: 8px;
+  background: var(--primary-light, rgba(59, 130, 246, 0.1));
+}
+
+.nav-item > .nav-icon,
+.nav-item > .nav-label {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-item,
+  .nav-label,
+  .sidebar {
+    transition: none;
+  }
 }
 
 .nav-icon {
@@ -80,11 +143,6 @@
   transition: opacity 0.2s ease;
 }
 
-.sidebar.collapsed .nav-label {
-  opacity: 0;
-  width: 0;
-}
-
 .sidebar.collapsed .sidebar-nav ul {
   padding: 0 8px;
 }
@@ -94,7 +152,8 @@
   gap: 0;
 }
 
-@media (max-width: 767px) {
+/* Below the desktop breakpoint the drawer takes over entirely. */
+@media (max-width: 1023px) {
   .sidebar {
     display: none;
   }

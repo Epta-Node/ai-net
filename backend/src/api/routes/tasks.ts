@@ -9,7 +9,7 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
-import { NotFoundError, ValidationError, RateLimitError, AppError } from "../../errors";
+import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 

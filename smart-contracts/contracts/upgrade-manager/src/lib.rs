@@ -376,7 +376,7 @@ impl UpgradeManager {
 
         // Execute the upgrade
         env.deployer()
-            .update_current_contract_wasm(proposal.new_wasm_hash.clone());
+            .update_current_contract_wasm(proposal.new_wasm_hash);
 
         // Create new version record
         let new_version = ContractVersion {
@@ -396,13 +396,6 @@ impl UpgradeManager {
             &DataKey::Version(proposal.new_version.clone()),
             &new_version,
         );
-
-        // Capture the outgoing version label before `current_version` is moved
-        // into the rollback record below; the applied event still reports it.
-        let old_version_label = current_version
-            .as_ref()
-            .map(|v| v.version.clone())
-            .unwrap_or_else(|| String::from_str(&env, "none"));
 
         // Store rollback info if we had a previous version
         if let Some(prev_version) = current_version {
@@ -429,9 +422,11 @@ impl UpgradeManager {
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("applied")),
             UpgradeAppliedEvent {
-                old_version: old_version_label,
-                new_version: proposal.new_version.clone(),
-                wasm_hash: proposal.new_wasm_hash.clone(),
+                old_version: current_version
+                    .map(|v| v.version)
+                    .unwrap_or(String::from_str(&env, "none")),
+                new_version: proposal.new_version,
+                wasm_hash: proposal.new_wasm_hash,
                 admin: new_version.admin,
             },
         );
@@ -539,10 +534,7 @@ fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{
-        testutils::{Address as _, Ledger as _},
-        BytesN, Env,
-    };
+    use soroban_sdk::{testutils::Address as _, BytesN, Env};
 
     fn create_test_env() -> (Env, UpgradeManagerClient<'static>, Address) {
         let env = Env::default();
@@ -564,7 +556,7 @@ mod tests {
         let (env, client, admin) = create_test_env();
         let initial_hash = test_wasm_hash(&env, 1);
 
-        let result = client.try_initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+        let result = client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
 
         assert!(result.is_ok());
         assert_eq!(client.get_admin(), Some(admin));
@@ -600,7 +592,8 @@ mod tests {
 
         // Validate proposal
         let gas_estimate = client.validate_proposal();
-        assert!(gas_estimate > 0);
+        assert!(gas_estimate.is_ok());
+        assert!(gas_estimate.unwrap() > 0);
 
         // Execute upgrade
         let result = client.try_execute_upgrade();

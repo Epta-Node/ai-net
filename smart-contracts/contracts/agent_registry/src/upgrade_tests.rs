@@ -6,7 +6,9 @@ mod upgrade_tests {
         testutils::{Address as _, Events as _, Ledger as _},
         Address, BytesN, Env, String,
     };
-    use upgrade_manager::UpgradeableError;
+    use upgrade_manager::{
+        MigrationMetadata, UpgradeStatus, Upgradeable, UpgradeableError, VersionCompatibility,
+    };
 
     fn setup_upgrade_test() -> (Env, AgentRegistryContractClient<'static>, Address) {
         let env = Env::default();
@@ -42,7 +44,7 @@ mod upgrade_tests {
         let (env, client, _admin) = setup_upgrade_test();
         let upgrade_manager = Address::generate(&env);
 
-        let result = client.try_set_upgrade_manager(&upgrade_manager);
+        let result = client.set_upgrade_manager(&upgrade_manager);
         assert!(result.is_ok());
 
         assert_eq!(client.get_upgrade_manager(), Some(upgrade_manager));
@@ -78,20 +80,17 @@ mod upgrade_tests {
         let new_version = String::from_str(&env, "1.1.0");
         let new_hash = test_wasm_hash(&env, 2);
 
-        let result = client.try_pre_upgrade_hook(&new_version, &new_hash);
+        let result = client.pre_upgrade_hook(&new_version, &new_hash);
         assert!(result.is_ok());
 
-        let validation_results = result.unwrap().unwrap();
-        assert!(!validation_results.is_empty());
+        let validation_results = result.unwrap();
+        assert!(validation_results.len() > 0);
 
         // Check that validation passed
         let last_result = validation_results
             .get(validation_results.len() - 1)
             .unwrap();
-        assert!(upgrade_manager::strutil::str_eq(
-            &last_result,
-            "Pre-upgrade validation successful"
-        ));
+        assert!(last_result.to_string().contains("successful"));
     }
 
     #[test]
@@ -126,7 +125,7 @@ mod upgrade_tests {
         let old_version = String::from_str(&env, "1.0.0");
         let new_version = String::from_str(&env, "1.1.0");
 
-        let result = client.try_post_upgrade_hook(&old_version, &new_version);
+        let result = client.post_upgrade_hook(&old_version, &new_version);
         assert!(result.is_ok());
 
         // Check that version was updated in storage
@@ -142,10 +141,10 @@ mod upgrade_tests {
         let (env, client, _admin) = setup_upgrade_test();
         let target_version = String::from_str(&env, "2.0.0");
 
-        let result = client.try_get_migration_plan(&target_version);
+        let result = client.get_migration_plan(&target_version);
         assert!(result.is_ok());
 
-        let migration_plan = result.unwrap().unwrap();
+        let migration_plan = result.unwrap();
         assert_eq!(migration_plan.from_version, String::from_str(&env, "1.0.0"));
         assert_eq!(migration_plan.to_version, target_version);
         assert!(migration_plan.estimated_data_items > 0);
@@ -157,10 +156,10 @@ mod upgrade_tests {
         let (env, client, _admin) = setup_upgrade_test();
         let target_version = String::from_str(&env, "3.0.0"); // Major version change
 
-        let result = client.try_get_migration_plan(&target_version);
+        let result = client.get_migration_plan(&target_version);
         assert!(result.is_ok());
 
-        let migration_plan = result.unwrap().unwrap();
+        let migration_plan = result.unwrap();
         // Major version changes should be marked as breaking
         // In a more sophisticated implementation, this would be true
         // For now, we just check that the plan was generated
@@ -191,7 +190,7 @@ mod upgrade_tests {
         let new_hash = test_wasm_hash(&env, 2);
         let description = String::from_str(&env, "Minor upgrade");
 
-        let result = client.try_initiate_upgrade(&new_version, &new_hash, &description);
+        let result = client.initiate_upgrade(&new_version, &new_hash, &description);
         assert!(result.is_ok());
 
         // Check event was emitted
@@ -207,12 +206,12 @@ mod upgrade_tests {
         let new_version = String::from_str(&env, "1.1.0");
         let description = String::from_str(&env, "Test upgrade");
 
-        let result = client.try_upgrade_contract(&new_hash, &new_version, &description);
+        let result = client.upgrade_contract(&new_hash, &new_version, &description);
         assert!(result.is_ok());
 
         // Check upgrade event was emitted
         let events = env.events().all();
-        assert!(!events.is_empty());
+        assert!(events.len() > 0);
 
         // Verify upgrade status
         let status = client.get_upgrade_status();
@@ -250,7 +249,7 @@ mod upgrade_tests {
         let result = client.try_check_upgrade_compatibility(&compatible_version);
         assert!(result.is_ok());
 
-        let compatibility = result.unwrap().unwrap();
+        let compatibility = result.unwrap();
         assert_eq!(
             compatibility.current_version,
             String::from_str(&env, "1.0.0")
@@ -263,7 +262,7 @@ mod upgrade_tests {
         let result = client.try_check_upgrade_compatibility(&incompatible_version);
         assert!(result.is_ok());
 
-        let compatibility = result.unwrap().unwrap();
+        let compatibility = result.unwrap();
         assert!(!compatibility.is_compatible);
         assert!(!compatibility.compatibility_issues.is_empty());
     }
@@ -298,12 +297,12 @@ mod upgrade_tests {
         let original_hash = test_wasm_hash(&env, 1);
         let original_version = String::from_str(&env, "1.0.0");
 
-        let result = client.try_emergency_rollback(&original_hash, &original_version);
+        let result = client.emergency_rollback(&original_hash, &original_version);
         assert!(result.is_ok());
 
         // Check rollback event was emitted
         let events = env.events().all();
-        assert!(!events.is_empty());
+        assert!(events.len() > 0);
 
         // Verify rollback is no longer available
         let status = client.get_upgrade_status();
@@ -414,7 +413,7 @@ mod upgrade_tests {
 
     #[test]
     fn test_upgrade_events() {
-        let (env, client, _admin) = setup_upgrade_test();
+        let (env, client, admin) = setup_upgrade_test();
 
         let new_hash = test_wasm_hash(&env, 2);
         let new_version = String::from_str(&env, "1.1.0");
@@ -425,7 +424,7 @@ mod upgrade_tests {
         let events = env.events().all();
 
         // Should have at least the upgrade event
-        assert!(!events.is_empty());
+        assert!(events.len() > 0);
 
         // In a real implementation, we would check for specific event types:
         // - ContractUpgradedEvent with correct data
@@ -433,14 +432,14 @@ mod upgrade_tests {
         // - PostUpgradeHookEvent
 
         // For now, just verify events were emitted
-        let upgrade_event_count = events
+        let upgrade_events: Vec<_> = events
             .iter()
             .filter(|(_, topics, _)| {
                 topics.len() >= 2 && topics.get(0).is_some() && topics.get(1).is_some()
             })
-            .count();
+            .collect();
 
-        assert!(upgrade_event_count > 0);
+        assert!(upgrade_events.len() > 0);
     }
 
     #[test]
@@ -449,7 +448,7 @@ mod upgrade_tests {
 
         // Create a migration plan
         let target_version = String::from_str(&env, "2.0.0");
-        let migration_plan = client.get_migration_plan(&target_version);
+        let migration_plan = client.get_migration_plan(&target_version).unwrap();
 
         // Verify gas estimation is reasonable
         assert!(migration_plan.estimated_data_items > 0);
@@ -489,7 +488,7 @@ mod upgrade_tests {
 
 #[cfg(test)]
 mod upgrade_integration_tests {
-    use crate::*;
+    use super::*;
     use soroban_sdk::{
         testutils::{Address as _, Events as _},
         Address, BytesN, Env, String, Vec,
@@ -528,7 +527,7 @@ mod upgrade_integration_tests {
 
     #[test]
     fn test_full_upgrade_flow_integration() {
-        let (env, _registry, upgrade_mgr, _admin) = setup_integration_test();
+        let (env, registry, upgrade_mgr, _admin) = setup_integration_test();
 
         let new_version = String::from_str(&env, "1.1.0");
         let new_hash = BytesN::from_array(&env, &[2u8; 32]);
@@ -556,13 +555,13 @@ mod upgrade_integration_tests {
 
         // Test the full upgrade flow through upgrade manager
         let result =
-            upgrade_mgr.try_propose_upgrade(&new_version, &new_hash, &description, &migration_plan);
+            upgrade_mgr.propose_upgrade(&new_version, &new_hash, &description, &migration_plan);
         assert!(result.is_ok());
 
         // Validate proposal
         let gas_estimate = upgrade_mgr.try_validate_proposal();
         assert!(gas_estimate.is_ok());
-        assert!(gas_estimate.unwrap().unwrap() > 0);
+        assert!(gas_estimate.unwrap() > 0);
 
         // Execute upgrade
         let result = upgrade_mgr.try_execute_upgrade();
@@ -576,7 +575,7 @@ mod upgrade_integration_tests {
         // Test rollback capability
         assert!(upgrade_mgr.can_rollback());
 
-        let result = upgrade_mgr.try_rollback_upgrade();
+        let result = upgrade_mgr.rollback_upgrade();
         assert!(result.is_ok());
 
         // Verify rollback worked
@@ -616,14 +615,14 @@ mod upgrade_integration_tests {
 
     #[test]
     fn test_cross_contract_upgrade_coordination() {
-        let (env, registry, _upgrade_mgr, _admin) = setup_integration_test();
+        let (env, registry, upgrade_mgr, _admin) = setup_integration_test();
 
         // Test that registry can initiate upgrades through the upgrade manager
         let new_version = String::from_str(&env, "1.2.0");
         let new_hash = BytesN::from_array(&env, &[3u8; 32]);
         let description = String::from_str(&env, "Cross-contract upgrade test");
 
-        let result = registry.try_initiate_upgrade(&new_version, &new_hash, &description);
+        let result = registry.initiate_upgrade(&new_version, &new_hash, &description);
         assert!(result.is_ok());
 
         // Verify that the upgrade manager has the proposal

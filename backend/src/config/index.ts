@@ -58,18 +58,15 @@ const envSchema = z.object({
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
 
-  // ── SQLite connection pool ──────────────────────────────────────────────────
-  /** Reader connections opened eagerly when a pool is created. Default: 2. */
-  DB_POOL_MIN: z.coerce.number().int().positive().default(2),
-  /** Upper bound on reader connections a pool may open. Default: 10. */
-  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
-  /** How long an acquire waits for a reader before rejecting, in ms. Default: 5 000. */
-  DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
-  /** Run `SELECT 1` on a reader before handing it out. Default: true. */
-  DB_POOL_HEALTH_CHECK: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
+  // ── Authentication & Session Security ───────────────────────────────────────
+  /** JWT secret key used to sign and verify access tokens. */
+  AUTH_JWT_SECRET: z.string().default("ai-net-default-auth-secret-change-in-production"),
+  /** Access token validity in seconds. Default: 900 (15 min). */
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Refresh token sliding expiry validity in seconds. Default: 604 800 (7 days). */
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  /** Max absolute session lifetime in seconds. Default: 2 592 000 (30 days). */
+  AUTH_SESSION_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
 });
 
 let _config: z.infer<typeof envSchema> | null = null;

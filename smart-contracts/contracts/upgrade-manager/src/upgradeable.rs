@@ -113,9 +113,7 @@ pub enum UpgradeableError {
 
 /// Utility functions for version comparison and compatibility checking
 pub mod version_utils {
-    use crate::strutil::starts_with;
     use crate::{UpgradeableError, VersionCompatibility};
-    use core::cmp::Ordering;
     use soroban_sdk::{Env, String, Vec};
 
     /// Lexicographic comparison of two version tags.
@@ -134,12 +132,16 @@ pub mod version_utils {
         current: String,
         target: String,
     ) -> Result<VersionCompatibility, UpgradeableError> {
+        let current_str = current.to_string();
+        let target_str = target.to_string();
+
         let mut issues = Vec::new(env);
         let mut is_compatible = true;
         let mut migration_required = false;
 
-        match current.cmp(&target) {
-            Ordering::Less => {
+        // Simple version comparison - in practice would use proper semver
+        match current_str.cmp(&target_str) {
+            std::cmp::Ordering::Less => {
                 // Upgrading to newer version - generally compatible
                 migration_required = true;
             }

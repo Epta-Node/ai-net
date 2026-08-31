@@ -51,16 +51,12 @@ pub enum Error {
     SlaViolation = 25,
     /// Invalid SLA parameters.
     InvalidSla = 26,
-    /// Bridge proof has passed its expiry timestamp.
-    BridgeProofExpired = 27,
-    /// No bridge proof exists for this agent and target chain.
-    BridgeProofNotFound = 28,
-    /// Bridge proof does not match the record held by the registry.
-    BridgeProofMismatch = 29,
-    /// Requested proof lifetime is zero or beyond the permitted maximum.
-    InvalidBridgeExpiry = 30,
-    /// Audit log pagination arguments are out of range.
-    InvalidAuditRange = 31,
+    /// Star rating value is outside the valid range [1, 5].
+    InvalidRating = 27,
+    /// Caller has exceeded the per-window submission limit for an agent.
+    RateLimitExceeded = 28,
+    /// Configuration value is out of accepted bounds.
+    InvalidConfig = 29,
 }
 
 impl Error {
