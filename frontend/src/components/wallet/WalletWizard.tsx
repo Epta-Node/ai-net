@@ -49,7 +49,7 @@ export const WalletWizard: React.FC = () => {
             We use the Stellar network for fast, secure, and low-cost transactions.
           </p>
           <div className={styles.illustration}>
-            <Wallet size={64} color="var(--primary, #3b82f6)" />
+            <Wallet size={64} color="var(--primary)" />
           </div>
         </div>
         <div className={styles.buttonGroup}>
@@ -75,7 +75,7 @@ export const WalletWizard: React.FC = () => {
               </div>
             ) : (
               <div>
-                <Download size={48} color="var(--text-muted, #6b7280)" />
+                <Download size={48} color="var(--text-muted, var(--text-muted))" />
                 <p style={{ marginTop: '1rem' }}>
                   Freighter extension not detected.{' '}
                   <a href="https://freighter.app" target="_blank" rel="noreferrer" className={styles.link}>

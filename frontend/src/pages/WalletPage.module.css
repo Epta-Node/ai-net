@@ -28,7 +28,7 @@
 .connectCard {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 32px;
   max-width: 440px;
 }
@@ -45,7 +45,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   font-family: monospace;
   background: var(--bg-secondary);
@@ -55,18 +55,18 @@
 
 .secretInput:focus {
   outline: none;
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 3px var(--accent-surface);
 }
 
 .connectButton {
   width: 100%;
   margin-top: 16px;
   padding: 10px 16px;
-  background: #6366f1;
-  color: #ffffff;
+  background: var(--accent-secondary);
+  color: var(--text-inverse);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
@@ -74,7 +74,7 @@
 }
 
 .connectButton:hover:not(:disabled) {
-  background: #4f46e5;
+  background: var(--accent-secondary-hover);
 }
 
 .connectButton:disabled {
@@ -86,10 +86,10 @@
 .freighterButton {
   width: 100%;
   padding: 10px 16px;
-  background: #0f172a;
-  color: #ffffff;
+  background: var(--surface-canvas);
+  color: var(--text-inverse);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
@@ -97,7 +97,7 @@
 }
 
 .freighterButton:hover:not(:disabled) {
-  background: #1e293b;
+  background: var(--surface-elevated);
 }
 
 .freighterButton:disabled {
@@ -110,9 +110,9 @@
   display: inline-block;
   margin-bottom: 12px;
   padding: 3px 8px;
-  background: #ecfdf5;
-  color: #059669;
-  border-radius: 4px;
+  background: var(--status-success-surface);
+  color: var(--status-success-strong);
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -147,7 +147,7 @@
 }
 
 .link {
-  color: #6366f1;
+  color: var(--accent-secondary);
   text-decoration: none;
   font-weight: 500;
 }
@@ -159,10 +159,10 @@
 /* Security warning */
 .securityWarning {
   font-size: 0.75rem;
-  color: #f59e0b;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: 6px;
+  color: var(--status-warning);
+  background: var(--status-warning-surface);
+  border: 1px solid var(--status-warning-text);
+  border-radius: var(--radius-md);
   padding: 8px 10px;
   margin: 8px 0 0;
   line-height: 1.4;
@@ -173,8 +173,8 @@
   display: inline-block;
   margin-top: 6px;
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  background: var(--white-alpha-20);
+  border-radius: var(--radius-sm);
   font-size: 0.6875rem;
   font-weight: 500;
   text-transform: uppercase;
@@ -183,10 +183,10 @@
 
 /* Balance card */
 .balanceCard {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  border-radius: 16px;
+  background: linear-gradient(135deg, var(--accent-secondary) 0%, var(--accent) 100%);
+  border-radius: var(--radius-2xl);
   padding: 28px;
-  color: #ffffff;
+  color: var(--text-inverse);
   margin-bottom: 32px;
 }
 
@@ -218,8 +218,8 @@
 .balanceSkeleton {
   height: 40px;
   width: 200px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
+  background: var(--white-alpha-20);
+  border-radius: var(--radius-lg);
   animation: pulse 1.5s infinite;
 }
 
@@ -290,13 +290,13 @@
   align-items: center;
   gap: 20px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  border-top: 1px solid var(--white-alpha-20);
 }
 
 .qrCode {
   background: var(--bg-primary);
   padding: 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   flex-shrink: 0;
   line-height: 0;
 }
@@ -324,9 +324,9 @@
 .address {
   font-size: 0.875rem;
   font-family: monospace;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--white-alpha-15);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   word-break: break-all;
 }
 
@@ -336,38 +336,38 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--white-alpha-15);
   border: none;
-  border-radius: 6px;
-  color: #ffffff;
+  border-radius: var(--radius-md);
+  color: var(--text-inverse);
   cursor: pointer;
   transition: background 0.15s;
   text-decoration: none;
 }
 
 .iconButton:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--white-alpha-25);
 }
 
 .actions {
   margin-top: 16px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  border-top: 1px solid var(--white-alpha-20);
 }
 
 .disconnectButton {
   padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
+  background: var(--white-alpha-15);
+  color: var(--text-inverse);
+  border: 1px solid var(--white-alpha-30);
+  border-radius: var(--radius-md);
   font-size: 0.8125rem;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .disconnectButton:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--white-alpha-25);
 }
 
 /* Content grid */
@@ -381,7 +381,7 @@
 .balanceCardSkeleton {
   background: var(--bg-surface);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: var(--radius-2xl);
   padding: 28px;
   margin-bottom: 32px;
 }
@@ -447,7 +447,7 @@
 .reconnectCard {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 32px;
   max-width: 440px;
 }
@@ -470,7 +470,7 @@
   font-family: monospace;
   background: var(--bg-secondary);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 0.75rem;
 }
 

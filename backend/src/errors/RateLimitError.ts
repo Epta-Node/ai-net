@@ -12,6 +12,7 @@ export class RateLimitError extends AppError {
     details?: AppErrorDetails,
     correlationId?: string,
   ) {
-    super(message, 429, "RATE_LIMIT_EXCEEDED", details, correlationId);
+    super(message, 429, "RATE_LIMITED", details, correlationId);
+    this.name = "RateLimitError";
   }
 }

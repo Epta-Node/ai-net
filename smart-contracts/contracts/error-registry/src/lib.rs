@@ -55,8 +55,8 @@
 //! but that situation does not exist here.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, BytesN, Env, Map, Symbol,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map,
+    String, Symbol, Vec,
 };
 
 /// Maximum allowed TTL for a single record: **90 days** (in seconds).
@@ -77,6 +77,7 @@ pub const MAX_CLEANUP_BATCH: u32 = 100;
 /// Batch size used when a caller passes `0` to [`cleanup_expired_errors`],
 /// giving a sensible default for the common "just clean up" call.
 pub const DEFAULT_CLEANUP_BATCH: u32 = 50;
+pub const CONTRACT_VERSION: &str = "1.0.0";
 
 /// A single error report stored on-chain.
 ///
@@ -113,6 +114,10 @@ pub struct CleanupStats {
 /// Storage keys. All entries live in `persistent` storage.
 #[contracttype]
 pub enum DataKey {
+    /// Admin address allowed to upgrade this contract.
+    Admin,
+    /// Current semantic contract version.
+    Version,
     /// Primary storage: `error_id` -> [`ErrorRecord`].
     Record(BytesN<32>),
     /// Secondary lookup index: `error_code` -> `Vec<error_id>`.
@@ -130,6 +135,14 @@ pub enum Error {
     InvalidTtl = 2,
     /// `created_at + ttl_seconds` would overflow `u64`.
     TtlOverflow = 3,
+    /// Contract instance has already been initialized.
+    AlreadyInitialized = 4,
+    /// Contract instance has not been initialized with an admin.
+    NotInitialized = 5,
+    /// Caller is not authorized for the requested admin action.
+    Unauthorized = 6,
+    /// Requested upgrade could not be applied.
+    UpgradeFailed = 7,
 }
 
 #[contract]
@@ -137,6 +150,46 @@ pub struct ErrorRegistryContract;
 
 #[contractimpl]
 impl ErrorRegistryContract {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
+        Ok(())
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("errreg"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+        );
+        Ok(())
+    }
+
     /// Submit a new error report with an explicit TTL.
     ///
     /// * `error_id` — unique 32-byte key for the record (caller-supplied, e.g. a
@@ -352,6 +405,16 @@ impl ErrorRegistryContract {
 
         stats
     }
+}
+
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::NotInitialized)?;
+    admin.require_auth();
+    Ok(admin)
 }
 
 /// Reject `ttl_seconds` outside `(0, MAX_TTL_SECONDS]`.

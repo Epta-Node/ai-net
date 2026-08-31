@@ -1,16 +1,10 @@
 import React, { forwardRef, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion, PanInfo } from 'framer-motion'
-import { LayoutDashboard, PlusCircle, Bot, Wallet, History } from 'lucide-react'
+import { NAV_GROUPS, NAV_ITEMS, isNavItemActive } from './navigation'
 import './MobileDrawer.css'
 
-export const NAV_ITEMS = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/tasks/new', icon: PlusCircle, label: 'New Task' },
-  { path: '/tasks/history', icon: History, label: 'Task History' },
-  { path: '/agents', icon: Bot, label: 'Agents' },
-  { path: '/wallet', icon: Wallet, label: 'Wallet' },
-] as const
+export { NAV_ITEMS }
 
 interface MobileDrawerProps {
   onClose: () => void
@@ -21,6 +15,13 @@ interface MobileDrawerProps {
 const FOCUSABLE_SELECTOR =
   'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
 
+/**
+ * Slide-over navigation for viewports below the desktop breakpoint.
+ *
+ * Enters from the left edge, mirroring where the sidebar sits on desktop, so
+ * the same navigation appears in the same place at every width. Drag it left
+ * (or flick) to dismiss.
+ */
 const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(
   ({ onClose, currentPath, onNavigate }, ref) => {
     const { t } = useTranslation()
@@ -77,43 +78,39 @@ const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(
       return () => document.removeEventListener('keydown', handleKeyDown)
     }, [])
 
+    // Dragging toward the edge the drawer came from dismisses it.
     const handleDragEnd = (_: unknown, info: PanInfo) => {
-      if (info.offset.x > 100 || info.velocity.x > 500) {
+      if (info.offset.x < -80 || info.velocity.x < -500) {
         onClose()
       }
-    }
-
-    const handleNavigate = (path: string) => {
-      onNavigate(path)
     }
 
     return (
       <>
         <motion.div
           className="drawer-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          variants={backdrop}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
           onClick={onClose}
           aria-hidden="true"
         />
         <motion.div
           ref={combinedRef}
           className="mobile-drawer trap-focus"
-          initial={{ y: '100%' }}
-          animate={{ y: 0 }}
-          exit={{ y: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 400, duration: 0.18 }}
-          drag="y"
-          dragConstraints={{ top: 0, bottom: 0 }}
+          initial={{ x: '-100%' }}
+          animate={{ x: 0 }}
+          exit={{ x: '-100%' }}
+          transition={{ type: 'spring', damping: 32, stiffness: 420 }}
+          drag="x"
+          dragConstraints={{ left: 0, right: 0 }}
           dragElastic={0.2}
           onDragEnd={handleDragEnd}
           role="dialog"
           aria-modal="true"
           aria-label={t('a11y.mobileNavigationMenu')}
         >
-          <div className="drawer-drag-handle" aria-hidden="true" />
           <div className="drawer-header">
             <h2>{t('nav.navigation')}</h2>
             <button
@@ -125,28 +122,37 @@ const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(
             </button>
           </div>
 
-          <nav className="drawer-nav">
-            <ul>
-              {NAV_ITEMS.map((item) => {
-                const isActive = currentPath === item.path
-                const Icon = item.icon
-                return (
-                  <li key={item.path}>
-                    <button
-                      className={`nav-item ${isActive ? 'active' : ''}`}
-                      onClick={() => handleNavigate(item.path)}
-                      aria-current={isActive ? 'page' : undefined}
-                    >
-                      <span className="nav-icon">
-                        <Icon size={20} />
-                      </span>
-                      <span className="nav-label">{item.label}</span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
+          <nav className="drawer-nav" aria-label={t('a11y.mobileNavigationMenu')}>
+            {NAV_GROUPS.map((group) => (
+              <div className="nav-group" key={group.id}>
+                <h3 className="nav-group-label" id={`drawer-group-${group.id}`}>
+                  {t(group.labelKey)}
+                </h3>
+                <ul aria-labelledby={`drawer-group-${group.id}`}>
+                  {group.items.map((item) => {
+                    const isActive = isNavItemActive(currentPath, item.path)
+                    const Icon = item.icon
+                    return (
+                      <li key={item.path}>
+                        <button
+                          className={`nav-item ${isActive ? 'active' : ''}`}
+                          onClick={() => onNavigate(item.path)}
+                          aria-current={isActive ? 'page' : undefined}
+                        >
+                          <span className="nav-icon">
+                            <Icon size={20} />
+                          </span>
+                          <span className="nav-label">{t(item.labelKey)}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))}
           </nav>
+
+          <div className="drawer-drag-handle" aria-hidden="true" />
         </motion.div>
       </>
     )
