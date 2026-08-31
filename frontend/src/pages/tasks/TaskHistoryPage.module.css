@@ -45,21 +45,21 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: rgba(139, 92, 246, 0.1);
-  border: 1px solid rgba(139, 92, 246, 0.3);
-  border-radius: 10px;
+  background: var(--accent-surface-muted);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-xl);
   padding: 8px 14px;
   font-size: 0.8rem;
   font-weight: 600;
-  color: #c4b5fd;
+  color: var(--accent-text);
 }
 
 .compareBtn {
   background: var(--primary);
   border: none;
-  color: #fff;
+  color: var(--text-inverse);
   padding: 5px 14px;
-  border-radius: 7px;
+  border-radius: var(--radius-lg);
   font-size: 0.78rem;
   font-weight: 700;
   box-shadow: none;
@@ -77,10 +77,10 @@
   align-items: center;
   gap: 4px;
   background: transparent;
-  border: 1px solid rgba(139, 92, 246, 0.35);
-  color: #a78bfa;
+  border: 1px solid var(--accent-border-strong);
+  color: var(--accent-text-strong);
   padding: 4px 10px;
-  border-radius: 7px;
+  border-radius: var(--radius-lg);
   font-size: 0.75rem;
   font-weight: 600;
   box-shadow: none;
@@ -89,7 +89,7 @@
 }
 
 .clearBtn:hover {
-  background: rgba(139, 92, 246, 0.12);
+  background: var(--accent-surface-muted);
   transform: none;
   box-shadow: none;
 }
@@ -103,10 +103,10 @@
   gap: 16px;
   flex-wrap: wrap;
   padding: 14px 18px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 10px;
-  color: #fca5a5;
+  background: var(--status-danger-surface-muted);
+  border: 1px solid var(--status-danger-surface-strong);
+  border-radius: var(--radius-xl);
+  color: var(--status-danger-text);
   font-size: 0.875rem;
   margin-bottom: 16px;
 }
@@ -116,11 +116,11 @@
 }
 
 .retryButton {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #fecaca;
+  background: var(--status-danger-surface);
+  border: 1px solid var(--status-danger-border-strong);
+  color: var(--status-danger-text);
   padding: 6px 14px;
-  border-radius: 7px;
+  border-radius: var(--radius-lg);
   font-size: 0.78rem;
   font-weight: 600;
   box-shadow: none;
@@ -128,7 +128,7 @@
 }
 
 .retryButton:hover {
-  background: rgba(239, 68, 68, 0.25);
+  background: var(--status-danger-surface-emphasis);
   transform: none;
   box-shadow: none;
 }

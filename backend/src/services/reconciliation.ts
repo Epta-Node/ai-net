@@ -12,6 +12,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { Horizon, Asset } from '@stellar/stellar-sdk';
 import { createLogger } from '../utils/logger';
+import { getConfig } from '../config';
 import { createPaymentDb, getDb, type PaymentDb, type PaymentRecord } from '../db/index';
 import type {
   ClaimableBalanceOnChain,
@@ -23,7 +24,6 @@ import type {
 
 const log = createLogger({ component: 'reconciliation' });
 
-const DEFAULT_HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const DEFAULT_DAILY_INTERVAL_MS = 86_400_000; // 24h
 const DEFAULT_FREQUENT_INTERVAL_MS = 300_000; // 5 minutes — drift detection SLA
 const LIST_BALANCES_MAX_PAGES = 10;
@@ -63,9 +63,7 @@ export class HorizonClaimableBalanceProvider implements ClaimableBalanceProvider
   private readonly server: Horizon.Server;
 
   constructor(horizonUrl?: string) {
-    this.server = new Horizon.Server(
-      horizonUrl ?? process.env.STELLAR_HORIZON ?? DEFAULT_HORIZON_URL
-    );
+    this.server = new Horizon.Server(horizonUrl ?? getConfig().STELLAR_HORIZON_URL);
   }
 
   async getBalance(balanceId: string): Promise<ClaimableBalanceOnChain | null> {
@@ -183,8 +181,7 @@ export class ReconciliationService {
       options.onChainProvider ?? new HorizonClaimableBalanceProvider();
     this.reportStore =
       options.reportStore ?? createSqliteReconciliationReportStore();
-    this.webhookUrl =
-      options.webhookUrl ?? process.env.RECONCILIATION_WEBHOOK_URL;
+    this.webhookUrl = options.webhookUrl ?? getConfig().RECONCILIATION_WEBHOOK_URL;
     this.logger = options.logger ?? log;
   }
 
