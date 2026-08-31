@@ -34,7 +34,7 @@ module.exports = {
     '!src/index.ts',
     '!src/checkSpec.ts',
   ],
-  coverageThresholds: {
+  coverageThreshold: {
     global: {
       statements: 90,
       branches: 80,

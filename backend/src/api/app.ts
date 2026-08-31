@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { createServer, Server as HttpServer } from "http";
 import swaggerUi from "swagger-ui-express";
 
@@ -16,6 +16,7 @@ import {
   getStreamConnectionCount,
   type TaskStreamOptions,
 } from "./routes/stream";
+import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { DAGNode } from "../types/task";
 import {
   createPaymentReleaseFn,

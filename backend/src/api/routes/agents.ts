@@ -1,6 +1,8 @@
-import { Router, Request, Response, NextFunction, type RequestHandler } from "express";
+import { Router, Request, Response, NextFunction } from "express";
+import { z } from "zod";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
-import { getAgentDb, createAgentDb, type AgentDb } from "../../db/agents";
+import { RegisterAgentSchema } from "../schemas/agent.schema";
+import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
 import { AgentListQuerySchema, RegisterAgentSchema } from "../schemas/agent.schema";
 import { getConfig } from "../../config";
@@ -190,13 +192,5 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   return router;
 }
 
-let defaultAgentsRouter: Router | null = null;
-
-export const agentsRouter: RequestHandler = (req, res, next) => {
-  if (!defaultAgentsRouter) {
-    defaultAgentsRouter = createAgentsRouter();
-  }
-  return defaultAgentsRouter(req, res, next);
-};
-
+export const agentsRouter = createAgentsRouter();
 export default agentsRouter;

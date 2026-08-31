@@ -1,6 +1,5 @@
-import { Router, Request, Response, type RequestHandler } from "express";
-import { getConfig, ttlForRoute } from "../../config";
-import { cacheMiddleware } from "../middleware/cache";
+import { Router, Request, Response } from "express";
+import { getConfig } from "../../config";
 import { adminAuthMiddleware } from "../middleware/auth";
 import { metricsService } from "../../services/metrics";
 import { tracingService } from "../../services/tracing";
