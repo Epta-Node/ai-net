@@ -41,7 +41,7 @@
   text-decoration: underline;
 }
 
-.pending { color: #eab308; }
-.completed { color: #22c55e; }
-.failed { color: #ef4444; }
-.default { color: #64748b; }
+.pending { color: var(--status-warning-strong); }
+.completed { color: var(--status-success); }
+.failed { color: var(--status-danger); }
+.default { color: var(--text-muted); }

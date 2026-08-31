@@ -46,9 +46,19 @@ vi.mock('../context/WalletContext', () => ({
 vi.mock('../hooks/useWalletBalance', () => ({
   useWalletBalance: () => ({
     balance: '100.0000000',
+    balances: [
+      { asset_type: 'native', balance: '100.0000000' },
+      { asset_type: 'credit_alphanum4', asset_code: 'USDC', asset_issuer: 'G...', balance: '25.5000000' },
+    ],
     loading: false,
     error: null,
   }),
+}))
+
+const mockShowToast = vi.fn()
+
+vi.mock('../hooks/useToast', () => ({
+  useToast: () => ({ showToast: mockShowToast }),
 }))
 
 // Only `useTransactionHistory` (the data-fetching hook) is mocked here - the
@@ -143,7 +153,23 @@ describe('WalletPage - Connected State', () => {
   it('shows the balance when connected', () => {
     renderPage()
     expect(screen.getByText('100.0000000')).toBeInTheDocument()
-    expect(screen.getByText('XLM')).toBeInTheDocument()
+    expect(screen.getAllByText('XLM').length).toBeGreaterThan(0)
+  })
+
+  it('renders balance chips for XLM and token trustlines', () => {
+    renderPage()
+    expect(screen.getByText('USDC')).toBeInTheDocument()
+    expect(screen.getByText('25.5')).toBeInTheDocument()
+    expect(screen.getAllByText('XLM').length).toBeGreaterThan(0)
+  })
+
+  it('shows a toast when copying the address', async () => {
+    renderPage()
+    const copyBtn = screen.getByRole('button', { name: /copy public key/i })
+    fireEvent.click(copyBtn)
+    await waitFor(() => {
+      expect(mockShowToast).toHaveBeenCalled()
+    })
   })
 
   it('shows the disconnect button', () => {

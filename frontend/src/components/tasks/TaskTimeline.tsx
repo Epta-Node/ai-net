@@ -25,11 +25,27 @@ import styles from './TaskTimeline.module.css';
 // ─── Agent icon colours ───────────────────────────────────────────────────────
 
 const AGENT_COLORS: Record<string, string> = {
-  research: '#38bdf8', // cyan
-  risk: '#f59e0b',     // amber
-  coding: '#a78bfa',   // violet
-  design: '#f472b6',   // pink
-  report: '#34d399',   // green
+  research: 'var(--agent-research)',
+  risk: 'var(--agent-risk)',
+  coding: 'var(--agent-coding)',
+  design: 'var(--agent-design)',
+  report: 'var(--agent-report)',
+};
+
+const AGENT_SURFACES: Record<string, string> = {
+  research: 'var(--agent-research-surface)',
+  risk: 'var(--agent-risk-surface)',
+  coding: 'var(--agent-coding-surface)',
+  design: 'var(--agent-design-surface)',
+  report: 'var(--agent-report-surface)',
+};
+
+const AGENT_BORDERS: Record<string, string> = {
+  research: 'var(--agent-research-border)',
+  risk: 'var(--agent-risk-border)',
+  coding: 'var(--agent-coding-border)',
+  design: 'var(--agent-design-border)',
+  report: 'var(--agent-report-border)',
 };
 
 const AGENT_ABBR: Record<string, string> = {
@@ -305,9 +321,9 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
                   key={type}
                   className={styles.agentBadge}
                   style={{
-                    background: `${AGENT_COLORS[type] || '#94a3b8'}22`,
-                    border: `1px solid ${AGENT_COLORS[type] || '#94a3b8'}44`,
-                    color: AGENT_COLORS[type] || '#94a3b8',
+                    background: AGENT_SURFACES[type] || 'var(--agent-default-surface)',
+                    border: `1px solid ${AGENT_BORDERS[type] || 'var(--agent-default-border)'}`,
+                    color: AGENT_COLORS[type] || 'var(--agent-default)',
                   }}
                   title={type}
                   aria-label={`${type} agent`}

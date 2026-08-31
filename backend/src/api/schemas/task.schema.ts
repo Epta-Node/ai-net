@@ -1,13 +1,27 @@
 import { z } from "zod";
+import { getConfig } from "../../config";
 
-const MAX_PROMPT_LENGTH = Number(process.env.MAX_PROMPT_LENGTH ?? 10_000);
-
-export const CreateTaskSchema = z.object({
-  prompt: z
+function promptSchema() {
+  return z
     .string()
     .min(1, "Prompt is required")
-    .max(MAX_PROMPT_LENGTH, `Prompt too long (max ${MAX_PROMPT_LENGTH} characters)`)
-    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim()),
+    .superRefine((prompt, ctx) => {
+      const maxPromptLength = getConfig().MAX_PROMPT_LENGTH;
+      if (prompt.length > maxPromptLength) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.too_big,
+          type: "string",
+          maximum: maxPromptLength,
+          inclusive: true,
+          message: `Prompt too long (max ${maxPromptLength} characters)`,
+        });
+      }
+    })
+    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim());
+}
+
+export const CreateTaskSchema = z.object({
+  prompt: promptSchema(),
   walletPublicKey: z.string().optional(),
   maxBudgetXLM: z.number().min(0.1).optional().default(1),
   agentPreferences: z.array(z.string()).optional(),

@@ -20,6 +20,31 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: detect-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Detect changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'tests/e2e/**'
+              - 'smart-contracts/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: backend
     runs-on: ubuntu-latest
@@ -41,11 +66,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests & coverage
+        run: npm run test:coverage
+
+      - name: Performance latency budgets
+        run: npm run test:performance
 
   frontend:
     name: frontend
@@ -68,11 +99,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests (vitest)
-        run: npm test
+      - name: Unit tests & coverage (vitest)
+        run: npm run test:coverage
 
   contracts:
     name: smart-contracts
@@ -156,11 +190,15 @@ jobs:
           cargo build --locked -p agent-bidding --target wasm32v1-none --release
           ls -la target/wasm32v1-none/release/*.wasm
 
-  e2e-fullstack:
-    name: e2e-fullstack
-    continue-on-error: true
-    # Sequence after backend so it doesn't overlap with the Rust contracts job.
-    needs: [backend]
+  # ── Backend E2E: smoke (registry/list/create) ───────────────────────────────
+  # Fast, deterministic smoke covering POST /api/agents/register,
+  # GET /api/agents, GET /api/agents/:id and POST /api/tasks create.
+  # Required, decoupled from heavy, with auto-retry (max 3 attempts).
+  e2e-backend-smoke:
+    name: e2e-backend-smoke (registry/list/create)
+    needs: [backend, changes]
+    # On PRs run only when backend paths changed; always run on push/main & dispatch
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -180,13 +218,225 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
-      - name: Run fullstack E2E suite
-        run: npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit
+      - name: Run backend smoke E2E (with auto-retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 12
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: cd backend && npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit --testPathPattern="scenario-a-registration" --json --outputFile=../test-results-backend-smoke.json
         env:
           NODE_ENV: test
           SKIP_STELLAR_ACCOUNT_VERIFY: "true"
           STELLAR_TEST_SECRET: ${{ secrets.STELLAR_TEST_SECRET }}
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+
+      - name: Upload backend smoke results (flake tracking)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-backend-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results-backend-smoke.json
+            backend/test-results-backend-smoke.json
+            ../test-results-backend-smoke.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Backend E2E: heavy (WS/lifecycle) ───────────────────────────────────────
+  # Covers task lifecycle, DAG execution, WebSocket/stream and agent
+  # removal cascades. Required but decoupled from smoke; retries handle flakes.
+  e2e-backend-heavy:
+    name: e2e-backend-heavy (WS/lifecycle)
+    needs: [backend, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+
+      - name: Run backend heavy E2E (with auto-retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 18
+          max_attempts: 3
+          retry_wait_seconds: 15
+          command: cd backend && npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit --testPathPattern="scenario-b|scenario-c|full-pipeline|agent-lifecycle" --json --outputFile=../test-results-backend-heavy.json
+        env:
+          NODE_ENV: test
+          SKIP_STELLAR_ACCOUNT_VERIFY: "true"
+          STELLAR_TEST_SECRET: ${{ secrets.STELLAR_TEST_SECRET }}
+          VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
+
+      - name: Upload backend heavy results (flake tracking)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-backend-heavy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results-backend-heavy.json
+            backend/test-results-backend-heavy.json
+            ../test-results-backend-heavy.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Frontend E2E: smoke (registry/list/create) ──────────────────────────────
+  # Fast Playwright smoke: agent registry table + task submission DAG preview.
+  # Required, decoupled from heavy, with retries=2 (config) + outer retry.
+  e2e-frontend-smoke:
+    name: e2e-frontend-smoke (registry/list/create)
+    needs: [frontend, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run frontend smoke E2E (with auto-retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: cd frontend && npx playwright test tests/e2e/agent-registry.spec.ts tests/e2e/task-submission.spec.ts --reporter=html
+        env:
+          CI: "true"
+
+      - name: Upload frontend smoke Playwright report (flake tracking)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-frontend-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            frontend/blob-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Frontend E2E: heavy (WS/lifecycle) ──────────────────────────────────────
+  # WebSocket lifecycle, wallet payment flow and remaining suites.
+  # Required but decoupled from smoke; flaky WS tests get 2 retries in config + outer retry.
+  e2e-frontend-heavy:
+    name: e2e-frontend-heavy (WS/lifecycle)
+    needs: [frontend, changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Run frontend heavy E2E (with auto-retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 10
+          command: cd frontend && npx playwright test tests/e2e/task-monitoring.spec.ts tests/e2e/wallet.spec.ts tests/e2e/i18n.spec.ts --reporter=html
+        env:
+          CI: "true"
+
+      - name: Upload frontend heavy Playwright report (flake tracking)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-frontend-heavy-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+            frontend/blob-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # ── Required aggregator gate ────────────────────────────────────────────────
+  # Branch protection should require this single check. It passes only when all
+  # non-skipped dependencies succeeded; skipped (path-filtered) counts as success
+  # so frontend-only or backend-only PRs can still be green.
+  ci-gate:
+    name: ci-gate (required)
+    if: always()
+    needs: [backend, frontend, contracts, e2e-backend-smoke, e2e-backend-heavy, e2e-frontend-smoke, e2e-frontend-heavy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Evaluate CI results (skipped = success for path-filtered PRs)
+        run: |
+          echo "backend: ${{ needs.backend.result }}"
+          echo "frontend: ${{ needs.frontend.result }}"
+          echo "contracts: ${{ needs.contracts.result }}"
+          echo "e2e-backend-smoke: ${{ needs.e2e-backend-smoke.result }}"
+          echo "e2e-backend-heavy: ${{ needs.e2e-backend-heavy.result }}"
+          echo "e2e-frontend-smoke: ${{ needs.e2e-frontend-smoke.result }}"
+          echo "e2e-frontend-heavy: ${{ needs.e2e-frontend-heavy.result }}"
+
+          fail=0
+          for job in "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.contracts.result }}"; do
+            if [[ "$job" == "failure" || "$job" == "cancelled" ]]; then
+              echo "❌ Required job failed: $job"
+              fail=1
+            fi
+          done
+          for job in "${{ needs.e2e-backend-smoke.result }}" "${{ needs.e2e-backend-heavy.result }}" "${{ needs.e2e-frontend-smoke.result }}" "${{ needs.e2e-frontend-heavy.result }}"; do
+            if [[ "$job" == "failure" || "$job" == "cancelled" ]]; then
+              echo "❌ E2E job failed: $job"
+              fail=1
+            fi
+            # skipped is OK (path-filtered), success is OK
+          done
+
+          if [[ $fail -ne 0 ]]; then
+            echo "❌ ci-gate failed — one or more required jobs failed"
+            exit 1
+          fi
+          echo "✅ ci-gate passed — all required jobs succeeded (or were correctly skipped)"
 
   contracts-integration:
     name: contracts-integration

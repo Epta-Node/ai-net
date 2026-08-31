@@ -3,6 +3,60 @@
   "rpc_url": "https://soroban-testnet.stellar.org",
   "horizon_url": "https://horizon-testnet.stellar.org",
   "deployed_at": null,
-  "contracts": {},
+  "contracts": {
+    "agent-registry": {
+      "contract_id": null,
+      "wasm_hash": null,
+      "version": "1.0.0",
+      "admin": null,
+      "upgrade_function": "upgrade",
+      "version_function": "contract_version"
+    },
+    "agent-bidding": {
+      "contract_id": null,
+      "wasm_hash": null,
+      "version": "1.0.0",
+      "admin": null,
+      "upgrade_function": "upgrade",
+      "version_function": "contract_version"
+    },
+    "task-store": {
+      "contract_id": null,
+      "wasm_hash": null,
+      "version": "1.0.0",
+      "admin": null,
+      "upgrade_function": "upgrade",
+      "version_function": "contract_version"
+    },
+    "error-resolver": {
+      "contract_id": null,
+      "wasm_hash": null,
+      "version": "1.0.0",
+      "admin": null,
+      "upgrade_function": "upgrade",
+      "version_function": "contract_version"
+    },
+    "error-registry": {
+      "contract_id": null,
+      "wasm_hash": null,
+      "version": "1.0.0",
+      "admin": null,
+      "upgrade_function": "upgrade",
+      "version_function": "contract_version"
+    }
+  },
+  "upgrade_verification": {
+    "script": "scripts/verified-upgrade-sequence.sh",
+    "network": "testnet",
+    "verification_network": "testnet",
+    "requires_live_testnet": true,
+    "contracts": [
+      "agent-registry",
+      "agent-bidding",
+      "task-store",
+      "error-resolver",
+      "error-registry"
+    ]
+  },
   "deployment_history": []
 }

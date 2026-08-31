@@ -6,7 +6,6 @@ import {
   Asset,
   Claimant,
   BASE_FEE,
-  Networks,
 } from "@stellar/stellar-sdk";
 import type { PaymentDb, PaymentRecord } from "../db/index";
 import {
@@ -16,11 +15,8 @@ import {
   stroopsToXlm,
 } from "./utils";
 import { tracingService } from "../services/tracing";
+import { getConfig } from "../config";
 
-const STELLAR_HORIZON =
-  process.env.STELLAR_HORIZON ?? "https://horizon-testnet.stellar.org";
-const STELLAR_NETWORK =
-  process.env.STELLAR_NETWORK ?? Networks.TESTNET;
 const MAX_RETRIES = 5;
 
 function isRetryable(err: unknown): boolean {
@@ -66,12 +62,15 @@ export interface PaymentServiceHooks {
 
 export class PaymentService {
   private server: Server;
+  private networkPassphrase: string;
 
   constructor(
     private db: PaymentDb,
     private hooks: PaymentServiceHooks = {}
   ) {
-    this.server = new Server(STELLAR_HORIZON);
+    const config = getConfig();
+    this.server = new Server(config.STELLAR_HORIZON_URL);
+    this.networkPassphrase = config.STELLAR_NETWORK_PASSPHRASE;
   }
 
   /**
@@ -103,7 +102,7 @@ export class PaymentService {
 
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
-        networkPassphrase: STELLAR_NETWORK,
+        networkPassphrase: this.networkPassphrase,
       })
         .addOperation(
           Operation.createClaimableBalance({
@@ -167,7 +166,7 @@ export class PaymentService {
 
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
-        networkPassphrase: STELLAR_NETWORK,
+        networkPassphrase: this.networkPassphrase,
       })
         .addOperation(
           Operation.claimClaimableBalance({ balanceId: record.balanceId })
@@ -214,7 +213,7 @@ export class PaymentService {
 
     const tx = new TransactionBuilder(account, {
       fee: BASE_FEE,
-      networkPassphrase: STELLAR_NETWORK,
+      networkPassphrase: this.networkPassphrase,
     })
       .addOperation(
         Operation.claimClaimableBalance({ balanceId: record.balanceId })

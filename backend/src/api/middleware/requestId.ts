@@ -1,6 +1,6 @@
-import { Request, Response, NextFunction } from 'express';
-import { randomUUID } from 'crypto';
-import { tracingService } from '../../services/tracing';
+import { Request, Response, NextFunction } from "express";
+import { randomUUID } from "crypto";
+import { tracingService } from "../../services/tracing";
 
 /**
  * Express middleware that ensures every request carries both an X-Request-Id
@@ -23,31 +23,32 @@ import { tracingService } from '../../services/tracing';
  * status `'completed'` or `'failed'`) when the response finishes.
  */
 export function requestId(req: Request, res: Response, next: NextFunction): void {
-  // ── X-Request-Id ──────────────────────────────────────────────────────────
-  const id = (req.headers['x-request-id'] as string) || randomUUID();
+  const id = (req.headers["x-request-id"] as string | undefined) || randomUUID();
   res.locals.requestId = id;
-  res.setHeader('X-Request-Id', id);
+  req.requestId = id;
+  res.setHeader("X-Request-Id", id);
 
-  // ── X-Correlation-ID ──────────────────────────────────────────────────────
-  const correlationId =
-    (req.headers['x-correlation-id'] as string) || randomUUID();
-  res.locals.correlationId = correlationId;
-  res.setHeader('X-Correlation-ID', correlationId);
+  const traceId =
+    (req.headers["x-trace-id"] as string | undefined) ||
+    (req.headers["x-correlation-id"] as string | undefined) ||
+    randomUUID();
+  res.locals.traceId = traceId;
+  res.locals.correlationId = traceId;
+  req.traceId = traceId;
+  req.correlationId = traceId;
+  res.setHeader("X-Trace-Id", traceId);
+  res.setHeader("X-Correlation-ID", traceId);
 
-  // Open a tracing span for this HTTP request.
-  const span = tracingService.startSpan(
-    correlationId,
-    'backend',
-    'http_request',
-    { method: req.method, path: req.path, requestId: id }
-  );
+  const span = tracingService.startSpan(traceId, "backend", "http_request", {
+    method: req.method,
+    path: req.path,
+    requestId: id,
+  });
 
-  if (typeof res.on === 'function') {
-    res.on('finish', () => {
-      const status = res.statusCode < 400 ? 'completed' : 'failed';
-      tracingService.endSpan(span.spanId, status, {
-        statusCode: res.statusCode,
-      });
+  if (typeof res.on === "function") {
+    res.on("finish", () => {
+      const status = res.statusCode < 400 ? "completed" : "failed";
+      tracingService.endSpan(span.spanId, status, { statusCode: res.statusCode });
     });
   }
 
