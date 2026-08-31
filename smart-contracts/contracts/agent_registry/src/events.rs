@@ -32,7 +32,7 @@
 //! | `unfreeze_agent`    | `unfreeze`         | `agent_id`                                               |
 //! | `update_pricing`    | `price_upd`        | `(agent_id, new_price)`                                  |
 
-use soroban_sdk::{contracttype, Address, BytesN, Symbol, String};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
 
 // ─── Legacy structs (kept for ABI compatibility) ──────────────────────────────
 

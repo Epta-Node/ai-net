@@ -17,6 +17,9 @@ interface AgentDetailModalProps {
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
+  // Called unconditionally (hook rules) — it no-ops on an empty id, which is
+  // what the closed-modal case passes.
+  const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id ?? '')
 
   useEffect(() => {
     if (!agent) return

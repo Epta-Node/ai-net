@@ -6,6 +6,7 @@ import { useWallet } from '../../context/WalletContext'
 import { useNotifications } from '../../hooks/useNotifications'
 import { NotificationCenter } from '../notifications/NotificationCenter'
 import { SUPPORTED_LANGUAGES } from '../../i18n/options'
+import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
 import './TopNav.css'
 import useTheme from '../../hooks/useTheme'
@@ -51,18 +52,18 @@ const TopNav: React.FC<TopNavProps> = ({
 
   const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
 
+  // The title mirrors the sidebar's labels via the shared nav config, so the
+  // page heading and the highlighted nav entry can never disagree.
   const getTitle = () => {
     const path = location.pathname
-    switch (path) {
-      case '/': return t('nav.dashboard')
-      case '/agents': return t('nav.agentRegistry')
-      case '/tasks/new': return t('nav.newTask')
-      case '/tasks/history': return t('nav.taskHistory')
-      case '/wallet': return t('nav.wallet')
-      default:
-        if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
-        return t('nav.dashboard')
-    }
+    // The registry page gets a fuller heading than its terse nav label.
+    if (path === '/agents') return t('nav.agentRegistry')
+
+    const navItem = NAV_ITEMS.find((item) => item.path === path)
+    if (navItem) return t(navItem.labelKey)
+
+    if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
+    return t('nav.dashboard')
   }
 
   const truncateKey = (key: string) => {

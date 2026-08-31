@@ -1,6 +1,7 @@
-import { Router } from "express";
-import { getStats, type DbClient } from "../../db/stats";
-import { StatsCache } from "../../utils/statsCache";
+import { Router, Request, Response, NextFunction } from 'express';
+import { getStats, type DbClient } from '../../db/stats';
+import { StatsCache } from '../../utils/statsCache';
+import { AppError } from '../../errors';
 import { createLogger } from "../../utils/logger";
 
 export function createStatsRouter(db: DbClient) {
@@ -52,13 +53,13 @@ export function createStatsRouter(db: DbClient) {
    *             schema:
    *               $ref: '#/components/schemas/InternalServerError'
    */
-  router.get("/", async (req, res) => {
+  router.get('/stats', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const stats = await cache.get();
       return res.status(200).json(stats);
     } catch (error) {
       logger.error({ err: error }, "failed to load stats");
-      return res.status(500).json({ error: "Unable to load stats" });
+      next(new AppError('Unable to load stats', 500, 'STATS_LOAD_ERROR'));
     }
   });
 
@@ -66,4 +67,3 @@ export function createStatsRouter(db: DbClient) {
 }
 
 export default createStatsRouter;
-
