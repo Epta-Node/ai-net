@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCheck, Inbox } from 'lucide-react';
+import { CheckCheck, Inbox, Plus } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
 import NotificationItem from './NotificationItem';
+import { EmptyState } from '../common/EmptyState';
 import './NotificationCenter.css';
 
 interface NotificationCenterProps {
@@ -90,13 +91,19 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
           {/* Body */}
           <div className="notification-panel-body">
             {notifications.length === 0 ? (
-              <div className="notification-empty-state" data-testid="notification-empty-state">
-                <div className="empty-state-icon-wrapper">
-                  <Inbox size={28} className="empty-state-icon" />
-                </div>
-                <p className="empty-state-title">No notifications yet</p>
-                <p className="empty-state-subtitle">We'll alert you when tasks update or payments settle.</p>
-              </div>
+              <EmptyState
+                icon={<Inbox size={28} />}
+                title="No notifications yet"
+                description="We'll alert you when tasks update or payments settle."
+                primaryAction={{
+                  label: 'Submit New Task',
+                  to: '/tasks/new',
+                  onClick: onClose,
+                  icon: <Plus size={16} />,
+                }}
+                variant="compact"
+                data-testid="notification-empty-state"
+              />
             ) : (
               <div className="notification-list" role="feed" aria-label="Notifications list">
                 <AnimatePresence initial={false}>

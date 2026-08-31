@@ -343,20 +343,31 @@ function getBucketLabel(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+import { EmptyState as CommonEmptyState } from '../common/EmptyState';
+import { Plus, History } from 'lucide-react';
+
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
 const EmptyState: React.FC<{ hasFilters: boolean }> = ({ hasFilters }) => (
-  <div className={styles.empty}>
-    <Clock size={40} className={styles.emptyIcon} aria-hidden="true" />
-    <p className={styles.emptyTitle}>
-      {hasFilters ? 'No tasks match the current filters' : 'No task history yet'}
-    </p>
-    <p className={styles.emptySubtitle}>
-      {hasFilters
-        ? 'Try adjusting the filters or expanding the zoom window.'
-        : 'Submit a task to see it appear here.'}
-    </p>
-  </div>
+  <CommonEmptyState
+    icon={hasFilters ? <Clock size={32} /> : <History size={32} />}
+    title={hasFilters ? 'No tasks match the current filters' : 'No task history yet'}
+    description={
+      hasFilters
+        ? 'Try adjusting the filters or expanding the date range.'
+        : 'Submit a task to see execution steps, agent timelines, and cost breakdowns here.'
+    }
+    primaryAction={
+      hasFilters
+        ? undefined
+        : {
+            label: 'Submit New Task',
+            to: '/tasks/new',
+            icon: <Plus size={16} />,
+          }
+    }
+    variant="card"
+  />
 );
 
 // ─── Skeleton loader ──────────────────────────────────────────────────────────

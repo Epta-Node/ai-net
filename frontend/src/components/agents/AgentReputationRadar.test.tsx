@@ -10,6 +10,9 @@ vi.mock('recharts', async () => {
     ResponsiveContainer: ({ children }: any) => (
       <div style={{ width: '100%', height: 250 }}>{children}</div>
     ),
+    RadarChart: ({ children }: any) => (
+      <div className="recharts-wrapper">{children}</div>
+    ),
   };
 });
 

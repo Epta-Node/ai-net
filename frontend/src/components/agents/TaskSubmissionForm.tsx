@@ -4,12 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
-import { useToast } from '../../hooks/useToast';
 import { useToast } from '../../context/ToastContext';
-import { FormField } from '../common/FormField';
-import { taskSchema, type TaskFormValues } from '../../schemas/task';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 // Only the label is translated: `value` is the wire format the API and the zod
@@ -28,8 +27,12 @@ const makeTaskSchema = (t: TFunction) =>
       .min(1, t('validation.promptRequired'))
       .max(1000, t('validation.promptTooLong')),
     maxBudgetXLM: z.preprocess((value) => {
+      if (value === '' || value === undefined || value === null || (typeof value === 'number' && isNaN(value))) {
+        return 0.1;
+      }
       if (typeof value === 'string') {
-        return Number(value);
+        const parsed = Number(value);
+        return isNaN(parsed) ? 0.1 : parsed;
       }
       return value;
     }, z.number().min(0.1, t('validation.minBudget'))),
@@ -43,10 +46,7 @@ export function TaskSubmissionForm() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
-  const { submitTask, status, data } = useTaskSubmit();
-  const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
-  const { showToast } = useToast();
 
   const agentPreferences = useMemo(
     () =>
@@ -64,9 +64,9 @@ export function TaskSubmissionForm() {
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isSubmitting, isSubmitted },
+    formState: { errors, isValid, isSubmitting, isSubmitted },
   } = useForm<TaskFormValues>({
-    mode: 'onBlur',
+    mode: 'all',
     resolver: zodResolver(taskSchema),
     defaultValues: {
       prompt: '',
@@ -94,7 +94,7 @@ export function TaskSubmissionForm() {
     try {
       const result = await submitTask(values);
       setPreview(result.dagPreview);
-      showToast('Task submitted successfully!', 'success');
+      showToast(t('task.submit.success'), 'success');
 
       window.setTimeout(() => {
         navigate(`/tasks/${result.taskId}`);
@@ -148,12 +148,13 @@ export function TaskSubmissionForm() {
             type="number"
             step="0.1"
             min="0.1"
+            defaultValue={0.1}
             {...register('maxBudgetXLM', { valueAsNumber: true })}
             style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
-          <p id="budget-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
+          <p id="budget-error" style={{ color: errors.maxBudgetXLM ? 'var(--danger)' : 'var(--text-muted, #64748b)', marginTop: 8 }}>
             {budgetHelperText}
           </p>
         </div>
@@ -192,11 +193,11 @@ export function TaskSubmissionForm() {
                       type="checkbox"
                       value={option.value}
                       checked={field.value.includes(option.value)}
-                      onChange={(event) => {
-                        const current = field.value;
-                        const next = event.target.checked
-                          ? [...current, option.value]
-                          : current.filter((value: AgentPreference) => value !== option.value);
+                      onChange={(e) => {
+                        const current = field.value || [];
+                        const next = e.target.checked
+                          ? Array.from(new Set([...current, option.value]))
+                          : current.filter((v: AgentPreference) => v !== option.value);
                         field.onChange(next);
                       }}
                       onBlur={field.onBlur}
@@ -222,7 +223,7 @@ export function TaskSubmissionForm() {
           <button
             type="submit"
             id="btn-submit-task"
-            disabled={isLoading || !isValid}
+            disabled={isLoading}
             style={{
               padding: '12px 20px',
               borderRadius: 10,

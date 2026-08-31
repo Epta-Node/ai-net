@@ -1,45 +1,55 @@
 import { useState, useCallback } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
+import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { signTransactionWithFreighter } from '../../services/freighter'
-import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
-import { FormField } from '../common/FormField'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
+
+function isValidStellarAddress(address: string): boolean {
+  return typeof address === 'string' && address.startsWith('G') && address.length === 56
+}
+
+export interface WalletTransferValues {
+  destination: string
+  amount: string
+  memo?: string
+}
 
 export function SendXLMForm() {
   const { t } = useTranslation()
   const { publicKey, keypair, connected, connectionMethod } = useWallet()
   const { balance } = useWalletBalance(publicKey)
 
+  const [destination, setDestination] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [errors, setErrors] = useState<{ destination?: string; amount?: string }>({})
   const [confirmation, setConfirmation] = useState<WalletTransferValues | null>(null)
   const [successTx, setSuccessTx] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const validateField = useCallback(
-    (field: 'destination' | 'amount'): string | undefined => {
+    (field: 'destination' | 'amount', destVal = destination, amtVal = amount): string | undefined => {
       if (field === 'destination') {
-        if (!destination.trim()) return t('validation.destinationRequired')
-        if (!isValidStellarAddress(destination.trim()))
-          return t('validation.invalidStellarAddress')
+        if (!destVal.trim()) return t('validation.destinationRequired', { defaultValue: 'Destination address is required' })
+        if (!isValidStellarAddress(destVal.trim()))
+          return t('validation.invalidStellarAddress', { defaultValue: 'Invalid Stellar address' })
         return undefined
       }
       if (field === 'amount') {
-        if (!amount.trim()) return t('validation.amountRequired')
-        const parsed = parseFloat(amount)
-        if (isNaN(parsed) || parsed <= 0) return t('validation.amountPositive')
+        if (!amtVal.trim()) return t('validation.amountRequired', { defaultValue: 'Amount is required' })
+        const parsed = parseFloat(amtVal)
+        if (isNaN(parsed) || parsed <= 0) return t('validation.amountPositive', { defaultValue: 'Amount must be positive' })
         const availableBalance = parseFloat(balance)
-        if (parsed > availableBalance) return t('validation.insufficientBalance')
+        if (parsed > availableBalance) return t('validation.insufficientBalance', { defaultValue: 'Insufficient balance' })
         return undefined
       }
       return undefined
     },
-    // `t` belongs here: these messages are re-validated and re-rendered, so a
-    // stale closure would keep showing them in the previous language.
     [destination, amount, balance, t]
   )
 
@@ -59,12 +69,13 @@ export function SendXLMForm() {
     const newErrors = { destination: destErr, amount: amtErr }
     setErrors(newErrors)
 
-  const handleSendClick = (data: WalletTransferValues) => {
-    setConfirmation({
-      destination: data.destination.trim(),
-      amount: data.amount,
-      memo: data.memo?.trim() || '',
-    })
+    if (!destErr && !amtErr) {
+      setConfirmation({
+        destination: destination.trim(),
+        amount: amount.trim(),
+        memo: memo.trim(),
+      })
+    }
   }
 
   const buildTransaction = async (): Promise<Transaction> => {
@@ -130,15 +141,17 @@ export function SendXLMForm() {
       const submitData = await submitRes.json()
 
       if (!submitRes.ok) {
-        throw new Error(submitData.extras?.result_codes?.transaction || t('wallet.send.submitFailed'))
+        throw new Error(submitData.extras?.result_codes?.transaction || t('wallet.send.submitFailed', { defaultValue: 'Submit failed' }))
       }
 
       const txHash = submitData.hash
       setSuccessTx(txHash)
-      reset()
+      setDestination('')
+      setAmount('')
+      setMemo('')
       setConfirmation(null)
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('wallet.send.failedToSend')
+      const message = err instanceof Error ? err.message : t('wallet.send.failedToSend', { defaultValue: 'Failed to send payment' })
       setSubmitError(message)
     } finally {
       setSubmitting(false)
@@ -152,50 +165,60 @@ export function SendXLMForm() {
   if (!connected) {
     return (
       <div className={styles.container}>
-        <p className={styles.disconnected}>{t('wallet.send.disconnected')}</p>
+        <p className={styles.disconnected}>{t('wallet.send.disconnected', { defaultValue: 'Connect your wallet to send XLM' })}</p>
       </div>
     )
   }
 
   return (
     <div className={styles.container}>
-      <h3 className={styles.heading}>{t('wallet.send.heading')}</h3>
+      <h3 className={styles.heading}>{t('wallet.send.heading', { defaultValue: 'Send XLM' })}</h3>
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-destination">
-          {t('wallet.send.destinationLabel')}
+          {t('wallet.send.destinationLabel', { defaultValue: 'Destination Public Key' })}
         </label>
         <input
           id="send-destination"
+          type="text"
           placeholder="GABCD...1234"
-          error={errors.destination?.message}
-          isTouched={touchedFields.destination}
+          value={destination}
+          onChange={(e) => {
+            setDestination(e.target.value)
+            if (errors.destination) setErrors((prev) => ({ ...prev, destination: undefined }))
+          }}
+          onBlur={handleDestinationBlur}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('destination')}
+          className={`${styles.input} ${errors.destination ? styles.inputError : ''}`}
         />
+        {errors.destination && (
+          <p id="destination-error" className={styles.error} role="alert">
+            {errors.destination}
+          </p>
+        )}
+      </div>
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-amount">
-          {t('wallet.send.amountLabel')}
+          {t('wallet.send.amountLabel', { defaultValue: 'Amount (XLM)' })}
         </label>
         <input
           id="send-amount"
-          className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
           type="number"
-          id="send-amount"
           step="0.0000001"
           min="0"
           placeholder="0.0"
-          error={errors.amount?.message}
-          isTouched={touchedFields.amount}
-          helperText={`Available balance: ${parseFloat(balance).toFixed(7)} XLM`}
+          value={amount}
+          onChange={(e) => {
+            setAmount(e.target.value)
+            if (errors.amount) setErrors((prev) => ({ ...prev, amount: undefined }))
+          }}
+          onBlur={handleAmountBlur}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('amount')}
+          className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
         />
         <p className={styles.helper}>
-          {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
+          {t('wallet.send.availableBalance', { balance: parseFloat(balance || '0').toFixed(7), defaultValue: `Available balance: ${parseFloat(balance || '0').toFixed(7)} XLM` })}
         </p>
         {errors.amount && (
           <p id="amount-error" className={styles.error} role="alert">
@@ -206,28 +229,28 @@ export function SendXLMForm() {
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-memo">
-          {t('wallet.send.memoLabel')}
+          {t('wallet.send.memoLabel', { defaultValue: 'Memo (Optional)' })}
         </label>
         <input
           id="send-memo"
-          className={styles.input}
           type="text"
-          placeholder={t('wallet.send.memoPlaceholder')}
+          placeholder={t('wallet.send.memoPlaceholder', { defaultValue: 'Payment memo (max 28 chars)' })}
           maxLength={28}
-          error={errors.memo?.message}
-          isTouched={touchedFields.memo}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('memo')}
+          className={styles.input}
         />
+      </div>
 
       <button
         id="btn-send-xlm"
+        type="button"
         className={styles.sendButton}
         onClick={handleSendClick}
         disabled={submitting || Boolean(successTx)}
       >
-        {submitting ? t('wallet.send.sending') : t('wallet.send.send')}
+        {submitting ? t('wallet.send.sending', { defaultValue: 'Sending...' }) : t('wallet.send.send', { defaultValue: 'Send' })}
       </button>
 
       {submitError && (
@@ -238,19 +261,21 @@ export function SendXLMForm() {
 
       {successTx && (
         <div className={styles.successMessage} role="status">
-          <p>{t('wallet.send.success')}</p>
+          <p>{t('wallet.send.success', { defaultValue: 'Transaction sent successfully!' })}</p>
           <p className={styles.txHash}>
             <Trans
               i18nKey="wallet.send.txHash"
               values={{ hash: successTx }}
               components={[<code key="hash" />]}
+              defaults="Tx Hash: <code>{{hash}}</code>"
             />
           </p>
           <button
+            type="button"
             className={styles.dismissButton}
             onClick={() => setSuccessTx(null)}
           >
-            {t('common.dismiss')}
+            {t('common.dismiss', { defaultValue: 'Dismiss' })}
           </button>
         </div>
       )}
@@ -266,20 +291,20 @@ export function SendXLMForm() {
             aria-labelledby="confirm-title"
           >
             <h3 id="confirm-title" className={styles.modalTitle}>
-              {t('wallet.send.confirmTitle')}
+              {t('wallet.send.confirmTitle', { defaultValue: 'Confirm Payment' })}
             </h3>
             <div className={styles.modalBody}>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>{t('wallet.send.to')}</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.to', { defaultValue: 'To' })}</span>
                 <span className={styles.confirmValue}>{confirmation.destination}</span>
               </div>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>{t('wallet.send.amount')}</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.amount', { defaultValue: 'Amount' })}</span>
                 <span className={styles.confirmValue}>{confirmation.amount} XLM</span>
               </div>
               {confirmation.memo && (
                 <div className={styles.confirmRow}>
-                  <span className={styles.confirmLabel}>{t('wallet.send.memo')}</span>
+                  <span className={styles.confirmLabel}>{t('wallet.send.memo', { defaultValue: 'Memo' })}</span>
                   <span className={styles.confirmValue}>{confirmation.memo}</span>
                 </div>
               )}
@@ -287,23 +312,25 @@ export function SendXLMForm() {
             <div className={styles.modalActions}>
               <button
                 id="btn-cancel-payment"
+                type="button"
                 className={styles.cancelButton}
                 onClick={handleCancelConfirm}
                 disabled={submitting}
               >
-                {t('common.cancel')}
+                {t('common.cancel', { defaultValue: 'Cancel' })}
               </button>
               <button
                 id="btn-confirm-payment"
+                type="button"
                 className={styles.confirmButton}
                 onClick={handleConfirm}
                 disabled={submitting}
               >
                 {submitting
                   ? connectionMethod === 'freighter'
-                    ? t('wallet.send.signingFreighter')
-                    : t('wallet.send.signingSending')
-                  : t('wallet.send.confirmSend')}
+                    ? t('wallet.send.signingFreighter', { defaultValue: 'Signing with Freighter...' })
+                    : t('wallet.send.signingSending', { defaultValue: 'Sending...' })
+                  : t('wallet.send.confirmSend', { defaultValue: 'Confirm & Send' })}
               </button>
             </div>
           </div>
