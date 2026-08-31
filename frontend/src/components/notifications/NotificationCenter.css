@@ -53,6 +53,12 @@
   letter-spacing: 0.04em;
 }
 
+.notification-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .mark-all-read-btn {
   display: inline-flex;
   align-items: center;
@@ -71,6 +77,24 @@
 .mark-all-read-btn:hover {
   color: var(--accent-cyan, #38bdf8);
   background: rgba(56, 189, 248, 0.08);
+}
+
+.clear-all-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #8a93a3);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.clear-all-btn:hover {
+  color: var(--error-red, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 /* Body / List */
@@ -156,19 +180,28 @@
   transition: all 0.2s ease;
 }
 
-.notification-icon-wrapper.task {
+.notification-icon-wrapper.task,
+.notification-icon-wrapper.task_completed {
   background: rgba(52, 211, 153, 0.12);
   border-color: rgba(52, 211, 153, 0.3);
   color: #34d399;
 }
 
-.notification-icon-wrapper.payment {
+.notification-icon-wrapper.task_failed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
+
+.notification-icon-wrapper.payment,
+.notification-icon-wrapper.payment_received {
   background: rgba(251, 191, 36, 0.12);
   border-color: rgba(251, 191, 36, 0.3);
   color: #fbbf24;
 }
 
-.notification-icon-wrapper.agent {
+.notification-icon-wrapper.agent,
+.notification-icon-wrapper.agent_registered {
   background: rgba(139, 92, 246, 0.12);
   border-color: rgba(139, 92, 246, 0.3);
   color: #a78bfa;
@@ -177,6 +210,26 @@
 .notification-icon-wrapper.system {
   background: rgba(56, 189, 248, 0.12);
   border-color: rgba(56, 189, 248, 0.3);
+  color: #38bdf8;
+}
+
+.notification-icon-task {
+  color: #34d399;
+}
+
+.notification-icon-error {
+  color: #ef4444;
+}
+
+.notification-icon-payment {
+  color: #fbbf24;
+}
+
+.notification-icon-agent {
+  color: #a78bfa;
+}
+
+.notification-icon-system {
   color: #38bdf8;
 }
 

@@ -17,6 +17,7 @@ interface AgentDetailModalProps {
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
+  const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id || '')
 
   useEffect(() => {
     if (!agent) return

@@ -8,7 +8,7 @@ vi.mock('recharts', async () => {
   return {
     ...OriginalRecharts,
     ResponsiveContainer: ({ children }: any) => (
-      <div style={{ width: '100%', height: 250 }}>{children}</div>
+      <div className="recharts-wrapper" style={{ width: '100%', height: 250 }}>{children}</div>
     ),
   };
 });

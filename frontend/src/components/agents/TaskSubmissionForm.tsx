@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
-import { useToast } from '../../hooks/useToast';
 import { useToast } from '../../context/ToastContext';
-import { FormField } from '../common/FormField';
-import { taskSchema, type TaskFormValues } from '../../schemas/task';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 // Only the label is translated: `value` is the wire format the API and the zod
@@ -41,9 +39,6 @@ type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
 export function TaskSubmissionForm() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const { showToast } = useToast();
-  const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
-  const { submitTask, status, data } = useTaskSubmit();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
   const { showToast } = useToast();
@@ -54,7 +49,7 @@ export function TaskSubmissionForm() {
         value,
         label: t(`task.submit.pref.${value}`),
       })),
-    [t],
+    [t]
   );
 
   const taskSchema = useMemo(() => makeTaskSchema(t), [t]);
@@ -66,7 +61,6 @@ export function TaskSubmissionForm() {
     trigger,
     formState: { errors, isSubmitting, isSubmitted },
   } = useForm<TaskFormValues>({
-    mode: 'onBlur',
     resolver: zodResolver(taskSchema),
     defaultValues: {
       prompt: '',
@@ -94,7 +88,6 @@ export function TaskSubmissionForm() {
     try {
       const result = await submitTask(values);
       setPreview(result.dagPreview);
-      showToast('Task submitted successfully!', 'success');
 
       window.setTimeout(() => {
         navigate(`/tasks/${result.taskId}`);
@@ -134,7 +127,7 @@ export function TaskSubmissionForm() {
             aria-invalid={Boolean(errors.prompt)}
             aria-describedby="prompt-error"
           />
-          <p id="prompt-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
+          <p id="prompt-error" style={{ color: '#b91c1c', marginTop: 8 }}>
             {errors.prompt?.message}
           </p>
         </div>
@@ -153,7 +146,7 @@ export function TaskSubmissionForm() {
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
-          <p id="budget-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
+          <p id="budget-error" style={{ color: '#b91c1c', marginTop: 8 }}>
             {budgetHelperText}
           </p>
         </div>
@@ -208,35 +201,29 @@ export function TaskSubmissionForm() {
               </div>
             )}
           />
-          <div aria-live="polite" id="agentPreferences-error">
-            {errors.agentPreferences && (
-              <p style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#b91c1c', marginTop: 8, fontSize: '0.875rem' }}>
-                <AlertCircle size={16} />
-                {errors.agentPreferences.message}
-              </p>
-            )}
-          </div>
+          <p id="agentPreferences-error" style={{ color: '#b91c1c', marginTop: 8 }}>
+            {errors.agentPreferences?.message}
+          </p>
         </div>
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 32 }}>
           <button
             type="submit"
             id="btn-submit-task"
-            disabled={isLoading || !isValid}
+            disabled={isLoading}
             style={{
               padding: '12px 20px',
               borderRadius: 10,
               border: 'none',
-              background: (!isValid || isLoading) ? '#9ca3af' : '#2563eb',
+              background: '#2563eb',
               color: '#ffffff',
-              cursor: (!isValid || isLoading) ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
             }}
           >
             {isLoading ? t('task.submit.submitting') : t('task.submit.submit')}
           </button>
           {status === 'success' && (
-            <span style={{ color: 'var(--success)' }}>{t('task.submit.success')}</span>
+            <span style={{ color: '#16a34a' }}>{t('task.submit.success')}</span>
           )}
         </div>
       </form>
@@ -260,9 +247,8 @@ export function TaskSubmissionForm() {
             marginTop: 24,
             padding: 16,
             borderRadius: 12,
-            background: 'var(--bg-secondary)',
-            color: 'var(--danger)',
-            border: '1px solid var(--danger)',
+            background: '#f8d7da',
+            color: '#842029',
           }}
         >
           {error}

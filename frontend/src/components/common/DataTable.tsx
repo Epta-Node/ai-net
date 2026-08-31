@@ -28,6 +28,10 @@ export interface DataTableProps<T> {
   onRowSelect?: (row: T) => void;
   onRowClick?: (row: T) => void;
   rowClassName?: (row: T) => string;
+  getRowTestId?: (row: T) => string;
+  sortKey?: string | null;
+  sortDirection?: SortDirection;
+  onSort?: (key: string) => void;
 }
 
 function getCellValue<T>(row: T, key: string): string | number | boolean | null {
@@ -69,17 +73,28 @@ export function DataTable<T>({
   stickyHeader = true,
   virtualization = false,
   rowHeight = 48,
-  selectedRowKeys = [],
+  selectedRowKeys: selectedRowKeysProp = [],
   onRowSelect,
   onRowClick,
   rowClassName,
+  getRowTestId,
+  sortKey: externalSortKey,
+  sortDirection: externalSortDirection,
+  onSort: externalOnSort,
 }: DataTableProps<T>) {
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [internalSortKey, setInternalSortKey] = useState<string | null>(null);
+  const [internalSortDirection, setInternalSortDirection] = useState<SortDirection>('asc');
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>(selectedRowKeysProp);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
 
-  const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDirection), [rows, sortKey, sortDirection]);
+  const sortKey = externalSortKey !== undefined ? externalSortKey : internalSortKey;
+  const sortDirection = externalSortDirection !== undefined ? externalSortDirection : internalSortDirection;
+
+  const sortedRows = useMemo(() => {
+    if (externalOnSort) return rows;
+    return sortRows(rows, sortKey, sortDirection);
+  }, [rows, sortKey, sortDirection, externalOnSort]);
 
   const itemCount = sortedRows.length;
   const overscan = 6;
@@ -89,12 +104,16 @@ export function DataTable<T>({
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
 
-  const handleSelect = (key: string | number, row: T) => {
+  const handleSelect = (_key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 
   const handleSort = (column: DataTableColumn<T>) => {
     if (!column.sortable) return;
+    if (externalOnSort) {
+      externalOnSort(column.key);
+      return;
+    }
     const nextKey = column.key;
     let nextDirection: SortDirection = 'asc';
 
@@ -102,8 +121,8 @@ export function DataTable<T>({
       nextDirection = sortDirection === 'asc' ? 'desc' : 'asc';
     }
 
-    setSortKey(nextKey);
-    setSortDirection(nextDirection);
+    setInternalSortKey(nextKey);
+    setInternalSortDirection(nextDirection);
   };
 
   if (rows.length === 0) {
@@ -159,6 +178,7 @@ export function DataTable<T>({
               return (
                 <tr
                   key={rowKey}
+                  data-testid={getRowTestId ? getRowTestId(row) : undefined}
                   className={classes.join(' ')}
                   onClick={() => onRowClick?.(row)}
                   tabIndex={onRowClick ? 0 : undefined}

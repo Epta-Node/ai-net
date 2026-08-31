@@ -9,10 +9,10 @@ import styles from './AgentTable.module.css'
 interface AgentTableProps {
   agents: AgentRecord[]
   loading: boolean
-  sortKey: SortKey | null
-  sortDir: SortDir
+  sortKey?: SortKey | null
+  sortDir?: SortDir
   /** Toggle/apply sort on the given column. Reputation only sorts desc. */
-  onSort: (key: SortKey) => void
+  onSort?: (key: SortKey) => void
   onRowClick: (agent: AgentRecord) => void
 }
 
@@ -21,15 +21,6 @@ const SKELETON_ROWS = 5
 function truncateId(id: string): string {
   if (id.length <= 14) return id
   return `${id.slice(0, 6)}…${id.slice(-4)}`
-}
-
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <ArrowUpDown size={12} aria-hidden="true" />
-  return dir === 'asc' ? (
-    <ArrowUp size={12} aria-hidden="true" />
-  ) : (
-    <ArrowDown size={12} aria-hidden="true" />
-  )
 }
 
 export function AgentTable({
@@ -88,6 +79,10 @@ export function AgentTable({
           columns={columns}
           rows={agents}
           getRowKey={(agent) => agent.id}
+          getRowTestId={(agent) => `agent-row-${agent.id}`}
+          sortKey={sortKey}
+          sortDirection={sortDir}
+          onSort={(key) => onSort?.(key as SortKey)}
           maxHeight={540}
           stickyHeader
           onRowClick={onRowClick}
