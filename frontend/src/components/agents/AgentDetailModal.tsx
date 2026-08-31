@@ -1,11 +1,11 @@
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ExternalLink, X } from 'lucide-react'
+import { ExternalLink } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import { ReputationStars } from './ReputationStars'
 import { useAgentReputation } from '../../hooks/useAgentReputation'
 import { AgentReputationRadar } from './AgentReputationRadar'
 import { AgentReputationTrend } from './AgentReputationTrend'
+import { Modal } from '../ui'
 import styles from './AgentDetailModal.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
@@ -17,6 +17,8 @@ interface AgentDetailModalProps {
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
+  // Called unconditionally (hook rules) — it no-ops on an empty id, which is
+  // what the closed-modal case passes.
   const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id ?? '')
 
   useEffect(() => {
@@ -31,36 +33,24 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   if (!agent) return null
 
   return (
-    <div
-      className={styles.overlay}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('a11y.detailsFor', { name: agent.name })}
+    <Modal
+      open={!!agent}
+      onClose={onClose}
+      title={agent ? t('a11y.detailsFor', { name: agent.name }) : ''}
+      data-testid="agent-detail-modal"
     >
-      <div
-        className={styles.modal}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="agent-detail-modal"
-      >
-        <header className={styles.header}>
-          <div>
-            <h2 className={styles.title}>{agent.name}</h2>
-            <code className={styles.id} title={agent.id}>
-              {agent.id}
-            </code>
+      {agent && (
+        <>
+          <div className={styles.header}>
+            <div>
+              <h2 className={styles.title}>{agent.name}</h2>
+              <code className={styles.id} title={agent.id}>
+                {agent.id}
+              </code>
+            </div>
           </div>
-          <button
-            type="button"
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label={t('common.close')}
-          >
-            <X size={18} />
-          </button>
-        </header>
 
-        <dl className={styles.grid}>
+          <dl className={styles.grid}>
           <div className={styles.field}>
             <dt>{t('common.status')}</dt>
             <dd>
@@ -143,8 +133,9 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
               )}
             </dd>
           </div>
-        </dl>
-      </div>
-    </div>
+          </dl>
+        </>
+      )}
+    </Modal>
   )
 }

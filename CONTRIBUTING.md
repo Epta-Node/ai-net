@@ -103,25 +103,53 @@ Every commit message and PR title must adhere to [Conventional Commits 1.0.0](ht
 
 ## 5. Testing & Quality Verification
 
-Run the verification suites locally before pushing:
+### 5.1 Unified Quality Gate (Single Command)
 
-### 5.1 Backend (Node.js & TypeScript)
+We enforce a single comprehensive quality gate across all PRs. Run this single command before pushing:
+
+```bash
+npm run gate
+# or
+npm run check:quality
+```
+
+This single command automatically executes:
+1. **Formatting check** (`prettier --check`)
+2. **Linting** (`eslint` across backend and frontend)
+3. **Type-checking** (`tsc --noEmit` across root, backend, and frontend)
+4. **Test coverage thresholds** (Jest ≥75% coverage on backend, Vitest ≥70% coverage on frontend)
+
+#### Individual Quality Sub-Commands
+```bash
+npm run format:check   # Prettier format check across all files
+npm run format:fix     # Automatically fix formatting issues
+npm run lint           # Run ESLint across backend and frontend
+npm run typecheck      # Run tsc --noEmit across backend and frontend
+npm run test:coverage  # Run test suites with coverage thresholds
+```
+
+### 5.2 Backend (Node.js & TypeScript)
 ```bash
 cd backend
 npm ci
-npm run lint          # ESLint check
-npm test              # Unit test suite
+npm run lint           # ESLint check
+npm run typecheck      # TypeScript type check (tsc --noEmit)
+npm test               # Unit test suite
+npm run test:coverage  # Jest coverage with thresholds
 ```
 
-### 5.2 Frontend (Next.js)
+### 5.3 Frontend (React & Vite)
 ```bash
 cd frontend
 npm ci
-npm run lint          # Next.js ESLint
-npm run build         # Production bundle compilation
+npm run lint           # ESLint check
+npm run typecheck      # TypeScript type check (tsc --noEmit)
+npm test               # Vitest unit test suite
+npm run test:coverage  # Vitest coverage with thresholds
+npm run build          # Production bundle compilation
 ```
 
-### 5.3 Smart Contracts (Rust & Soroban)
+### 5.4 Smart Contracts (Rust & Soroban)
 ```bash
 cd smart-contracts
 cargo fmt --all -- --check          # Formatting check

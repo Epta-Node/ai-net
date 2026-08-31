@@ -1,66 +1,96 @@
+/* — Toast container: stacking (top-right), pointer-events, responsive — */
 .toast-container {
   position: fixed;
-  top: 20px;
-  right: 20px;
+  bottom: 24px;
+  right: 24px;
   z-index: 10000;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   max-width: 400px;
+  /* The stack itself must not swallow clicks on the page behind it; each
+     toast re-enables pointer events for its own box. */
   pointer-events: none;
 }
 
+/* — Toast shell: smooth enter/exit via framer-motion, fallback keyframes — */
 .toast {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 280px;
   max-width: 360px;
   padding: 14px 16px;
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   border: 1px solid transparent;
   background: rgba(15, 23, 42, 0.96);
   color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.5;
   pointer-events: auto;
-  animation: toast-slide-in 0.2s ease-out;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  /* fallback for no-motion environment */
+  animation: toast-slide-in 0.22s ease-out;
 }
 
+/* variants */
 .toast--success {
-  background: rgba(20, 83, 45, 0.96);
-  border-color: rgba(34, 197, 94, 0.65);
+  background: var(--status-success-surface-muted);
+  border-color: var(--status-success-border);
+  color: var(--status-success-text);
 }
-
 .toast--error {
-  background: rgba(127, 29, 29, 0.96);
-  border-color: rgba(248, 113, 113, 0.7);
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-border-strong);
+  color: var(--status-danger-text);
 }
+.toast-success .toast-icon { color: #16a34a; }
+.toast-success .toast-action-btn { background: #dcfce7; color: #166534; }
+.toast-success .toast-action-btn:hover { background: #bbf7d0; }
 
 .toast--warning {
-  background: rgba(120, 53, 15, 0.96);
-  border-color: rgba(251, 191, 36, 0.7);
+  background: var(--status-warning-surface);
+  border-color: var(--status-warning-border-strong);
+  color: var(--status-warning-text);
 }
-
 .toast--info {
-  background: rgba(30, 41, 59, 0.96);
-  border-color: rgba(96, 165, 250, 0.6);
+  background: var(--info-surface);
+  border-color: var(--info-border);
+  color: var(--accent-info);
 }
+.toast-error .toast-icon { color: #dc2626; }
+.toast-error .toast-action-btn { background: #fee2e2; color: #991b1b; }
+.toast-error .toast-action-btn:hover { background: #fecaca; }
 
-.toast__message {
-  line-height: 1.4;
-  word-break: break-word;
+/* legacy class support for old ToastContext inline */
+.toast-success,
+.toast-error,
+.toast-warning,
+.toast-info {
+  composes: toast;
 }
+.toast-warning .toast-icon { color: #d97706; }
+.toast-warning .toast-action-btn { background: #fef3c7; color: #92400e; }
+.toast-warning .toast-action-btn:hover { background: #fde68a; }
 
 .toast__dismiss {
+  flex-shrink: 0;
   appearance: none;
+  flex-shrink: 0;
   border: none;
   background: transparent;
   color: inherit;
   font-size: 1.3rem;
   line-height: 1;
+  padding: 0 2px;
   cursor: pointer;
-  opacity: 0.8;
+  opacity: 0.7;
+  transition: opacity 0.15s;
 }
 
 .toast__dismiss:hover {
@@ -70,18 +100,46 @@
 @keyframes toast-slide-in {
   from {
     opacity: 0;
-    transform: translateY(12px) scale(0.98);
+    transform: translateX(12px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(0) scale(1);
   }
 }
 
+/* responsive: dock bottom on small screens, allow full width */
 @media (max-width: 480px) {
   .toast-container {
-    left: 12px;
-    right: 12px;
+    left: var(--space-3);
+    right: var(--space-3);
     max-width: none;
+    align-items: center;
+  }
+  .toast {
+    width: 100%;
+  }
+
+  .toast {
+    min-width: 0;
+    max-width: none;
+    width: auto;
+  }
+  .toast {
+    min-width: 0;
+    width: 100%;
   }
 }
+
+/* legacy button support */
+.toast button {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+.toast button:hover { opacity: 1; }

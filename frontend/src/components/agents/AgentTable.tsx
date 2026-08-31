@@ -1,9 +1,10 @@
 import { useTranslation } from 'react-i18next'
-import { Inbox } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import type { SortDir, SortKey } from '../../utils/agentRegistry'
 import { ReputationStars } from './ReputationStars'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
+import { EmptyState } from '../common/EmptyState'
+import { Users, Plus } from 'lucide-react'
 import styles from './AgentTable.module.css'
 
 interface AgentTableProps {
@@ -23,9 +24,13 @@ function truncateId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
+
 export function AgentTable({
   agents,
   loading,
+  sortKey: _sortKey,
+  sortDir: _sortDir,
+  onSort: _onSort,
   onRowClick,
 }: AgentTableProps) {
   const { t } = useTranslation()
@@ -66,18 +71,26 @@ export function AgentTable({
   return (
     <div className={styles.tableWrap}>
       {agents.length === 0 ? (
-        <div className={styles.emptyState} data-testid="agents-empty">
-          <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
-          <p className={styles.emptyTitle}>{t('agent.table.emptyTitle')}</p>
-          <p className={styles.emptySubtext}>{t('agent.table.emptySubtext')}</p>
-        </div>
+        <EmptyState
+          icon={<Users size={32} />}
+          title={t('agent.table.emptyTitle')}
+          description={t('agent.table.emptySubtext')}
+          primaryAction={{
+            label: t('landing.hero.startTask', { defaultValue: 'Submit Task' }),
+            to: '/tasks/new',
+            icon: <Plus size={16} />,
+          }}
+          data-testid="agents-empty"
+        />
       ) : (
         <DataTable
           columns={columns}
           rows={agents}
           getRowKey={(agent) => agent.id}
+          getRowTestId={(agent) => `agent-row-${agent.id}`}
           maxHeight={540}
           stickyHeader
+          onSort={(key) => onSort(key as SortKey)}
           onRowClick={onRowClick}
           rowClassName={() => styles.row}
         />
