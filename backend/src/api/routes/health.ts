@@ -25,7 +25,24 @@ router.get("/", cachedRoute("health"), (_req: Request, res: Response) => {
     version: config.NPM_PACKAGE_VERSION,
     stellarNetwork: config.STELLAR_NETWORK,
   });
-});
+}
+
+router.get("/", livenessHandler);
+
+/**
+ * @openapi
+ * /health/live:
+ *   get:
+ *     summary: Basic liveness check
+ *     operationId: getLive
+ *     description: Alias for `GET /health` — process-only liveness, no dependency checks.
+ *     tags: [Health]
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Service is up
+ */
+router.get("/live", livenessHandler);
 
 router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) => {
   const config = getConfig();
@@ -47,14 +64,19 @@ router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) 
 });
 
 router.get("/ready", async (_req: Request, res: Response) => {
-  const checks: Record<string, "ok" | "error"> = {
+  const checks: Record<string, "ok" | "error" | "unknown"> = {
     tasks: "ok",
     payments: "ok",
+    queue: "ok",
+    venice: "ok",
+    horizon: "ok",
+    websocket: "ok",
   };
 
   try {
     const tasksModule = await import("../../db/tasks.js");
     const paymentsModule = await import("../../db/index.js");
+    const queueModule = await import("../../queue/jobStore.js");
 
     try {
       const taskDb = (tasksModule.getTaskDb as Function)();
@@ -73,13 +95,44 @@ router.get("/ready", async (_req: Request, res: Response) => {
     } finally {
       (paymentsModule.closeDb as Function)();
     }
+
+    try {
+      const jobDb = (queueModule.getJobDb as Function)();
+      jobDb.prepare("SELECT 1").get();
+    } catch (error) {
+      (checks as any).queue = "error";
+    } finally {
+      (queueModule.closeJobDb as Function)();
+    }
   } catch (error) {
     res.status(500).json({ status: "error", checks, error: String(error) });
     return;
   }
 
-  const allOk = Object.values(checks).every((status) => status === "ok");
-  res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
+  const config = getConfig();
+  const timeoutMs = config.HEALTH_PROBE_TIMEOUT_MS;
+  const [veniceStatus, horizonStatus] = await Promise.all([
+    checkVenice(config.VENICE_API_KEY, timeoutMs),
+    checkHorizon(config.STELLAR_HORIZON_URL, timeoutMs),
+  ]);
+  checks.venice = veniceStatus === "ok" ? "ok" : "error";
+  checks.horizon = horizonStatus === "ok" ? "ok" : "error";
+
+  const websocketStatus = metricsService.getWebSocketStatus();
+  checks.websocket =
+    websocketStatus.status === "unknown"
+      ? "unknown"
+      : websocketStatus.status === "ok"
+        ? "ok"
+        : "error";
+
+  // A missing WebSocket probe ("unknown") is a valid configuration — the
+  // stream layer may simply not be attached — so it alone does not fail
+  // readiness. A probe that *is* attached and reports "error" (not
+  // listening) does, same as every other dependency.
+  const failing = Object.values(checks).filter((status) => status === "error");
+  const ready = failing.length === 0;
+  res.status(ready ? 200 : 500).json({ status: ready ? "ok" : "error", checks });
 });
 
 router.get("/dashboard", adminAuthMiddleware, async (req: Request, res: Response) => {
@@ -108,7 +161,7 @@ router.get("/traces/:traceId", (req: Request, res: Response) => {
   res.json(trace);
 });
 
-async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
+async function checkVenice(apiKey: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
@@ -123,7 +176,7 @@ async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
   }
 }
 
-async function checkHorizon(url: string): Promise<"ok" | "unreachable"> {
+async function checkHorizon(url: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5_000);
