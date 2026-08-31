@@ -120,6 +120,45 @@ export class VeniceResponseCache {
     return null;
   }
 
+  /**
+   * Graceful degradation: return the most recent cached entry for the prompt
+   * even if it is stale/expired. Used when all providers fail so the task
+   * can proceed without failing. Returns null if nothing is cached at all.
+   */
+  getStale(prompt: string, agentType: string, modelVersion: string): string | null {
+    // Prefer fresh hit first (already tried via get), then fall back to stale
+    const exact = this.store.get(buildCacheKey(prompt, agentType, modelVersion));
+    if (exact) {
+      this.recordHit();
+      return exact.content;
+    }
+
+    // Fuzzy stale search — ignore expiry, pick highest similarity then most recent
+    const norm = normalizePrompt(prompt);
+    let best: CachedEntry | null = null;
+    let bestScore = 0;
+    let bestTime = 0;
+    for (const entry of this.store.values()) {
+      if (entry.agentType !== agentType) continue;
+      if (entry.modelVersion !== modelVersion) continue;
+      const score = similarity(norm, entry.prompt);
+      if (score >= this.options.similarityThreshold) {
+        if (score > bestScore || (score === bestScore && entry.createdAt > bestTime)) {
+          bestScore = score;
+          bestTime = entry.createdAt;
+          best = entry;
+        }
+      }
+    }
+
+    if (best) {
+      this.recordHit();
+      return best.content;
+    }
+
+    return null;
+  }
+
   set(prompt: string, agentType: string, modelVersion: string, content: string): void {
     const now = Date.now();
     const key = buildCacheKey(prompt, agentType, modelVersion);

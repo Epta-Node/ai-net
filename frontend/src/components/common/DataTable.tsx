@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import styles from './DataTable.module.css';
 
@@ -27,7 +27,9 @@ export interface DataTableProps<T> {
   selectedRowKeys?: Array<string | number>;
   onRowSelect?: (row: T) => void;
   onRowClick?: (row: T) => void;
+  onSort?: (key: string, direction: SortDirection) => void;
   rowClassName?: (row: T) => string;
+  getRowTestId?: (row: T) => string;
 }
 
 function getCellValue<T>(row: T, key: string): string | number | boolean | null {
@@ -72,12 +74,16 @@ export function DataTable<T>({
   selectedRowKeys = [],
   onRowSelect,
   onRowClick,
+  onSort,
   rowClassName,
+  getRowTestId,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [scrollTop, setScrollTop] = useState(0);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
 
   const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDirection), [rows, sortKey, sortDirection]);
 
@@ -88,6 +94,11 @@ export function DataTable<T>({
     ? Math.min(itemCount, Math.ceil((scrollTop + maxHeight) / rowHeight) + overscan)
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
+
+  useEffect(() => {
+    setActiveRowIndex((current) => Math.min(current, Math.max(visibleRows.length - 1, 0)));
+    rowRefs.current = rowRefs.current.slice(0, visibleRows.length);
+  }, [visibleRows.length]);
 
   const handleSelect = (key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
@@ -104,6 +115,45 @@ export function DataTable<T>({
 
     setSortKey(nextKey);
     setSortDirection(nextDirection);
+    if (onSort) {
+      onSort(nextKey, nextDirection);
+    }
+  };
+
+  const focusRow = (index: number) => {
+    const nextIndex = Math.min(Math.max(index, 0), visibleRows.length - 1);
+    setActiveRowIndex(nextIndex);
+    rowRefs.current[nextIndex]?.focus();
+  };
+
+  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, index: number, row: T) => {
+    if (event.target !== event.currentTarget) return;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        focusRow(index + 1);
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        focusRow(index - 1);
+        break;
+      case 'Home':
+        event.preventDefault();
+        focusRow(0);
+        break;
+      case 'End':
+        event.preventDefault();
+        focusRow(visibleRows.length - 1);
+        break;
+      case 'Enter':
+      case ' ':
+        if (onRowClick) {
+          event.preventDefault();
+          onRowClick(row);
+        }
+        break;
+    }
   };
 
   if (rows.length === 0) {
@@ -150,7 +200,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row) => {
+            {visibleRows.map((row, rowIndex) => {
               const rowKey = getRowKey(row);
               const isSelected = selectedRowKeys.includes(rowKey);
               const classes = [styles.row, rowClassName ? rowClassName(row) : ''];
@@ -159,10 +209,13 @@ export function DataTable<T>({
               return (
                 <tr
                   key={rowKey}
+                  ref={(element) => { rowRefs.current[rowIndex] = element; }}
                   className={classes.join(' ')}
                   onClick={() => onRowClick?.(row)}
-                  tabIndex={onRowClick ? 0 : undefined}
-                  role={onRowClick ? 'button' : undefined}
+                  onFocus={() => setActiveRowIndex(rowIndex)}
+                  onKeyDown={(event) => handleRowKeyDown(event, rowIndex, row)}
+                  tabIndex={rowIndex === activeRowIndex ? 0 : -1}
+                  aria-selected={onRowSelect ? isSelected : undefined}
                 >
                   {onRowSelect && (
                     <td className={styles.selectionCell}>

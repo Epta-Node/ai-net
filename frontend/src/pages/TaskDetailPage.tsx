@@ -8,6 +8,25 @@ import { PaymentTimeline } from '../components/dashboard/PaymentTimeline';
 import { Skeleton, SkeletonText } from '../components/common/Skeleton';
 import { AlertCircle, CheckCircle2, Play, RefreshCw } from 'lucide-react';
 
+const CustomNode: React.FC<{ id: string; data: { label: string; status: string } }> = ({ id, data }) => {
+  const { t } = useTranslation();
+
+  return (
+    <div id={id} className={`dag-node ${data.status} h-full flex flex-col justify-between`}>
+      <Handle type="target" position={Position.Left} style={{ background: 'var(--text-muted)', width: 8, height: 8 }} />
+      <div>
+        <div className="text-[10px] uppercase font-extrabold tracking-wider opacity-60 mb-0.5">
+          {t('page.task.agentNode')}
+        </div>
+        <div className="text-sm font-bold truncate capitalize">{data.label}</div>
+      </div>
+      <div className="node-status text-[9px] font-mono font-bold uppercase tracking-widest mt-2 px-1.5 py-0.5 rounded bg-black/25 inline-block mx-auto">
+        {data.status}
+      </div>
+      <Handle type="source" position={Position.Right} style={{ background: 'var(--text-muted)', width: 8, height: 8 }} />
+    </div>
+  );
+};
 
 
 /**
@@ -68,6 +87,95 @@ const TaskDetailPage: React.FC = () => {
     return nodes.find(n => n.status === 'failed');
   }, [nodes]);
 
+  // Construct React Flow nodes dynamically based on node state
+  const flowNodes = useMemo<Node[]>(() => {
+    return nodes.map((node, index) => {
+      let background = 'var(--surface-panel-translucent)';
+      let borderColor = 'var(--white-alpha-08)';
+      let boxShadow = 'none';
+      let color = 'var(--text-muted)';
+
+      if (node.status === 'completed') {
+        background = 'var(--status-success-surface)';
+        borderColor = 'var(--success)';
+        boxShadow = 'var(--glow-success)';
+        color = 'var(--status-success-text)';
+      } else if (node.status === 'running') {
+        background = 'var(--accent-surface-strong)';
+        borderColor = 'var(--primary)';
+        boxShadow = 'var(--glow-info)';
+        color = 'var(--accent-text)';
+      } else if (node.status === 'failed') {
+        background = 'var(--status-danger-surface-strong)';
+        borderColor = 'var(--danger)';
+        boxShadow = 'var(--glow-danger)';
+        color = 'var(--status-danger-text)';
+      }
+
+      const cleanLabel = node.nodeId.replace('node_', '').replace('node-', '');
+
+      return {
+        id: node.nodeId,
+        type: 'custom',
+        data: { 
+          label: cleanLabel, 
+          status: node.status 
+        },
+        position: { x: index * 240 + 60, y: 110 },
+        style: {
+          padding: '12px 16px',
+          borderRadius: 'var(--radius-2xl)',
+          border: '2px solid',
+          backgroundColor: background,
+          borderColor: borderColor,
+          color: color,
+          boxShadow: boxShadow,
+          minWidth: '160px',
+          height: '92px',
+          textAlign: 'center',
+          fontWeight: 'bold',
+          transition: 'all 0.3s ease',
+          cursor: 'pointer',
+        },
+      };
+    });
+  }, [nodes]);
+
+  // Construct React Flow edges dynamically based on dependency state
+  const flowEdges = useMemo<Edge[]>(() => {
+    const edges: Edge[] = [];
+    nodes.forEach(node => {
+      if (node.dependsOn && node.dependsOn.length > 0) {
+        node.dependsOn.forEach(depId => {
+          let strokeColor = 'var(--border-strong)';
+          let animated = false;
+          
+          if (node.status === 'completed') {
+            strokeColor = 'var(--status-success)'; // green for completed paths
+          } else if (node.status === 'running') {
+            strokeColor = 'var(--accent-secondary)'; // blue animated for active paths
+            animated = true;
+          } else if (node.status === 'failed') {
+            strokeColor = 'var(--status-danger)'; // red for failed paths
+          }
+
+          edges.push({
+            id: `edge-${depId}-${node.nodeId}`,
+            source: depId,
+            target: node.nodeId,
+            animated,
+            style: { stroke: strokeColor, strokeWidth: 2.5 },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: strokeColor,
+            },
+          });
+        });
+      }
+    });
+    return edges;
+  }, [nodes]);
+
   if (loading && !nodes.length) {
     return <TaskDetailSkeleton />;
   }
@@ -76,7 +184,7 @@ const TaskDetailPage: React.FC = () => {
     return (
       <div className="glass-panel border-rose-500/30 text-center py-12">
         <AlertCircle className="text-rose-500 mx-auto mb-4" size={48} />
-        <h2 className="text-xl font-bold text-slate-100 mb-2">{t('page.task.errorTitle')}</h2>
+        <h2 className="text-xl font-bold text-[var(--text-primary)] mb-2">{t('page.task.errorTitle')}</h2>
         <p className="text-rose-300/80 mb-6">{error.message}</p>
         <button onClick={refetch} className="flex items-center gap-2 mx-auto">
           <RefreshCw size={16} />
@@ -91,25 +199,25 @@ const TaskDetailPage: React.FC = () => {
     switch (wsStatus) {
       case 'connected':
         return {
-          bg: 'rgba(16, 185, 129, 0.15)',
-          border: 'rgba(16, 185, 129, 0.3)',
-          color: '#a7f3d0',
+          bg: 'var(--status-success-surface)',
+          border: 'var(--status-success-border)',
+          color: 'var(--status-success-text)',
           label: t('page.task.ws.connected'),
         };
       case 'connecting':
         return {
-          bg: 'rgba(245, 158, 11, 0.15)',
-          border: 'rgba(245, 158, 11, 0.3)',
-          color: '#fde68a',
+          bg: 'var(--status-warning-surface)',
+          border: 'var(--status-warning-border)',
+          color: 'var(--status-warning-text)',
           label: t('page.task.ws.connecting'),
         };
       case 'error':
       case 'disconnected':
       default:
         return {
-          bg: 'rgba(239, 68, 68, 0.15)',
-          border: 'rgba(239, 68, 68, 0.3)',
-          color: '#fca5a5',
+          bg: 'var(--status-danger-surface)',
+          border: 'var(--status-danger-border)',
+          color: 'var(--status-danger-text)',
           label: t('page.task.ws.disconnected'),
         };
     }
@@ -125,7 +233,7 @@ const TaskDetailPage: React.FC = () => {
           <AlertCircle className="text-rose-400 mt-0.5 shrink-0" size={20} />
           <div>
             <h4 className="font-bold text-sm">{t('page.task.failedTitle')}</h4>
-            <p className="text-xs text-rose-300 mt-0.5">
+            <p className="text-xs text-[var(--status-danger-text)] mt-0.5">
               <Trans
                 i18nKey="page.task.failedBody"
                 values={{
@@ -145,7 +253,7 @@ const TaskDetailPage: React.FC = () => {
           <CheckCircle2 className="text-emerald-400 mt-0.5 shrink-0" size={20} />
           <div>
             <h4 className="font-bold text-sm">{t('page.task.completedTitle')}</h4>
-            <p className="text-xs text-emerald-300 mt-0.5">
+            <p className="text-xs text-[var(--status-success-text)] mt-0.5">
               {t('page.task.completedBody')}
             </p>
           </div>
@@ -176,7 +284,7 @@ const TaskDetailPage: React.FC = () => {
             {t('page.task.taskId', { id })}
           </p>
           {task?.prompt && (
-            <p className="text-sm text-slate-300 mt-3 italic border-l-2 border-indigo-500 pl-3">
+            <p className="text-sm text-[var(--text-muted)] mt-3 italic border-l-2 border-[var(--accent-secondary)] pl-3">
               "{task.prompt}"
             </p>
           )}
@@ -186,16 +294,57 @@ const TaskDetailPage: React.FC = () => {
           <div className="text-right hidden sm:block">
             <div className="text-[10px] uppercase font-bold text-[var(--text-secondary)]">{t('common.status')}</div>
             <div className={`text-xs font-extrabold capitalize mt-0.5 ${
-              task?.status === 'completed' ? 'text-emerald-400' :
-              task?.status === 'failed' ? 'text-rose-400' : 'text-indigo-400'
+              task?.status === 'completed' ? 'text-[var(--status-success)]' :
+              task?.status === 'failed' ? 'text-[var(--status-danger)]' : 'text-[var(--accent-secondary)]'
             }`}>
               {task?.status || 'queued'}
             </div>
           </div>
-          <button onClick={refetch} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+          <button onClick={refetch} className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[var(--surface-elevated)] hover:bg-[var(--surface-muted)] border border-[var(--border-strong)] transition">
             <RefreshCw size={12} />
             <span>{t('page.task.sync')}</span>
           </button>
+        </div>
+      </div>
+
+      {/* DAG Graph Panel */}
+      <div className="glass-panel relative flex flex-col">
+        <div className="flex items-center gap-2 mb-3">
+          <Play size={16} className="text-[var(--accent-secondary)]" />
+          <h3 className="text-md font-semibold text-[var(--text-primary)]">{t('page.task.dagTitle')}</h3>
+          <span className="text-[10px] text-[var(--text-muted)] ml-auto">{t('page.task.dagHint')}</span>
+        </div>
+        
+        <div 
+          id="dag-preview"
+          className="w-full bg-[var(--surface-glass-subtle)] rounded-xl border border-[var(--panel-border)] overflow-hidden relative"
+          style={{ height: '280px' }}
+        >
+          {flowNodes.length > 0 ? (
+            <ReactFlow
+              nodes={flowNodes}
+              edges={flowEdges}
+              nodeTypes={nodeTypes}
+              onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
+              nodesConnectable={false}
+              nodesDraggable={false}
+              zoomOnScroll={false}
+              zoomOnPinch={false}
+              zoomOnDoubleClick={false}
+              panOnDrag={true}
+              preventScrolling={true}
+              attributionPosition="bottom-left"
+            >
+              <Background color="var(--surface-elevated)" gap={16} size={1} />
+              <Controls showInteractive={false} />
+            </ReactFlow>
+          ) : (
+            <div className="flex items-center justify-center h-full text-[var(--text-muted)]">
+              {t('page.task.dagEmpty')}
+            </div>
+          )}
         </div>
       </div>
 
