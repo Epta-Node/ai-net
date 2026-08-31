@@ -5,6 +5,9 @@ import { RegisterAgentSchema } from "../schemas/agent.schema";
 import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
 import { NotFoundError, ValidationError, AuthenticationError } from "../../errors";
+import { cacheMiddleware } from "../middleware/cache";
+import { invalidateAgentsCache } from "../../cache/invalidation";
+import { ttlForRoute } from "../../config";
 
 export interface AgentsRouterOptions {
   healthTimeoutMs?: number;
@@ -78,7 +81,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *               $ref: '#/components/schemas/InternalServerError'
    */
   // GET /api/agents
-  router.get("/", (req: Request, res: Response, next: NextFunction): void => {
+  router.get("/", cacheMiddleware({ ttl: ttlForRoute("agents") }), (req: Request, res: Response, next: NextFunction): void => {
     const db = getDb();
     const capability = req.query.capability as string | undefined;
     const minReputation = req.query.minReputation ? parseFloat(req.query.minReputation as string) : undefined;
@@ -133,7 +136,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *               error: "Agent not found"
    */
   // GET /api/agents/:id
-  router.get("/:id", (req: Request, res: Response, next: NextFunction): void => {
+  router.get("/:id", cacheMiddleware({ ttl: ttlForRoute("agents") }), (req: Request, res: Response, next: NextFunction): void => {
     try {
       const correlationId = res.locals.correlationId as string | undefined;
       const db = getDb();
@@ -331,6 +334,9 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       
       db.upsert(agent);
       
+      // Await invalidation so the new agent appears on the next GET
+      await invalidateAgentsCache().catch(() => {/* best-effort */});
+      
       res.status(201).json(agent);
     } catch (err) {
       next(err);
@@ -376,7 +382,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *               $ref: '#/components/schemas/RateLimitError'
    */
   // POST /api/agents/:id/heartbeat
-  router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, (req: Request, res: Response, next: NextFunction): void => {
+  router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const correlationId = res.locals.correlationId as string | undefined;
       const db = getDb();
@@ -387,6 +393,8 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
 
       db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: 'online' });
       const updated = db.findById(req.params.id);
+      // Await invalidation so the updated lastSeenAt is visible on the next GET
+      await invalidateAgentsCache().catch(() => {/* best-effort */});
       res.status(200).json({
         status: "ok",
         lastSeenAt: updated?.lastSeenAt ?? new Date().toISOString(),
@@ -451,7 +459,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *               $ref: '#/components/schemas/NotFoundError'
    */
   // DELETE /api/agents/:id
-  router.delete("/:id", (req: Request, res: Response, next: NextFunction): void => {
+  router.delete("/:id", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const correlationId = res.locals.correlationId as string | undefined;
       const db = getDb();
@@ -479,6 +487,8 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       }
       
       db.delete(req.params.id);
+      // Await invalidation so deleted agent is not served from cache
+      await invalidateAgentsCache().catch(() => {/* best-effort */});
       res.json({ message: "Agent deleted successfully" });
     } catch (err) {
       next(err);

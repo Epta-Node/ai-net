@@ -33,6 +33,7 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 import { scValToNative } from "@stellar/stellar-base";
 import { getAgentDb, createAgentDb } from "../db/agents";
 import { createLogger } from "../utils/logger";
+import { invalidateAgentsCache } from "../cache/invalidation";
 
 const RPC_URL =
   process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
@@ -157,6 +158,9 @@ function handleEvent(
         status: "online",
       });
 
+      // Invalidate registry cache so the updated agent list is served fresh
+      invalidateAgentsCache().catch(() => {/* best-effort — sync must not crash */});
+
       logger.info(
         { agentId: data.agent_id, capability: data.capability, owner: data.owner },
         "agent registered"
@@ -169,6 +173,9 @@ function handleEvent(
 
       // Remove the agent from the local DB using the existing delete method.
       db.delete(data.agent_id);
+
+      // Invalidate registry cache so the agent no longer appears in listings
+      invalidateAgentsCache().catch(() => {/* best-effort */});
 
       logger.info(
         { agentId: data.agent_id, capability: data.capability, owner: data.owner },
@@ -188,6 +195,7 @@ function handleEvent(
       const existing = db.findById(agentId);
       if (existing) {
         db.upsert({ ...existing, status: "offline" });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent frozen (marked offline)");
       break;
@@ -203,6 +211,7 @@ function handleEvent(
       const existing = db.findById(agentId);
       if (existing) {
         db.upsert({ ...existing, status: "online", lastSeenAt: new Date().toISOString() });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent unfrozen (marked online)");
       break;
@@ -223,6 +232,7 @@ function handleEvent(
           ...existing,
           pricingXLM: Number(priceStroops) / 10_000_000,
         });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info(
         { agentId, priceXLM: (Number(priceStroops) / 10_000_000).toFixed(7) },

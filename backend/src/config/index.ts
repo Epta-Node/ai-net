@@ -23,6 +23,8 @@ const envSchema = z.object({
   CACHE_TTL_AGENTS: z.coerce.number().int().nonnegative().default(60),
   CACHE_TTL_STATS: z.coerce.number().int().nonnegative().default(30),
   CACHE_TTL_HEALTH: z.coerce.number().int().nonnegative().default(10),
+  /** Deployment-scoped key prefix for registry cache entries (Issue #427). */
+  REGISTRY_CACHE_KEY_PREFIX: z.string().default("registry"),
 
   MAX_PROMPT_LENGTH: z.coerce.number().int().positive().default(10_000),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
