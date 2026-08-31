@@ -11,7 +11,10 @@ import {
   computeTotalScore,
   computeTrend,
   extractSignificantTokens,
+  loadScorerConfig,
+  percentileNormalize,
   reputationDeltaForScore,
+  runValidationSet,
   scoreCompleteness,
   scoreFormat,
   scoreRelevance,
@@ -19,7 +22,7 @@ import {
   MAX_REPUTATION,
   MIN_REPUTATION,
 } from './qualityScorer';
-import type { QualityScoringRules } from './qualityScorer.types';
+import type { QualityScorerConfig, QualityScoringRules, ValidationEntry } from './qualityScorer.types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
