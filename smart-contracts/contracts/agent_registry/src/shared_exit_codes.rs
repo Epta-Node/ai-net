@@ -151,7 +151,7 @@ mod tests {
         ];
         for code in &codes {
             let raw = *code as u32;
-            assert!(raw >= 1 && raw <= 15);
+            assert!((1..=15).contains(&raw));
             let recovered = CommonExitCode::from_raw(raw).unwrap();
             assert_eq!(recovered as u32, raw);
         }

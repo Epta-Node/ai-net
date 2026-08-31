@@ -2118,7 +2118,7 @@ fn test_get_agents_batch_registered_pagination() {
 
 #[test]
 fn error_mapper_returns_common_codes_for_reserved_range() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Common codes 1..=15 should map to their CommonExitCode variants
     for raw in 1..=15u32 {
@@ -2130,7 +2130,7 @@ fn error_mapper_returns_common_codes_for_reserved_range() {
 
 #[test]
 fn error_mapper_returns_none_for_contract_specific_codes() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Contract-specific codes outside 1..=15 should return None
     assert!(client.error_mapper(&0).is_none());
@@ -2141,7 +2141,7 @@ fn error_mapper_returns_none_for_contract_specific_codes() {
 
 #[test]
 fn error_mapper_propagation_consistency() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Simulate cross-contract error propagation: a contract returns
     // Error::NotFound (code 1), which maps to CommonExitCode::NotFound (code 1)
