@@ -22,6 +22,29 @@
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 
+    <!-- Theme Boot Script: Prevents Flash of Unstyled Content (FOUC) and honors system preference -->
+    <script>
+      (function() {
+        try {
+          var stored = localStorage.getItem('theme-mode');
+          var mode = (stored === 'light' || stored === 'dark' || stored === 'system') ? stored : 'system';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var effective = mode === 'system' ? (prefersDark ? 'dark' : 'light') : mode;
+          if (effective === 'light') {
+            document.documentElement.classList.add('theme-light');
+          } else {
+            document.documentElement.classList.remove('theme-light');
+          }
+          var metaThemeColor = document.querySelector('meta[name="theme-color"]');
+          if (metaThemeColor) {
+            metaThemeColor.setAttribute('content', effective === 'light' ? '#FFFFFF' : '#0A0E14');
+          }
+        } catch (e) {
+          // Graceful fallback to default
+        }
+      })();
+    </script>
+
     <title>AI Net</title>
   </head>
 

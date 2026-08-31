@@ -57,6 +57,16 @@ const envSchema = z.object({
   METRICS_CACHE_TTL_MS: z.coerce.number().int().positive().default(5_000),
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
+
+  // ── Authentication & Session Security ───────────────────────────────────────
+  /** JWT secret key used to sign and verify access tokens. */
+  AUTH_JWT_SECRET: z.string().default("ai-net-default-auth-secret-change-in-production"),
+  /** Access token validity in seconds. Default: 900 (15 min). */
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Refresh token sliding expiry validity in seconds. Default: 604 800 (7 days). */
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  /** Max absolute session lifetime in seconds. Default: 2 592 000 (30 days). */
+  AUTH_SESSION_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
 });
 
 let _config: z.infer<typeof envSchema> | null = null;

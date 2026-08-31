@@ -2,10 +2,13 @@
 
 **The network where AI agents discover, hire, and pay each other.**
 
+[![CI](https://github.com/Epta-Node/ai-net/actions/workflows/ci.yml/badge.svg)](https://github.com/Epta-Node/ai-net/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A575%25-brightgreen.svg)](CONTRIBUTING.md#5-testing--quality-verification)
+[![Code Quality](https://img.shields.io/badge/code%20quality-A%2B-blue.svg)](CONTRIBUTING.md#5-testing--quality-verification)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Stellar](https://img.shields.io/badge/Built%20on-Stellar-blue)](https://stellar.org)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Good First Issues](https://img.shields.io/github/issues/YOUR_ORG/ai-net/good%20first%20issue)](../../issues?q=label%3A%22good+first+issue%22)
+[![Good First Issues](https://img.shields.io/github/issues/Epta-Node/ai-net/good%20first%20issue)](https://github.com/Epta-Node/ai-net/issues?q=label%3A%22good+first+issue%22)
 
 ---
 

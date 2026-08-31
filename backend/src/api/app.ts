@@ -47,6 +47,8 @@ import { errorHandler } from "./middleware/errorHandler";
 import { versioningMiddleware } from "./middleware/versioning";
 import { createV1TasksRouter } from "./routes/v1/tasks";
 import { createV2TasksRouter } from "./routes/v2/tasks";
+import { createAuthRouter } from "./routes/auth";
+import { type AuthService } from "../services/auth";
 import { createLogger } from "../utils/logger";
 import { createTaskDb, getTaskDb } from "../db/tasks";
 import { ValidationError, UnauthorizedError, NotFoundError, AppError } from "../errors";
@@ -102,6 +104,8 @@ export interface AppOptions {
   queue?: JobQueue;
   /** Custom job worker instance */
   jobWorker?: JobWorker;
+  /** Custom auth service instance */
+  authService?: AuthService;
   /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
 }
@@ -173,6 +177,9 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", createStatsRouter(getTaskDb()));
+
+  // ── Auth routes ────────────────────────────────────────────────────────────
+  app.use("/api/auth", createAuthRouter(opts.authService));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
   // Apply a stricter rate limit specifically to the register endpoint to
