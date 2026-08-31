@@ -18,8 +18,20 @@
 // ---------------------------------------------------------------------------
 
 /** Current schema version emitted by this code.  Increment when a payload
- *  shape changes in a backward-incompatible way. */
-export const CURRENT_EVENT_VERSION = 1 as const;
+ *  shape changes in a backward-incompatible way.
+ *
+ * Version history:
+ *  - v1: Initial event schema.
+ *  - v2: Added optional fields to TaskCreated (agentId, durationMs),
+ *       NodeStarted (timeoutMs), NodeCompleted (durationMs),
+ *       NodeFailed (retryCount), PaymentLocked (xlmAmount),
+ *       PaymentReleased (ledgerSequence), TaskCompleted (durationMs),
+ *       TaskFailed (failedStage).
+ */
+export const CURRENT_EVENT_VERSION = 2 as const;
+
+/** The earliest schema version this codebase can read. */
+export const MIN_SUPPORTED_EVENT_VERSION = 1 as const;
 
 /** Base fields carried by every event. */
 export interface BaseEvent {
@@ -52,19 +64,29 @@ export interface TaskCreatedPayload {
   walletPublicKey: string;
   /** DAG node count at creation time. */
   dagSize: number;
+  /** v2: The agent that was dispatched (populated after dispatch). */
+  agentId?: string;
+  /** v2: Duration from creation to completion in milliseconds. */
+  durationMs?: number;
 }
 
 export interface NodeStartedPayload {
   agentType: string;
+  /** v2: Maximum time allowed for this node before timeout. */
+  timeoutMs?: number;
 }
 
 export interface NodeCompletedPayload {
   /** Arbitrary result returned by the agent. */
   result: unknown;
+  /** v2: Agent response time in milliseconds. */
+  durationMs?: number;
 }
 
 export interface NodeFailedPayload {
   error: string;
+  /** v2: Number of retry attempts before failure. */
+  retryCount?: number;
 }
 
 export interface PaymentLockedPayload {
@@ -72,11 +94,15 @@ export interface PaymentLockedPayload {
   balanceId: string;
   /** Amount in stroops. */
   amountStroops: number;
+  /** v2: XLM equivalent of the locked amount. */
+  xlmAmount?: number;
 }
 
 export interface PaymentReleasedPayload {
   /** Stellar transaction hash. */
   txHash: string;
+  /** v2: Stellar ledger sequence at which the release was confirmed. */
+  ledgerSequence?: number;
 }
 
 // task_completed and task_failed carry no additional payload beyond BaseEvent.
@@ -133,12 +159,19 @@ export interface PaymentReleasedEvent extends BaseEvent {
 
 export interface TaskCompletedEvent extends BaseEvent {
   type: 'TaskCompleted';
-  payload?: Record<string, never>;
+  payload?: {
+    /** v2: Total duration from task creation to completion in milliseconds. */
+    durationMs?: number;
+  };
 }
 
 export interface TaskFailedEvent extends BaseEvent {
   type: 'TaskFailed';
-  payload?: { error?: string };
+  payload?: {
+    error?: string;
+    /** v2: The stage at which the task failed. */
+    failedStage?: string;
+  };
 }
 
 /** Union of all typed event variants. */
