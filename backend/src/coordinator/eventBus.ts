@@ -32,6 +32,7 @@ import { createEventStore } from '../events/eventStore';
 import type { EventStore } from '../events/eventStore';
 import type { AppEvent } from '../events/eventTypes';
 import { CURRENT_EVENT_VERSION } from '../events/eventTypes';
+import { createLogger } from '../utils/logger';
 
 // ---------------------------------------------------------------------------
 // Adapter — convert a legacy DAGEvent to AppEvent
@@ -103,6 +104,8 @@ class EventBus extends EventEmitter {
   /** Underlying append-only event store. */
   readonly store: EventStore;
 
+  private readonly log = createLogger({ module: 'eventBus' });
+
   constructor(options: EventBusOptions = {}) {
     super();
     this.store = options.store ?? createEventStore();
@@ -123,7 +126,7 @@ class EventBus extends EventEmitter {
     } catch (err) {
       // Surface rehydration errors — a silent failure here means duplicate
       // seq=0 events after restart, which is worse than a startup warning.
-      console.error('[eventBus] failed to rehydrate taskSeq counters from DB:', err);
+      this.log.error({ err }, "failed to rehydrate taskSeq counters from DB");
     }
 
     // Wire the persistence recorder: every event is persisted BEFORE per-task
@@ -134,7 +137,7 @@ class EventBus extends EventEmitter {
       } catch (err) {
         // Persistence failures must not crash the process — log and continue.
         // The event has already been emitted to live subscribers.
-        console.error('[eventBus] failed to persist event:', err);
+        this.log.error({ err }, "failed to persist event");
       }
     });
   }

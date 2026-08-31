@@ -47,7 +47,10 @@ export type DAGEventType =
   | "payment_locked"
   | "payment_released"
   | "task_completed"
-  | "task_failed";
+  | "task_failed"
+  | "AgentFailedOver"
+  | "AgentRecovered"
+  | "AgentMarkedOffline";
 
 export interface DAGEvent {
   type: DAGEventType;

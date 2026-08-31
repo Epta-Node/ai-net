@@ -1,5 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
+import { deflateSync, inflateSync } from "zlib";
 import axios from "axios";
 import { discoverAgents } from "../registry/registry";
 
@@ -12,11 +14,128 @@ export interface DAGNode {
   result?: unknown;
 }
 
+export enum TaskStatus {
+  Pending = 0,
+  Running = 1,
+  Completed = 2,
+  Failed = 3,
+}
+
+export interface OnChainTaskMetadata {
+  taskId: Uint8Array;
+  promptHash: Uint8Array;
+  assignedAgents: string[];
+  dag: DAGNode[];
+  status: TaskStatus;
+  createdAt: bigint;
+  expiresAt: bigint;
+}
+
+export interface TaskMetadataContractClient {
+  store_task_metadata(args: {
+    submitter: string;
+    task_id: Uint8Array;
+    prompt_hash: Uint8Array;
+    assigned_agents: string[];
+    compressed_dag: Uint8Array;
+    ttl_days: number;
+  }): AssembledContractTransaction<void>;
+  get_task_metadata(task_id: Uint8Array): AssembledContractTransaction<{
+    taskId: Uint8Array;
+    promptHash: Uint8Array;
+    assignedAgents: string[];
+    compressedDag: Uint8Array;
+    status: TaskStatus;
+    createdAt: bigint;
+    expiresAt: bigint;
+  }>;
+  get_task_status(task_id: Uint8Array): AssembledContractTransaction<TaskStatus>;
+  update_task_status(args: {
+    task_id: Uint8Array;
+    agent: string;
+    new_status: TaskStatus;
+  }): AssembledContractTransaction<void>;
+}
+
+export interface AssembledContractTransaction<T> {
+  signAndSend(): Promise<T>;
+  simulate(): Promise<T>;
+}
+
+export interface StoreTaskMetadataInput {
+  taskId: string;
+  prompt: string;
+  submitter: string;
+  assignedAgents: string[];
+  dag: DAGNode[];
+  ttlDays?: number;
+}
+
 export class CyclicDAGError extends Error {
   constructor() {
     super("Cyclic dependency detected in task DAG");
     this.name = "CyclicDAGError";
   }
+}
+
+function hashTaskValue(value: string): Uint8Array {
+  return createHash("sha256").update(value, "utf8").digest();
+}
+
+export async function storeTaskMetadata(
+  client: TaskMetadataContractClient,
+  input: StoreTaskMetadataInput,
+): Promise<void> {
+  const compressedDag = deflateSync(Buffer.from(JSON.stringify(input.dag)));
+
+  await client.store_task_metadata({
+    submitter: input.submitter,
+    task_id: hashTaskValue(input.taskId),
+    prompt_hash: hashTaskValue(input.prompt),
+    assigned_agents: input.assignedAgents,
+    compressed_dag: compressedDag,
+    ttl_days: input.ttlDays ?? 0,
+  }).signAndSend();
+}
+
+export async function getTaskMetadata(
+  client: TaskMetadataContractClient,
+  taskId: string,
+): Promise<OnChainTaskMetadata> {
+  const metadata = await client.get_task_metadata(hashTaskValue(taskId)).simulate();
+  const dag = JSON.parse(
+    inflateSync(Buffer.from(metadata.compressedDag)).toString("utf8"),
+  ) as DAGNode[];
+
+  return {
+    taskId: metadata.taskId,
+    promptHash: metadata.promptHash,
+    assignedAgents: metadata.assignedAgents,
+    dag,
+    status: metadata.status,
+    createdAt: metadata.createdAt,
+    expiresAt: metadata.expiresAt,
+  };
+}
+
+export function getTaskStatus(
+  client: TaskMetadataContractClient,
+  taskId: string,
+): Promise<TaskStatus> {
+  return client.get_task_status(hashTaskValue(taskId)).simulate();
+}
+
+export function updateTaskStatus(
+  client: TaskMetadataContractClient,
+  taskId: string,
+  agent: string,
+  newStatus: TaskStatus,
+): Promise<void> {
+  return client.update_task_status({
+    task_id: hashTaskValue(taskId),
+    agent,
+    new_status: newStatus,
+  }).signAndSend();
 }
 
 // ── Venice AI ────────────────────────────────────────────────────────────────

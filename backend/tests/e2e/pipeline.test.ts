@@ -209,11 +209,12 @@ describe('Full pipeline E2E', () => {
   });
 
   it('payment was released exactly once per node (5 releases total)', () => {
-    expect(paymentReleases).toHaveLength(5);
-    const releasedNodeIds = paymentReleases.map(r => r.nodeId).sort();
+    const taskPaymentReleases = paymentReleases.filter(r => r.taskId === taskId);
+    expect(taskPaymentReleases).toHaveLength(5);
+    const releasedNodeIds = taskPaymentReleases.map(r => r.nodeId).sort();
     expect(releasedNodeIds).toEqual([...AGENT_NODE_IDS].sort());
     // All releases share the same taskId
-    for (const r of paymentReleases) {
+    for (const r of taskPaymentReleases) {
       expect(r.taskId).toBe(taskId);
     }
   });

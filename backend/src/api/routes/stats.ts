@@ -1,64 +1,69 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { getStats, type DbClient } from '../../db/stats';
 import { StatsCache } from '../../utils/statsCache';
+import { AppError } from '../../errors';
+import { createLogger } from "../../utils/logger";
 
 export function createStatsRouter(db: DbClient) {
   const router = Router();
+  const logger = createLogger({ module: "stats" });
   const cache = new StatsCache({
     ttlMs: 60_000,
-    computeStats: () => getStats(db)
+    computeStats: () => getStats(db),
   });
 
   /**
    * @openapi
    * /api/stats:
    *   get:
-   *     summary: Get network statistics
+   *     summary: Get network statistics and analytics
+   *     description: Returns aggregated network performance metrics including total registered agents, completed tasks, system uptime percentage, XLM transacted, and 24-hour activity time series.
    *     operationId: getStats
    *     tags: [Stats]
    *     security: []
    *     responses:
    *       200:
-   *         description: Current network statistics
+   *         description: Current network statistics retrieved successfully
+   *         headers:
+   *           X-RateLimit-Limit:
+   *             $ref: '#/components/headers/X-RateLimit-Limit'
+   *           X-RateLimit-Remaining:
+   *             $ref: '#/components/headers/X-RateLimit-Remaining'
+   *           X-RateLimit-Reset:
+   *             $ref: '#/components/headers/X-RateLimit-Reset'
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 totalAgents: { type: integer }
-   *                 totalTasks: { type: integer }
-   *                 uptimePercent: { type: number }
-   *                 totalXLMTransacted: { type: number }
-   *                 tasksLast24h:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       timestamp: { type: string, format: date-time }
-   *                       value: { type: number }
-   *                 xlmLast24h:
-   *                   type: array
-   *                   items:
-   *                     type: object
-   *                     properties:
-   *                       timestamp: { type: string, format: date-time }
-   *                       value: { type: number }
+   *               $ref: '#/components/schemas/StatsResponse'
+   *             example:
+   *               totalAgents: 12
+   *               totalTasks: 348
+   *               uptimePercent: 99.98
+   *               totalXLMTransacted: 1250.75
+   *               tasksLast24h:
+   *                 - timestamp: "2026-08-25T12:00:00.000Z"
+   *                   value: 45
+   *               xlmLast24h:
+   *                 - timestamp: "2026-08-25T12:00:00.000Z"
+   *                   value: 120.5
    *       500:
    *         description: Unable to load stats
    *         content:
    *           application/json:
    *             schema:
-   *               $ref: '#/components/schemas/Error'
+   *               $ref: '#/components/schemas/InternalServerError'
    */
-  router.get('/', async (req, res) => {
+  router.get('/stats', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const stats = await cache.get();
       return res.status(200).json(stats);
     } catch (error) {
-      console.error('Failed to load stats', error);
-      return res.status(500).json({ error: 'Unable to load stats' });
+      logger.error({ err: error }, "failed to load stats");
+      next(new AppError('Unable to load stats', 500, 'STATS_LOAD_ERROR'));
     }
   });
 
   return router;
 }
+
+export default createStatsRouter;

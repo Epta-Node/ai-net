@@ -4,6 +4,7 @@ import {
   createDefaultReconciliationService,
 } from '../../services/reconciliation';
 import type { ReconciliationTrigger } from '../../services/reconciliation.types';
+import { createLogger } from '../../utils/logger';
 
 export interface ReconciliationRouterOptions {
   /** Service to use; defaults to the production service. */
@@ -63,6 +64,7 @@ export function createReconciliationRouter(
   options: ReconciliationRouterOptions = {}
 ): Router {
   const router = Router();
+  const logger = createLogger({ module: "reconciliation" });
   let service: ReconciliationService | null = null;
   const getService = (): ReconciliationService =>
     (service ??= options.service ?? createDefaultReconciliationService());
@@ -76,7 +78,7 @@ export function createReconciliationRouter(
       const report = await getService().run(triggeredBy);
       return res.status(200).json(report);
     } catch (error) {
-      console.error('Reconciliation run failed', error);
+      logger.error({ err: error }, "reconciliation run failed");
       return res.status(500).json({ error: 'RECONCILIATION_FAILED' });
     }
   });

@@ -1,40 +1,23 @@
 import { Router, Request, Response } from "express";
 import { getConfig } from "../../config";
+import { adminAuthMiddleware } from "../middleware/auth";
+import { metricsService } from "../../services/metrics";
 import { tracingService } from "../../services/tracing";
 
 const router = Router();
+const startTime = Date.now();
 
-let startTime = Date.now();
+function cachedRoute(group: "health"): RequestHandler {
+  let middleware: RequestHandler | null = null;
+  return (req, res, next) => {
+    if (!middleware) {
+      middleware = cacheMiddleware({ ttl: ttlForRoute(group) });
+    }
+    return middleware(req, res, next);
+  };
+}
 
-/**
- * @openapi
- * /health:
- *   get:
- *     summary: Basic liveness check
- *     operationId: getLiveness
- *     description: Returns immediately with process uptime and version info. Does not check external dependencies — use /health/deep for that.
- *     tags: [Health]
- *     security: []
- *     responses:
- *       200:
- *         description: Service is up
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   enum: [ok]
- *                 uptime:
- *                   type: number
- *                   description: Seconds since process start
- *                 version:
- *                   type: string
- *                 stellarNetwork:
- *                   type: string
- */
-router.get("/", (_req: Request, res: Response) => {
+router.get("/", cachedRoute("health"), (_req: Request, res: Response) => {
   const config = getConfig();
   res.json({
     status: "ok",
@@ -44,44 +27,20 @@ router.get("/", (_req: Request, res: Response) => {
   });
 });
 
-/**
- * @openapi
- * /health/deep:
- *   get:
- *     summary: Deep health check
- *     operationId: getDeepHealth
- *     description: >
- *       Checks reachability of external dependencies (Venice AI and Stellar
- *       Horizon) with a 5 second timeout each. Always returns 200 —
- *       individual dependency failures are reported in the response body,
- *       not via HTTP status.
- *     tags: [Health]
- *     security: []
- *     responses:
- *       200:
- *         description: Dependency status report
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 venice:
- *                   type: string
- *                   enum: [ok, unreachable]
- *                 horizon:
- *                   type: string
- *                   enum: [ok, unreachable]
- */
-router.get("/deep", async (_req: Request, res: Response) => {
+router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) => {
   const config = getConfig();
-  const horizonUrl = config.STELLAR_HORIZON_URL;
-
   const [veniceStatus, horizonStatus] = await Promise.all([
     checkVenice(config.VENICE_API_KEY),
-    checkHorizon(horizonUrl),
+    checkHorizon(config.STELLAR_HORIZON_URL),
   ]);
 
-  res.json({
+  const allOk = veniceStatus === "ok" && horizonStatus === "ok";
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? "ok" : "degraded",
+    services: {
+      venice: veniceStatus,
+      horizon: horizonStatus,
+    },
     venice: veniceStatus,
     horizon: horizonStatus,
   });
@@ -100,8 +59,8 @@ router.get("/ready", async (_req: Request, res: Response) => {
     try {
       const taskDb = (tasksModule.getTaskDb as Function)();
       taskDb.prepare("SELECT 1").get();
-    } catch (error) {
-      (checks as any).tasks = "error";
+    } catch {
+      checks.tasks = "error";
     } finally {
       (tasksModule.closeTaskDb as Function)();
     }
@@ -109,8 +68,8 @@ router.get("/ready", async (_req: Request, res: Response) => {
     try {
       const paymentDb = (paymentsModule.getDb as Function)();
       paymentDb.prepare("SELECT 1").get();
-    } catch (error) {
-      (checks as any).payments = "error";
+    } catch {
+      checks.payments = "error";
     } finally {
       (paymentsModule.closeDb as Function)();
     }
@@ -123,50 +82,27 @@ router.get("/ready", async (_req: Request, res: Response) => {
   res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
 });
 
-/**
- * @openapi
- * /health/traces/{correlationId}:
- *   get:
- *     summary: Retrieve distributed trace by correlation ID
- *     operationId: getTrace
- *     description: >
- *       Returns the in-memory trace for the given correlation ID, including all
- *       recorded spans with their timestamps, durations, and statuses.
- *       Returns 404 when no spans have been recorded for the ID.
- *     tags: [Health]
- *     security: []
- *     parameters:
- *       - in: path
- *         name: correlationId
- *         required: true
- *         schema:
- *           type: string
- *         description: The UUID v4 correlation ID propagated via X-Correlation-ID header
- *     responses:
- *       200:
- *         description: Trace found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 correlationId:
- *                   type: string
- *                 spans:
- *                   type: array
- *                 startedAt:
- *                   type: string
- *                 endedAt:
- *                   type: string
- *                 totalDurationMs:
- *                   type: number
- *       404:
- *         description: No trace found for the given correlation ID
- */
-router.get("/traces/:correlationId", (req: Request, res: Response) => {
-  const trace = tracingService.getTrace(req.params.correlationId);
+router.get("/dashboard", adminAuthMiddleware, async (req: Request, res: Response) => {
+  try {
+    const dashboard = await metricsService.getDashboard(req.query.refresh === "true");
+    res.json(dashboard);
+  } catch (error) {
+    res.status(500).json({
+      status: "unhealthy",
+      error: "Failed to collect metrics",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+router.get("/traces/:traceId", (req: Request, res: Response) => {
+  const trace = tracingService.getTrace(req.params.traceId);
   if (!trace) {
-    res.status(404).json({ error: "Trace not found", correlationId: req.params.correlationId });
+    res.status(404).json({
+      error: "Trace not found",
+      traceId: req.params.traceId,
+      correlationId: req.params.traceId,
+    });
     return;
   }
   res.json(trace);
@@ -174,14 +110,14 @@ router.get("/traces/:correlationId", (req: Request, res: Response) => {
 
 async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch("https://api.venice.ai/api/v1/models", {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch("https://api.venice.ai/api/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: ctrl.signal,
+      signal: controller.signal,
     });
-    clearTimeout(t);
-    return res.ok ? "ok" : "unreachable";
+    clearTimeout(timeout);
+    return response.ok || response.status === 401 ? "ok" : "unreachable";
   } catch {
     return "unreachable";
   }
@@ -189,14 +125,15 @@ async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
 
 async function checkHorizon(url: string): Promise<"ok" | "unreachable"> {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(t);
-    return res.ok ? "ok" : "unreachable";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    return response.ok ? "ok" : "unreachable";
   } catch {
     return "unreachable";
   }
 }
 
 export { router as healthRouter };
+export default router;

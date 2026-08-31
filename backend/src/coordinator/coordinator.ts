@@ -14,6 +14,7 @@ import type { QualityScore } from '../services/qualityScorer.types';
 import { createLogger } from '../utils/logger';
 import { tracingService } from '../services/tracing';
 import type { Job } from '../queue/jobStore';
+import { selectFallbackAgent } from './dispatch';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -254,7 +255,7 @@ export class Coordinator {
               }
             })
             .catch(err => {
-              console.error('[coordinator] runNode threw unexpectedly:', err);
+              this.log.error({ err, taskId, nodeId: node.nodeId }, "runNode threw unexpectedly");
               failed.add(node.nodeId);
             })
             .finally(() => {
@@ -521,12 +522,23 @@ export class Coordinator {
       }
     }
 
-    const fallback = agents.find(agent => agent.id !== primary.id);
+    const fallback = selectFallbackAgent(agents, primary.id) ?? agents.find(agent => agent.id !== primary.id);
     if (fallback) {
       this.log.warn(
-        { taskId, nodeId: node.nodeId, primaryId: primary.id, fallbackId: fallback.id },
+        { taskId, nodeId: node.nodeId, primaryId: primary.id, fallbackId: fallback.id, correlationId: this.correlationId },
         'falling back to alternative agent'
       );
+      this.bus.emit(taskId, {
+        type: 'AgentFailedOver',
+        taskId,
+        nodeId: node.nodeId,
+        timestamp: now(),
+        payload: {
+          fromAgentId: primary.id,
+          toAgentId: fallback.id,
+          correlationId: this.correlationId,
+        },
+      });
       try {
         return { agentId: fallback.id, result: await this.dispatchNode(node, context, fallback) };
       } catch (err) {
