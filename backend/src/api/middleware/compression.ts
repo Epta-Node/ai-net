@@ -22,6 +22,7 @@
 import compression from "compression";
 import { createBrotliCompress, constants as zlibConstants } from "zlib";
 import type { Request, Response, NextFunction, RequestHandler } from "express";
+import { getConfig } from "../../config";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -75,10 +76,7 @@ function brotliMiddleware(): RequestHandler {
       const ct = res.getHeader("content-type") as string | undefined;
       if (shouldSkipContentType(ct)) return false;
 
-      const level = Math.min(
-        Math.max(Number(process.env.COMPRESSION_LEVEL ?? 6), 1),
-        11, // Brotli max quality
-      );
+      const level = Math.min(Math.max(getConfig().COMPRESSION_LEVEL, 1), 11);
       brotliStream = createBrotliCompress({
         params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level },
       });
@@ -140,9 +138,10 @@ export interface CompressionOptions {
 export function compressionMiddleware(
   opts: CompressionOptions = {},
 ): RequestHandler[] {
-  const threshold = opts.threshold ?? COMPRESSION_THRESHOLD;
-  const level = opts.level ?? Math.min(Math.max(Number(process.env.COMPRESSION_LEVEL ?? 6), 1), 9);
-  const enableBrotli = opts.enableBrotli ?? true;
+  const config = getConfig();
+  const threshold = opts.threshold ?? config.COMPRESSION_THRESHOLD;
+  const level = opts.level ?? Math.min(Math.max(config.COMPRESSION_LEVEL, 1), 9);
+  const enableBrotli = opts.enableBrotli ?? config.COMPRESSION_ENABLE_BROTLI;
 
   const gzipHandler = compression({
     threshold,

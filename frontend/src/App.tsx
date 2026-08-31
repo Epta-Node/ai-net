@@ -1,11 +1,13 @@
 import React from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { RouteProgressProvider } from './context/RouteProgressContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
@@ -17,73 +19,99 @@ import RendererDemoPage from './pages/RendererDemoPage'
 import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import './components/common/Toast.css'
 
 /**
- * Everything that needs router context lives here, so `<Router>` (mounted by
- * `App` below) is already in place before `useCommandPalette` calls
- * `useNavigate`.
+ * Everything below the router.
+ *
+ * `/` is the public landing page and renders bare. **Every other route** —
+ * including 404 — renders inside a single `<AppShell>`, so the top nav,
+ * sidebar, drawer, and breadcrumb are assembled once rather than per route.
+ *
+ * The command palette is mounted here, once, outside the route tree: it is
+ * reachable with Ctrl/Cmd+K from any page and must not remount on navigation.
+ * `useCommandPalette` calls `useNavigate`, so this component has to sit inside
+ * `<Router>` rather than beside it.
  */
-const AppContent: React.FC = () => {
-  return (
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
-  )
-}
-
-// Lives INSIDE <Router>: useCommandPalette() calls useNavigate(), which
-// throws the "may be used only in the context of a <Router>" invariant when
-// rendered above it.
 const RoutedContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
+  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
 
   return (
     <>
       <Routes>
         <Route path="/" element={<LandingPage />} />
-        <Route path="/*" element={
-          <AppShell>
-            <Routes>
-              <Route path="/dashboard" element={
-                <ProtectedRoute><DashboardPage /></ProtectedRoute>
-              } />
-              <Route path="/wallet" element={
-                <ProtectedRoute><WalletPage /></ProtectedRoute>
-              } />
-              <Route path="/agents" element={
-                <ProtectedRoute><AgentsPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/new" element={
-                <ProtectedRoute><NewTaskPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/history" element={
-                <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/:id" element={
-                <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
-              } />
-              {import.meta.env.DEV && (
-                <Route path="/renderer-demo" element={<RendererDemoPage />} />
-              )}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </AppShell>
-        } />
-        <Route path="*" element={<NotFoundPage />} />
+        <Route
+          path="/*"
+          element={
+            <AppShell>
+              <Routes>
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/wallet"
+                  element={
+                    <ProtectedRoute>
+                      <WalletPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/agents"
+                  element={
+                    <ProtectedRoute>
+                      <AgentsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/new"
+                  element={
+                    <ProtectedRoute>
+                      <NewTaskPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/history"
+                  element={
+                    <ProtectedRoute>
+                      <TaskHistoryPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/:id"
+                  element={
+                    <ProtectedRoute>
+                      <TaskDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+                {import.meta.env.DEV && (
+                  <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                )}
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </AppShell>
+          }
+        />
       </Routes>
+
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
         onSearch={search}
         recentSearches={recentSearches}
-        onRecentSearchClick={(query) => {
-          // Trigger search with the recent query
-          search(query)
-        }}
+        onRecentSearchClick={runRecentSearch}
       />
     </>
   )
@@ -96,9 +124,11 @@ const App: React.FC = () => {
         <ThemeProvider>
           <WalletProvider>
             <ToastProvider>
-              <Router>
-                <AppContent />
-              </Router>
+              <NotificationProvider>
+                <Router>
+                  <RoutedContent />
+                </Router>
+              </NotificationProvider>
             </ToastProvider>
           </WalletProvider>
         </ThemeProvider>

@@ -34,10 +34,7 @@ describe('TopNav Theme Toggle', () => {
     )
 
     const toggle = screen.getByRole('switch')
-    // default is dark
-    expect(localStorage.getItem('theme-mode')).toBe('dark')
-
-    await act(async () => { fireEvent.click(toggle) })
+    // default is system
     expect(localStorage.getItem('theme-mode')).toBe('system')
 
     await act(async () => { fireEvent.click(toggle) })
@@ -45,5 +42,8 @@ describe('TopNav Theme Toggle', () => {
 
     await act(async () => { fireEvent.click(toggle) })
     expect(localStorage.getItem('theme-mode')).toBe('dark')
+
+    await act(async () => { fireEvent.click(toggle) })
+    expect(localStorage.getItem('theme-mode')).toBe('system')
   })
 })

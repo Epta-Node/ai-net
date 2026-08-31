@@ -9,7 +9,7 @@ import { aggregateDailySpend, aggregateByCounterparty } from '../../hooks/useTra
 import { formatDate } from '../../utils/format'
 import styles from './PaymentChart.module.css'
 
-const SLICE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4', '#a855f7', '#ef4444', '#64748b']
+const SLICE_COLORS = ['var(--accent-secondary)', 'var(--status-success)', 'var(--status-warning)', 'var(--accent-text-strong)', 'var(--accent-info)', 'var(--accent)', 'var(--status-danger)', 'var(--text-muted)']
 
 interface PaymentChartProps {
   transactions: TransactionEvent[]
@@ -52,7 +52,7 @@ export function PaymentChart({ transactions }: PaymentChartProps) {
                 formatter={(value: number) => [`${value.toFixed(7)} XLM`, t('wallet.chart.spent')]}
                 labelFormatter={(value: string) => formatDate(value, i18n.language)}
               />
-              <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="total" fill="var(--accent-secondary)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
