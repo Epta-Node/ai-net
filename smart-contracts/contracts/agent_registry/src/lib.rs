@@ -32,16 +32,22 @@
 //! Callers inspect the returned `Vec<BatchResult>` / `Vec<VoidBatchResult>`:
 //! all-success means the batch committed; any failure means **no** writes occurred.
 
-pub mod shared_exit_codes;
+pub mod audit;
+pub mod bridge;
 mod errors;
 mod events;
+pub mod shared_exit_codes;
+mod types;
 mod upgrade;
+
+pub use errors::Error;
+pub use types::*;
 
 #[cfg(test)]
 mod upgrade_tests;
 
-pub use upgrade::*;
 pub use shared_exit_codes::CommonExitCode;
+pub use upgrade::*;
 
 use events::{
     AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, AnalyticsRecordedEvent,
@@ -49,7 +55,6 @@ use events::{
     OperationCancelled, OperationExecuted, OperationProposed, RegistryInitializedEvent,
     SlaBonusAwardedEvent, SlaSetEvent, SlaViolationDetectedEvent,
 };
-pub use types::Attestation;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
     TryFromVal, Val, Vec,
@@ -278,6 +283,18 @@ pub enum DataKey {
     // Pagination keys (issue #339)
     AgentByIndex(u32),
     RegistrationSequence,
+    // Cross-chain bridging keys (issue #259)
+    /// Bridge proof for an agent on one target chain.
+    BridgeProof(Symbol, TargetChain),
+    // Security audit trail keys (issue #261)
+    /// One audit entry, keyed by sequence number.
+    AuditEntry(u64),
+    /// Next audit sequence number to allocate.
+    AuditSequence,
+    /// Thresholds for logging and anomaly detection.
+    AuditConfig,
+    /// Rolling operation counter for one caller.
+    CallerActivity(Address),
 }
 
 /// Per-item outcome for batch registration (`Ok(agent_id)` / `Err(code)`).
@@ -541,11 +558,12 @@ impl AgentRegistryContract {
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("adm_chngd")),
             AdminChangedEvent {
-                old_admin,
+                old_admin: old_admin.clone(),
                 new_admin,
             },
         );
 
+        audit::record(&env, &old_admin, symbol_short!("setadmin"), None, 0);
         Ok(())
     }
 
@@ -860,18 +878,20 @@ impl AgentRegistryContract {
     }
 
     pub fn pause(env: Env) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         env.events()
             .publish((symbol_short!("registry"), symbol_short!("paused")), ());
+        audit::record(&env, &admin, symbol_short!("pause"), None, 0);
         Ok(())
     }
 
     pub fn unpause(env: Env) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         env.events()
             .publish((symbol_short!("registry"), symbol_short!("unpaused")), ());
+        audit::record(&env, &admin, symbol_short!("unpause"), None, 0);
         Ok(())
     }
 
@@ -887,26 +907,28 @@ impl AgentRegistryContract {
     }
 
     pub fn freeze_agent(env: Env, agent_id: Symbol) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .persistent()
             .set(&DataKey::FrozenAgent(agent_id.clone()), &true);
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("freeze")),
-            agent_id,
+            agent_id.clone(),
         );
+        audit::record(&env, &admin, symbol_short!("freeze"), Some(agent_id), 0);
         Ok(())
     }
 
     pub fn unfreeze_agent(env: Env, agent_id: Symbol) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .persistent()
             .set(&DataKey::FrozenAgent(agent_id.clone()), &false);
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("unfreeze")),
-            agent_id,
+            agent_id.clone(),
         );
+        audit::record(&env, &admin, symbol_short!("unfreeze"), Some(agent_id), 0);
         Ok(())
     }
 
@@ -1577,13 +1599,14 @@ impl AgentRegistryContract {
 
     /// Admin: set the minimum bond required for agent registration (stroops).
     pub fn set_min_bond(env: Env, amount_stroops: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::MinBond, &amount_stroops);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("minbond"), None, amount_stroops);
         Ok(())
     }
 
@@ -1598,7 +1621,7 @@ impl AgentRegistryContract {
     /// If the penalty equals or exceeds the remaining bond the bond becomes 0.
     /// Emits a [`BondSlashed`][events::BondSlashed] event.
     pub fn slash_bond(env: Env, agent_id: Symbol, penalty_stroops: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
 
         let agent_key = DataKey::Agent(agent_id.clone());
         let mut record: AgentRecord = env
@@ -1622,10 +1645,17 @@ impl AgentRegistryContract {
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("bond_slsh")),
             events::BondSlashed {
-                agent_id,
+                agent_id: agent_id.clone(),
                 penalty_stroops: actual_penalty,
                 remaining_stroops: remaining,
             },
+        );
+        audit::record(
+            &env,
+            &admin,
+            symbol_short!("slashbond"),
+            Some(agent_id),
+            actual_penalty,
         );
         Ok(())
     }
@@ -1697,10 +1727,11 @@ impl AgentRegistryContract {
     /// Configure how many ledger sequences newly reported errors live for
     /// before becoming eligible for `cleanup_expired_errors`.
     pub fn set_error_ttl(env: Env, ttl_ledgers: u64) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::ErrorTTL, &ttl_ledgers);
+        audit::record(&env, &admin, symbol_short!("errttl"), None, 0);
         Ok(())
     }
 
@@ -1873,11 +1904,12 @@ impl AgentRegistryContract {
 
     /// Override empirical gas parameters stored in instance config.
     pub fn set_gas_config(env: Env, config: GasConfig) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::GasConfig, &config);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("gascfg"), None, 0);
         Ok(())
     }
 
@@ -1898,13 +1930,14 @@ impl AgentRegistryContract {
 
     /// Update storage configuration (admin only).
     pub fn set_storage_config(env: Env, config: StorageConfig) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::StorageConfig, &config);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("storecfg"), None, 0);
         Ok(())
     }
 
@@ -2263,6 +2296,145 @@ impl AgentRegistryContract {
         Some((sla, compliance))
     }
 
+    // ── Cross-chain identity bridging (issue #259) ───────────────────────────
+
+    /// Mint a time-limited proof that `agent_id` is controlled by
+    /// `stellar_pubkey`, for use on `target_chain`.
+    ///
+    /// The agent's registered owner must authorise the call, and `signature`
+    /// must be `stellar_pubkey`'s ed25519 signature over the canonical message
+    /// described in `bridge::canonical_message`. Supplying `0` for `ttl_secs`
+    /// uses the 24-hour default; the ceiling is 30 days.
+    ///
+    /// Re-bridging the same agent to the same chain replaces the previous
+    /// proof, which is how a proof is rotated.
+    pub fn bridge_identity(
+        env: Env,
+        agent_id: Symbol,
+        stellar_pubkey: BytesN<32>,
+        target_chain: TargetChain,
+        ttl_secs: u64,
+        signature: BytesN<64>,
+    ) -> Result<BridgeProof, Error> {
+        require_not_paused(&env)?;
+        require_not_frozen(&env, &agent_id)?;
+
+        let record: AgentRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Agent(agent_id.clone()))
+            .ok_or(Error::NotFound)?;
+        record.owner.require_auth();
+
+        let proof = bridge::issue(
+            &env,
+            agent_id.clone(),
+            stellar_pubkey,
+            target_chain,
+            ttl_secs,
+            signature,
+        )?;
+
+        audit::record(
+            &env,
+            &record.owner,
+            symbol_short!("bridge"),
+            Some(agent_id),
+            0,
+        );
+
+        Ok(proof)
+    }
+
+    /// Check a presented bridge proof against the registry's record.
+    ///
+    /// Returns `Ok(())` only when the proof matches field for field and has not
+    /// expired. Every attempt, successful or not, emits a
+    /// `BridgeProofVerifiedEvent`.
+    pub fn verify_bridge_proof(env: Env, proof: BridgeProof) -> Result<(), Error> {
+        bridge::verify(&env, &proof)
+    }
+
+    /// Read the stored bridge proof for an agent and chain, if any.
+    pub fn get_bridge_proof(
+        env: Env,
+        agent_id: Symbol,
+        target_chain: TargetChain,
+    ) -> Option<BridgeProof> {
+        bridge::get(&env, agent_id, target_chain)
+    }
+
+    /// Revoke a bridge proof before its expiry.
+    ///
+    /// `caller` must be either the agent's owner or the registry admin; the
+    /// admin is allowed so a compromised agent key cannot strand a live proof.
+    /// Soroban cannot attempt an authorisation and fall back, so the caller is
+    /// named explicitly and checked before `require_auth`.
+    ///
+    /// This only clears the registry's record: a verifier checking the
+    /// signature offline cannot learn about the revocation, which is why proof
+    /// lifetimes are capped at `bridge::MAX_BRIDGE_TTL_SECS`.
+    pub fn revoke_bridge_proof(
+        env: Env,
+        caller: Address,
+        agent_id: Symbol,
+        target_chain: TargetChain,
+    ) -> Result<(), Error> {
+        let record: AgentRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Agent(agent_id.clone()))
+            .ok_or(Error::NotFound)?;
+
+        let is_admin = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Admin)
+            .is_some_and(|admin| admin == caller);
+
+        if caller != record.owner && !is_admin {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        bridge::revoke(&env, agent_id.clone(), target_chain, caller.clone())?;
+        audit::record(&env, &caller, symbol_short!("unbridge"), Some(agent_id), 0);
+        Ok(())
+    }
+
+    // ── Security audit trail (issue #261) ────────────────────────────────────
+
+    /// Read a page of audit entries, newest first.
+    ///
+    /// Pass `None` for `before_seq` to start at the newest entry, then the
+    /// returned `next_cursor` to continue. `limit` of `0` uses the default page
+    /// size; anything above `MAX_AUDIT_PAGE_SIZE` is rejected.
+    pub fn get_audit_log(
+        env: Env,
+        before_seq: Option<u64>,
+        limit: u32,
+    ) -> Result<AuditPage, Error> {
+        audit::page(&env, before_seq, limit)
+    }
+
+    /// Total audit entries ever written, including any whose TTL has lapsed.
+    pub fn get_audit_total(env: Env) -> u64 {
+        audit::audit_total(&env)
+    }
+
+    /// Current audit thresholds.
+    pub fn get_audit_config(env: Env) -> AuditConfig {
+        audit::audit_config(&env)
+    }
+
+    /// Replace the audit thresholds. Admin only.
+    pub fn set_audit_config(env: Env, config: AuditConfig) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        audit::set_config(&env, config)?;
+        audit::record(&env, &admin, symbol_short!("auditcfg"), None, 0);
+        Ok(())
+    }
+
     /// Map a raw error code from any ai-net contract to its standardized
     /// [`CommonExitCode`] equivalent.
     ///
@@ -2305,6 +2477,10 @@ fn get_metadata_u32(
     default_val
 }
 
+#[cfg(test)]
+mod audit_tests;
+#[cfg(test)]
+mod bridge_tests;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

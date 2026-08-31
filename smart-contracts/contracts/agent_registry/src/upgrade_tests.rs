@@ -1,6 +1,7 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod upgrade_tests {
-    use super::*;
+    use crate::*;
     use soroban_sdk::{
         testutils::{Address as _, Events as _, Ledger as _},
         Address, BytesN, Env, String,
@@ -34,7 +35,7 @@ mod upgrade_tests {
 
     #[test]
     fn test_is_upgradeable() {
-        let (env, client, _admin) = setup_upgrade_test();
+        let (_env, client, _admin) = setup_upgrade_test();
         assert!(client.is_upgradeable());
     }
 
@@ -50,7 +51,7 @@ mod upgrade_tests {
 
         // Check event was emitted
         let events = env.events().all();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
         // Would check for specific UpgradeManagerSetEvent in real implementation
     }
 
@@ -132,7 +133,7 @@ mod upgrade_tests {
 
         // Check event was emitted
         let events = env.events().all();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
     }
 
     #[test]
@@ -162,7 +163,7 @@ mod upgrade_tests {
         // Major version changes should be marked as breaking
         // In a more sophisticated implementation, this would be true
         // For now, we just check that the plan was generated
-        assert!(migration_plan.data_transformations.len() > 0);
+        assert!(!migration_plan.data_transformations.is_empty());
     }
 
     #[test]
@@ -194,7 +195,7 @@ mod upgrade_tests {
 
         // Check event was emitted
         let events = env.events().all();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
     }
 
     #[test]
@@ -245,7 +246,7 @@ mod upgrade_tests {
 
         // Test compatible upgrade
         let compatible_version = String::from_str(&env, "1.1.0");
-        let result = client.check_upgrade_compatibility(&compatible_version);
+        let result = client.try_check_upgrade_compatibility(&compatible_version);
         assert!(result.is_ok());
 
         let compatibility = result.unwrap();
@@ -258,12 +259,12 @@ mod upgrade_tests {
 
         // Test incompatible downgrade
         let incompatible_version = String::from_str(&env, "0.9.0");
-        let result = client.check_upgrade_compatibility(&incompatible_version);
+        let result = client.try_check_upgrade_compatibility(&incompatible_version);
         assert!(result.is_ok());
 
         let compatibility = result.unwrap();
         assert!(!compatibility.is_compatible);
-        assert!(compatibility.compatibility_issues.len() > 0);
+        assert!(!compatibility.compatibility_issues.is_empty());
     }
 
     #[test]
@@ -464,7 +465,7 @@ mod upgrade_tests {
 
         // Test same version
         let same_version = String::from_str(&env, "1.0.0");
-        let result = client.check_upgrade_compatibility(&same_version);
+        let _result = client.check_upgrade_compatibility(&same_version);
         // Should handle same version gracefully
 
         // Test malformed version
@@ -475,10 +476,10 @@ mod upgrade_tests {
 
         // Test very large version jump
         let future_version = String::from_str(&env, "99.0.0");
-        let result = client.check_upgrade_compatibility(&future_version);
-        if result.is_ok() {
-            let compatibility = result.unwrap();
-            // Large jumps might be incompatible
+        let result = client.try_check_upgrade_compatibility(&future_version);
+        if let Ok(Ok(compatibility)) = result {
+            // A large jump is still reported, but may be flagged incompatible.
+            let _ = compatibility.is_compatible;
         }
     }
 }
@@ -489,7 +490,7 @@ mod upgrade_tests {
 mod upgrade_integration_tests {
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, Ledger as _},
+        testutils::{Address as _, Events as _},
         Address, BytesN, Env, String, Vec,
     };
     use upgrade_manager::{MigrationPlan, UpgradeManager, UpgradeManagerClient};
@@ -558,12 +559,12 @@ mod upgrade_integration_tests {
         assert!(result.is_ok());
 
         // Validate proposal
-        let gas_estimate = upgrade_mgr.validate_proposal();
+        let gas_estimate = upgrade_mgr.try_validate_proposal();
         assert!(gas_estimate.is_ok());
         assert!(gas_estimate.unwrap() > 0);
 
         // Execute upgrade
-        let result = upgrade_mgr.execute_upgrade();
+        let result = upgrade_mgr.try_execute_upgrade();
         assert!(result.is_ok());
 
         // Verify upgrade was applied
@@ -629,6 +630,6 @@ mod upgrade_integration_tests {
         // For now, just verify the call succeeded and events were emitted
 
         let events = env.events().all();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
     }
 }

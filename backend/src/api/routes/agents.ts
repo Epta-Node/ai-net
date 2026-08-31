@@ -1,7 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
-import { RegisterAgentSchema } from "../schemas/agent.schema";
 import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
 import { NotFoundError, ValidationError, UnauthorizedError, AppError } from "../../errors";
@@ -327,7 +326,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   router.post("/register", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const correlationId = res.locals.correlationId as string | undefined;
-      const parse = RegisterAgentSchema.safeParse(req.body);
+      const parse = registerAgentSchema.safeParse(req.body);
       if (!parse.success) {
         throw new ValidationError(
           "Invalid agent registration data",

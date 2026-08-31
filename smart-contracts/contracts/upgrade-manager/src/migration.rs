@@ -180,7 +180,7 @@ fn execute_post_migration_validation(env: &Env, validation: &String) -> Result<(
 
 // ─── Specific Migration Functions ────────────────────────────────────────────
 
-fn migrate_agent_records(env: &Env) -> Result<u32, UpgradeError> {
+fn migrate_agent_records(_env: &Env) -> Result<u32, UpgradeError> {
     // Simulate migrating agent records
     // In a real implementation, this would:
     // 1. Read existing agent records
@@ -192,7 +192,7 @@ fn migrate_agent_records(env: &Env) -> Result<u32, UpgradeError> {
     Ok(10)
 }
 
-fn update_storage_keys(env: &Env) -> Result<u32, UpgradeError> {
+fn update_storage_keys(_env: &Env) -> Result<u32, UpgradeError> {
     // Simulate updating storage key formats
     // This might involve:
     // 1. Reading data from old key format
@@ -203,7 +203,7 @@ fn update_storage_keys(env: &Env) -> Result<u32, UpgradeError> {
     Ok(25)
 }
 
-fn convert_metadata_format(env: &Env) -> Result<u32, UpgradeError> {
+fn convert_metadata_format(_env: &Env) -> Result<u32, UpgradeError> {
     // Simulate converting metadata formats
     // This could involve:
     // 1. Reading existing metadata
@@ -215,7 +215,7 @@ fn convert_metadata_format(env: &Env) -> Result<u32, UpgradeError> {
     Ok(15)
 }
 
-fn rebuild_indexes(env: &Env) -> Result<u32, UpgradeError> {
+fn rebuild_indexes(_env: &Env) -> Result<u32, UpgradeError> {
     // Simulate rebuilding capability indexes
     // This might involve:
     // 1. Clearing existing indexes
@@ -228,17 +228,18 @@ fn rebuild_indexes(env: &Env) -> Result<u32, UpgradeError> {
 }
 
 /// Helper function to check if a migration is reversible
+#[allow(dead_code)]
 pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
     // Check if all transformations in the plan are reversible
     for transformation in migration_plan.data_transformations.iter() {
         let transform_str = transformation.to_string();
 
         // These transformations are considered irreversible
-        match transform_str.as_str() {
-            "delete_deprecated_data" => return false,
-            "compress_storage" => return false,
-            "merge_duplicate_records" => return false,
-            _ => {} // Most transformations are reversible
+        if str_eq(&transformation, "delete_deprecated_data")
+            || str_eq(&transformation, "compress_storage")
+            || str_eq(&transformation, "merge_duplicate_records")
+        {
+            return false;
         }
     }
 
@@ -246,6 +247,7 @@ pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
 }
 
 /// Helper function to estimate migration complexity
+#[allow(dead_code)]
 pub fn estimate_migration_complexity(migration_plan: &MigrationPlan) -> u32 {
     let mut complexity = 0u32;
 

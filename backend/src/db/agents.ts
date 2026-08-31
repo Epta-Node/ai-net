@@ -34,12 +34,26 @@ export function getAgentDb(dbPath?: string): Database.Database {
     _agentDb = new Database(filePath);
     migrateToLatest(_agentDb, MIGRATIONS_DIR);
   }
-  return _agentDb;
+  return _agentPool;
+}
+
+/**
+ * The writer connection, for the synchronous `createAgentDb` API.
+ *
+ * New code should prefer `getAgentPool().read(...)`.
+ */
+export function getAgentDb(dbPath?: string): Database.Database {
+  return getAgentPool(dbPath).writer;
+}
+
+/** The agent pool if one is open, else null. Used by the metrics endpoint. */
+export function currentAgentPool(): SqlitePool | null {
+  return _agentPool && !_agentPool.closed ? _agentPool : null;
 }
 
 export function closeAgentDb(): void {
-  _agentDb?.close();
-  _agentDb = null;
+  void _agentPool?.close();
+  _agentPool = null;
 }
 
 export interface AgentDb {

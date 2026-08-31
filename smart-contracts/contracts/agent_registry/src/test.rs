@@ -456,6 +456,8 @@ fn set_gas_config_requires_admin_auth() {
         resolve_error_marginal: 15_000,
         slash_bond: 30_000,
         deregister_with_bond: 40_000,
+        cleanup_error: 10_000,
+        cleanup_error_marginal: 5_000,
     };
 
     env.mock_auths(&[]);
@@ -805,6 +807,8 @@ fn gas_benchmark_custom_config_used_by_estimate_gas() {
         resolve_error_marginal: 20_000,
         slash_bond: GAS_SLASH_BOND,
         deregister_with_bond: GAS_DEREGISTER_WITH_BOND,
+        cleanup_error: GAS_CLEANUP_ERROR,
+        cleanup_error_marginal: GAS_CLEANUP_ERROR_MARGINAL,
     };
     client.set_gas_config(&custom);
 
@@ -861,7 +865,8 @@ fn set_admin_emits_admin_changed_event() {
     let (env, client, _) = setup_with_admin();
     let new_admin = Address::generate(&env);
     client.set_admin(&new_admin);
-    assert_eq!(env.events().all().len(), 1);
+    // Admin operations also write the audit trail added for issue #261, so the
+    // handover event is no longer the only one emitted. It is still first.
     assert_event_topics(
         &env,
         0,
@@ -1974,7 +1979,7 @@ fn sla_violation_penalty_slashes_bond() {
 
 #[test]
 fn test_get_agents_empty_registry() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
     let page = client.get_agents(&None, &None);
     assert_eq!(page.agents.len(), 0);
     assert_eq!(page.next_cursor, None);
@@ -2113,7 +2118,7 @@ fn test_get_agents_batch_registered_pagination() {
 
 #[test]
 fn error_mapper_returns_common_codes_for_reserved_range() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Common codes 1..=15 should map to their CommonExitCode variants
     for raw in 1..=15u32 {
@@ -2125,7 +2130,7 @@ fn error_mapper_returns_common_codes_for_reserved_range() {
 
 #[test]
 fn error_mapper_returns_none_for_contract_specific_codes() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Contract-specific codes outside 1..=15 should return None
     assert!(client.error_mapper(&0).is_none());
@@ -2136,7 +2141,7 @@ fn error_mapper_returns_none_for_contract_specific_codes() {
 
 #[test]
 fn error_mapper_propagation_consistency() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Simulate cross-contract error propagation: a contract returns
     // Error::NotFound (code 1), which maps to CommonExitCode::NotFound (code 1)
@@ -2151,4 +2156,3 @@ fn error_mapper_propagation_consistency() {
     assert!(common.is_some());
     assert_eq!(common.unwrap(), CommonExitCode::AlreadyExists);
 }
-

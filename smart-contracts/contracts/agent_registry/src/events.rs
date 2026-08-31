@@ -59,6 +59,72 @@ pub struct ContractUpgradedEvent {
     pub upgrade_ledger: u32,
 }
 
+/// Emitted when the registry's upgrade-manager address is set.
+///
+/// topic: `("upgrade", "mgr_set")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeManagerSetEvent {
+    /// Address of the registry contract the manager was set on.
+    pub contract: Address,
+    /// Address of the upgrade manager now responsible for this contract.
+    pub upgrade_manager: Address,
+    /// Admin that performed the change.
+    pub admin: Address,
+}
+
+/// Emitted after the pre-upgrade hook finishes its validation pass.
+///
+/// topic: `("upgrade", "pre_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreUpgradeHookEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded to.
+    pub version: String,
+    /// Human-readable outcome of each validation performed.
+    pub validation_results: Vec<String>,
+    /// Whether every validation passed.
+    pub success: bool,
+}
+
+/// Emitted after the post-upgrade hook finishes migrating data.
+///
+/// topic: `("upgrade", "post_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PostUpgradeHookEvent {
+    /// Address of the registry contract that was upgraded.
+    pub contract: Address,
+    /// Version the contract was upgraded from.
+    pub old_version: String,
+    /// Version the contract was upgraded to.
+    pub new_version: String,
+    /// Human-readable outcome of each migration step executed.
+    pub migration_results: Vec<String>,
+    /// Whether every migration step succeeded.
+    pub success: bool,
+}
+
+/// Emitted when an upgrade is initiated against the upgrade manager.
+///
+/// topic: `("upgrade", "initiated")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeInitiatedEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded from.
+    pub from_version: String,
+    /// Version the contract is being upgraded to.
+    pub to_version: String,
+    /// WASM hash of the new contract build.
+    pub wasm_hash: BytesN<32>,
+    /// Admin that initiated the upgrade.
+    pub initiator: Address,
+}
+
 /// Emitted when contract is rolled back to previous version
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -395,4 +461,90 @@ pub struct SlaBonusAwardedEvent {
     pub agent_id: Symbol,
     /// Reputation boost awarded.
     pub reputation_boost: u32,
+}
+
+// ─── Cross-chain bridging events (issue #259) ────────────────────────────────
+
+/// Emitted when an agent identity is bridged to another chain.
+///
+/// topic: `("registry", "bridged")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct IdentityBridgedEvent {
+    /// Agent whose identity was bridged.
+    pub agent_id: Symbol,
+    /// Chain the proof is scoped to.
+    pub target_chain: TargetChain,
+    /// Digest an off-chain verifier checks the signature against.
+    pub digest: BytesN<32>,
+    /// Timestamp after which the proof stops being valid.
+    pub expiry: u64,
+}
+
+/// Emitted on every bridge-proof verification attempt.
+///
+/// Emitted for failures too, so a target chain repeatedly presenting stale
+/// proofs is visible to an indexer.
+///
+/// topic: `("registry", "brdg_vrfy")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BridgeProofVerifiedEvent {
+    /// Agent the proof refers to.
+    pub agent_id: Symbol,
+    /// Chain the proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Whether the proof was accepted.
+    pub valid: bool,
+}
+
+/// Emitted when a bridge proof is revoked before its expiry.
+///
+/// topic: `("registry", "brdg_revk")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BridgeProofRevokedEvent {
+    /// Agent whose proof was revoked.
+    pub agent_id: Symbol,
+    /// Chain the revoked proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Address that performed the revocation.
+    pub revoked_by: Address,
+}
+
+// ─── Security audit trail events (issue #261) ────────────────────────────────
+
+/// Emitted for every privileged operation recorded in the audit log.
+///
+/// topic: `("registry", "audit")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AuditLogEntryEvent {
+    /// Sequence number of the entry written.
+    pub seq: u64,
+    /// Address that authorised the operation.
+    pub caller: Address,
+    /// Short operation name.
+    pub operation: Symbol,
+    /// Value moved, in stroops.
+    pub amount_stroops: i128,
+    /// Whether the operation crossed the high-value threshold.
+    pub high_value: bool,
+}
+
+/// Emitted when an operation trips one of the anomaly checks.
+///
+/// topic: `("registry", "anomaly")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnomalyDetectedEvent {
+    /// Audit entry the anomaly was detected on.
+    pub seq: u64,
+    /// Caller responsible for the operation.
+    pub caller: Address,
+    /// Which check fired.
+    pub kind: AnomalyKind,
+    /// Observed value: the operation count for a rate anomaly, the amount in
+    /// stroops for a high-value one, and zero for a first-seen caller.
+    pub observed: i128,
 }
