@@ -17,6 +17,7 @@ This document specifies repository instructions and conventions for developers a
 3. **Frontend Invariants**:
    - Responsive, token-driven modern design.
    - Proper skeleton loading states and graceful error boundaries.
+   - Follow [Frontend Architecture & Conventions](docs/FRONTEND_ARCHITECTURE.md) for folder structure, naming, and component patterns.
 
 ---
 

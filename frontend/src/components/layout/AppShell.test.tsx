@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, test, expect, beforeEach, vi } from 'vitest'
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest'
 import AppShell from './AppShell'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
@@ -159,9 +159,27 @@ describe('Sidebar collapsed state persistence', () => {
 // ─── Mobile drawer Escape key ─────────────────────────────────────────────
 
 describe('Mobile drawer keyboard', () => {
+  let origMatchMedia: typeof window.matchMedia
+
   beforeEach(() => {
-    Object.defineProperty(window, 'innerWidth', { writable: true, configurable: true, value: 375 })
-    window.dispatchEvent(new Event('resize'))
+    origMatchMedia = window.matchMedia
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: (query: string) => ({
+        matches: query.includes('max-width'),
+        media: query,
+        onchange: null,
+        addListener: () => {},
+        removeListener: () => {},
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        dispatchEvent: () => false,
+      }),
+    })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(window, 'matchMedia', { value: origMatchMedia })
   })
 
   test('closes drawer on Escape key', async () => {

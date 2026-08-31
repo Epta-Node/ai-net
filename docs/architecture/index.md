@@ -1,188 +1,160 @@
-# ai-net Architecture
+# 🏛️ AI-Net Architecture Specification & Technical Design
 
-This is the authoritative technical map for ai-net. It describes how the frontend, backend coordinator, and Stellar smart contracts fit together, how task state moves through the system, and where tests should cover each layer.
+This document serves as the **authoritative technical reference** for the AI-Net platform — a decentralized marketplace and multi-agent coordination protocol built on the **Stellar Network and Soroban Smart Contracts**.
 
-## System Context
+---
 
-```mermaid
-flowchart LR
-  User[User wallet and browser] --> Frontend[Frontend dashboard]
-  Frontend --> Backend[Backend API and coordinator]
-  Backend --> Queue[Task queue and workers]
-  Backend --> AgentDb[(Agent and task state)]
-  Queue --> Agents[Specialized agents]
-  Agents --> Venice[Venice AI]
-  Backend --> Stellar[Stellar RPC]
-  Stellar --> Contracts[Soroban contracts]
-  Contracts --> Registry[Agent registry]
-  Contracts --> Bidding[Agent bidding]
-  Contracts --> TaskStore[Task store]
-  Contracts --> Errors[Error registry and resolver]
-```
+## 1. System Context & Overview
 
-ai-net has three primary layers:
-
-| Layer | Responsibility | Primary source |
-|---|---|---|
-| Frontend | Task submission, task history, wallet flows, agent browsing, status/error surfaces | `frontend/src` |
-| Backend | API auth, rate limits, read-only incident controls, task orchestration, queue workers, reconciliation, audit logging | `backend/src` |
-| Smart contracts | Agent identity, bidding, task records, error metadata, upgrade-controlled on-chain state | `smart-contracts/contracts` |
-
-## Component Model
+AI-Net coordinates specialized autonomous AI agents (Coding, Research, Risk, Design, and Reporting) to execute complex, multi-step workflows. Stellar Soroban smart contracts provide trustless escrow, agent registration, quality scoring, and automated economic settlement.
 
 ```mermaid
-flowchart TB
-  subgraph UI[Frontend]
-    Submit[Task submission form]
-    Timeline[Task history and timeline]
-    Wallet[Wallet and payment views]
-    AgentsPage[Agent directory]
-  end
+graph TB
+    subgraph "External Clients"
+        User["Client / Web UI / SDK"]
+        Venice["Venice AI / LLM Providers"]
+        StellarRPC["Stellar Soroban RPC"]
+    end
 
-  subgraph API[Backend API]
-    Auth[Auth and admin auth]
-    ReadOnly[Global read-only gate]
-    Tasks[Task routes]
-    Admin[Admin incident routes]
-    Recon[Payment reconciliation]
-    Metrics[Health and metrics]
-  end
+    subgraph "AI-Net Platform"
+        FE["Next.js Web Frontend"]
+        API["Node.js / Express REST API"]
+        Coord["Coordinator Agent Engine"]
+        Queue["BullMQ / Redis Job Queue"]
+        DB[(PostgreSQL Event Store)]
+        Cache[(Redis Cache & Pub/Sub)]
+        Agents["Worker Agents (Code/Risk/Research/Design)"]
+    end
 
-  subgraph Runtime[Coordinator runtime]
-    Queue[Job queue]
-    Worker[Job worker]
-    Dispatch[Agent dispatch]
-    Payments[Payment release]
-    Audit[(Admin audit log)]
-  end
+    subgraph "Stellar Blockchain"
+        RegistrySC["Agent Registry Contract"]
+        PaymentSC["Escrow & Payment Contract"]
+    end
 
-  subgraph Chain[Soroban contracts]
-    AR[agent-registry]
-    AB[agent-bidding]
-    TS[task-store]
-    ER[error-registry]
-    EX[error-resolver]
-  end
-
-  Submit --> Tasks
-  Timeline --> Tasks
-  Wallet --> Recon
-  AgentsPage --> AR
-  Auth --> Tasks
-  ReadOnly --> Tasks
-  Admin --> ReadOnly
-  Admin --> Audit
-  Tasks --> Queue
-  Queue --> Worker
-  Worker --> Dispatch
-  Worker --> Payments
-  Payments --> Chain
-  Recon --> Chain
-  AR --> AB
-  TS --> ER
-  ER --> EX
+    User -->|HTTPS / WSS| FE
+    FE -->|REST / SSE| API
+    API -->|Enqueue Task| Queue
+    Queue -->|Dispatch| Coord
+    Coord -->|Subtask Execution| Agents
+    Agents -->|Inference API| Venice
+    Coord -->|State & Events| DB
+    API -->|Cache Read/Write| Cache
+    Coord -->|Lock / Release Escrow| PaymentSC
+    API -->|Verify Registration| RegistrySC
+    PaymentSC -->|RPC Query| StellarRPC
+    RegistrySC -->|RPC Query| StellarRPC
 ```
 
-## Task Lifecycle
+---
+
+## 2. Layer Responsibilities & Component Architecture
+
+AI-Net is partitioned into three decoupled layers:
 
 ```mermaid
-sequenceDiagram
-  participant U as User
-  participant F as Frontend
-  participant A as Backend API
-  participant Q as Job Queue
-  participant C as Coordinator Worker
-  participant R as Agent Registry
-  participant G as Specialized Agent
-  participant S as Soroban Contracts
+classDiagram
+    class PresentationLayer {
+        +Next.js App Router
+        +Tailwind CSS UI
+        +Freighter Wallet Connect
+        +SSE Live Task Streaming
+    }
+    class OrchestrationLayer {
+        +Express REST API
+        +Coordinator Engine
+        +Task Event Sourcing
+        +Agent Health Monitor
+        +Venice AI Client
+    }
+    class SettlementLayer {
+        +Soroban Agent Registry
+        +Soroban Payment Escrow
+        +Stellar Horizon / RPC
+    }
 
-  U->>F: Submit prompt, budget, agent preferences
-  F->>A: POST /api/tasks
-  A->>A: Validate auth, quota, prompt bounds, read-only state
-  A->>Q: Enqueue idempotent task job
-  A-->>F: Task id and DAG preview
-  Q->>C: Claim queued job
-  C->>R: Discover eligible agents
-  C->>G: Dispatch DAG node with context
-  G-->>C: Node result or typed failure
-  C->>S: Persist task/payment/error state
-  C->>Q: Mark job completed or retryable failure
-  F->>A: Poll or stream task status
-  A-->>F: Current task state and audit-safe errors
+    PresentationLayer ..> OrchestrationLayer : REST / SSE API
+    OrchestrationLayer ..> SettlementLayer : Soroban SDK / RPC
 ```
 
-Task state is authoritative in the backend queue/task database while execution is in flight. Contract records provide the durable on-chain settlement and registry truth. Reconciliation compares backend payment intent with observed Stellar state and repairs safe mismatches through explicit operator action.
+### 2.1 Layer Breakdown
 
-## Payment And Escrow Flow
+1. **Presentation Layer (`frontend/`)**:
+   - Next.js 14 App Router, TypeScript, Tailwind CSS, Lucide icons.
+   - Stellar wallet integration (Freighter) for transaction signing.
+   - Real-time task execution telemetry using Server-Sent Events (SSE).
+
+2. **Orchestration & Coordination Layer (`backend/`)**:
+   - Node.js, Express, TypeScript, and BullMQ for distributed job processing.
+   - **Coordinator Agent**: Decomposes natural-language user tasks into Directed Acyclic Graphs (DAGs) of subtasks.
+   - **Specialized Worker Agents**: Research (Venice AI), Coding, Risk Analysis, Architecture Design, and Reporting.
+   - **Persistence**: PostgreSQL event store with full transaction audit logs and Redis caching.
+
+3. **Decentralized Settlement Layer (`smart-contracts/`)**:
+   - Written in Rust for the Soroban Smart Contract platform.
+   - **Agent Registry (`agent_registry`)**: On-chain verified agent identities, endpoints, capabilities, and reputation scores.
+   - **Payment Escrow (`escrow_payment`)**: Trustless micro-payments in XLM/USDC with time-locked refund safety nets.
+
+---
+
+## 3. End-to-End Task Lifecycle Data Flow
+
+The following sequence diagram details the full lifecycle from user submission to Soroban smart contract escrow settlement:
 
 ```mermaid
 sequenceDiagram
-  participant U as User wallet
-  participant A as Backend coordinator
-  participant B as Agent bidding contract
-  participant T as Task store contract
-  participant E as Escrow or payment layer
-  participant G as Winning agent
+    autonumber
+    actor User as Client / User
+    participant FE as Web Frontend
+    participant API as Backend API
+    participant Coord as Coordinator Engine
+    participant Escrow as Soroban Escrow Contract
+    participant Agent as Specialized Worker Agent
+    participant Venice as Venice AI / LLM
+    participant DB as PostgreSQL DB
 
-  U->>A: Submit task with budget
-  A->>B: Create bidding auction
-  G->>B: Submit sealed bid
-  G->>B: Reveal bid after deadline
-  A->>B: Award winning bid
-  A->>E: Lock escrow for awarded price
-  A->>T: Record task and selected agent
-  G->>A: Complete assigned work
-  A->>T: Mark node/task completed
-  A->>E: Release escrow payment
-  E-->>G: Transfer funds
-  A->>A: Record reconciliation/audit state
+    User->>FE: Submit Task ("Audit Soroban Contract")
+    FE->>Escrow: Lock Budget in Escrow (XLM/USDC)
+    Escrow-->>FE: Escrow Locked (Tx Hash)
+    FE->>API: POST /api/v1/tasks (with Escrow Tx)
+    API->>DB: Record Task (Status: Queued)
+    API->>Coord: Dispatch Task to Queue
+
+    Coord->>Coord: Decompose into Subtasks (DAG)
+    Coord->>API: Query Active Agents for Capability ("risk")
+    API-->>Coord: Candidate Agent (Agent-001)
+
+    Coord->>Agent: Execute Subtask
+    Agent->>Venice: Model Inference (Static Analysis)
+    Venice-->>Agent: Analysis Results
+    Agent-->>Coord: Subtask Output Complete
+
+    Coord->>DB: Persist Intermediate & Final Artifacts
+    Coord->>Escrow: Invoke Release Funds to Agent-001
+    Escrow-->>Coord: Settlement Confirmed On-Chain
+
+    Coord->>API: Mark Task Completed
+    API-->>FE: Stream SSE Completion Event
+    FE-->>User: Display Audit Report & Verification Tx
 ```
 
-Every contract mutation must call `require_auth()` for the signer that owns the action. Singleton configuration such as admin and contract version belongs in instance storage. Entity records belong in persistent or temporary storage with TTL handling and bounded collection access.
+---
 
-## Incident Controls
+## 4. Multi-Tier Security & Testing Strategy
 
-Operators use `/api/admin/*` endpoints guarded by `ADMIN_API_KEY`.
+```mermaid
+graph LR
+    subgraph "Testing Tiers"
+        T1["Unit Tests (Jest / ts-jest)"]
+        T2["Integration Tests (Supertest / Mock RPC)"]
+        T3["Soroban Contract Tests (Rust Cargo Test)"]
+        T4["End-to-End Tests (Docker Compose Pipeline)"]
+    end
 
-| Control | Backend endpoint | Behavior |
-|---|---|---|
-| Global read-only | `PUT /api/admin/read-only` | Blocks `POST`, `PUT`, `PATCH`, and `DELETE` outside exempt admin/reconciliation paths |
-| Agent enablement | `GET /api/admin/agents`, `POST /api/admin/agents/:id/enable`, `POST /api/admin/agents/:id/disable` | Lists or flips agent availability without manual database edits |
-| Reconciliation | `POST /api/admin/reconciliation/run` | Runs payment reconciliation using the configured service |
-| Maintenance | `POST /api/admin/maintenance/vacuum`, `POST /api/admin/maintenance/backup` | Runs SQLite vacuum or backup over operational databases |
-| Audit export | `GET /api/admin/audit-log?format=json|csv` | Exports admin action history |
+    T1 --> T2
+    T2 --> T3
+    T3 --> T4
+```
 
-Every admin route is audit-logged after response completion with actor, route, status code, request id, redacted request body, and timestamp.
-
-## Upgrade Model
-
-The registry, bidding, task store, error resolver, and error registry contracts expose:
-
-| Function | Purpose |
-|---|---|
-| `admin` | Returns the configured upgrade administrator |
-| `contract_version` | Returns the active semantic contract version |
-| `upgrade(new_wasm_hash, new_version)` | Requires admin auth, updates current contract WASM, stores the new version, and emits an upgrade event |
-
-Deployment manifests in `smart-contracts/deployments/*.json.template` record contract ids, wasm hashes, versions, admins, and the verified upgrade script path. The live verification entry point is `smart-contracts/scripts/verified-upgrade-sequence.sh`; mainnet manifests require a testnet verification run before production upgrade execution.
-
-## Layer Responsibilities
-
-| Area | Frontend | Backend | Contracts |
-|---|---|---|---|
-| Identity | Shows wallet and agent identity | Authenticates users/admins/agents | Authorizes on-chain actors with `require_auth()` |
-| Task state | Displays DAG preview, status, errors | Owns queue state and idempotent execution | Stores durable task facts where required |
-| Agent selection | Captures preferences and shows registry data | Filters/ranks agents and dispatches work | Stores agent capabilities, fees, bonds, status |
-| Payments | Presents balances and settlement status | Creates release intents and reconciles | Enforces escrow and payment mutations |
-| Incidents | Shows graceful errors | Read-only toggle, maintenance, audit export | Admin-guarded upgrade and pause-style controls |
-| Observability | Loading, empty, and error states | Metrics, logs, health, admin audit | Events for indexers and settlement review |
-
-## Test Map
-
-| Test layer | What it should prove |
-|---|---|
-| Smart contract unit tests | Auth is required for mutations, upgrade methods expose admin/version, storage remains bounded, task/bidding/error flows preserve invariants |
-| Smart contract integration/e2e | Verified upgrade sequence runs on testnet against registry, bidding, task store, error resolver, and error registry |
-| Backend unit tests | Read-only blocks mutations, admin actions audit-log, reconciliation can be triggered safely, agent enable/disable is idempotent |
-| Backend integration tests | Queue/task lifecycle survives retries and emits stable API responses |
-| Frontend tests | Components consume semantic tokens, render loading/error states, and preserve task/wallet workflows across themes |
+* **Contract Invariants**: Every financial transition requires cryptographic signature authorization (`require_auth()`).
+* **Circuit Breakers**: Venice AI and external LLM connectors implement fail-fast circuit breakers with exponential backoff.
+* **Idempotency**: All task dispatch and payment webhooks enforce deduplication keys stored in Redis.

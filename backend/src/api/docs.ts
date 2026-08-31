@@ -1,5 +1,10 @@
 import swaggerJsdoc from "swagger-jsdoc";
 import YAML from "yaml";
+import { z } from "zod";
+import { CreateTaskSchema } from "./schemas/task.schema";
+import { RegisterAgentSchema } from "./schemas/agent.schema";
+import { PaginationSchema, IdParamSchema } from "./schemas/common.schema";
+import { generateOpenApiSchema } from "./openapi/zod";
 
 export const openapiOptions: swaggerJsdoc.Options = {
   definition: {
@@ -129,6 +134,10 @@ List endpoints support standardized query parameters:
         },
       },
       schemas: {
+        CreateTaskRequest: generateOpenApiSchema(CreateTaskSchema),
+        RegisterAgentRequest: generateOpenApiSchema(RegisterAgentSchema),
+        Pagination: generateOpenApiSchema(PaginationSchema),
+        IdParam: generateOpenApiSchema(IdParamSchema),
         TaskStatus: {
           type: "string",
           enum: ["queued", "running", "completed", "failed", "cancelled"],
@@ -170,40 +179,6 @@ List endpoints support standardized query parameters:
               nullable: true,
               example: null,
               description: "Error message if the node execution failed.",
-            },
-          },
-        },
-        CreateTaskRequest: {
-          type: "object",
-          required: ["prompt"],
-          properties: {
-            prompt: {
-              type: "string",
-              minLength: 1,
-              maxLength: 10000,
-              description: "Task description or objective for the AI agents to execute.",
-              example: "Research Stellar smart contract security best practices and generate a report",
-            },
-            walletPublicKey: {
-              type: "string",
-              description: "Owner's Stellar wallet public key (can also be provided in walletpublickey header).",
-              example: "GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA",
-            },
-            maxBudgetXLM: {
-              type: "number",
-              minimum: 0.1,
-              default: 1,
-              description: "Maximum XLM budget allocated for agent execution fees.",
-              example: 5.0,
-            },
-            agentPreferences: {
-              type: "array",
-              items: { type: "string" },
-              description: "Optional list of preferred agent IDs or types.",
-              example: ["research-agent-v1", "report-agent-v1"],
-            },
-            priority: {
-              $ref: "#/components/schemas/JobPriority",
             },
           },
         },
@@ -310,25 +285,6 @@ List endpoints support standardized query parameters:
             stellarPublicKey: { type: "string", example: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ" },
             reputationScore: { type: "number", example: 98.5 },
             lastSeenAt: { type: "string", format: "date-time", example: "2026-08-25T17:20:00.000Z" },
-          },
-        },
-        RegisterAgentRequest: {
-          type: "object",
-          required: ["agentId", "capabilities", "pricingXLM", "endpoint", "stellarPublicKey"],
-          properties: {
-            agentId: { type: "string", example: "agent_crypto_analyst_01" },
-            capabilities: {
-              type: "array",
-              items: { type: "string" },
-              example: ["research", "data_cleaning"],
-            },
-            pricingXLM: { type: "number", minimum: 0.001, example: 0.15 },
-            endpoint: { type: "string", format: "uri", example: "https://agent-node.example.com/execute" },
-            stellarPublicKey: {
-              type: "string",
-              pattern: "^G[A-Z2-7]{55}$",
-              example: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ",
-            },
           },
         },
         AgentHeartbeatResponse: {

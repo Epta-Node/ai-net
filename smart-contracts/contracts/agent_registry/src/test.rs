@@ -2086,3 +2086,46 @@ fn test_get_agents_batch_registered_pagination() {
     assert_eq!(page2.total_count, 4);
 }
 
+// ─── error_mapper tests ─────────────────────────────────────────────────────
+
+#[test]
+fn error_mapper_returns_common_codes_for_reserved_range() {
+    let (env, client) = setup();
+
+    // Common codes 1..=15 should map to their CommonExitCode variants
+    for raw in 1..=15u32 {
+        let result = client.error_mapper(&raw);
+        assert!(result.is_some(), "error_mapper({raw}) should return Some");
+        assert_eq!(result.unwrap() as u32, raw);
+    }
+}
+
+#[test]
+fn error_mapper_returns_none_for_contract_specific_codes() {
+    let (env, client) = setup();
+
+    // Contract-specific codes outside 1..=15 should return None
+    assert!(client.error_mapper(&0).is_none());
+    assert!(client.error_mapper(&16).is_none());
+    assert!(client.error_mapper(&100).is_none());
+    assert!(client.error_mapper(&255).is_none());
+}
+
+#[test]
+fn error_mapper_propagation_consistency() {
+    let (env, client) = setup();
+
+    // Simulate cross-contract error propagation: a contract returns
+    // Error::NotFound (code 1), which maps to CommonExitCode::NotFound (code 1)
+    let agent_registry_code = Error::NotFound as u32;
+    let common = client.error_mapper(&agent_registry_code);
+    assert!(common.is_some());
+    assert_eq!(common.unwrap(), CommonExitCode::NotFound);
+
+    // Error::AlreadyExists (code 3) maps to CommonExitCode::AlreadyExists
+    let already_exists_code = Error::AlreadyExists as u32;
+    let common = client.error_mapper(&already_exists_code);
+    assert!(common.is_some());
+    assert_eq!(common.unwrap(), CommonExitCode::AlreadyExists);
+}
+

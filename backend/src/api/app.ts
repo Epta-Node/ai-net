@@ -1,5 +1,6 @@
-import express, { type Request, type Response } from "express";
-import { createServer, type Server as HttpServer } from "http";
+import express, { Request, Response, NextFunction } from "express";
+import { createServer, Server as HttpServer } from "http";
+import { randomUUID } from "crypto";
 import swaggerUi from "swagger-ui-express";
 
 import {
@@ -16,7 +17,12 @@ import { getGlobalJobQueue, JobWorker, type JobQueue } from "../queue";
 import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
 import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { EventStore } from "../events/eventStore";
-import type { AgentRegistry } from "../types/agent";
+import {
+  attachTaskStream,
+  getStreamConnectionCount,
+  type TaskStreamOptions,
+} from "./routes/stream";
+import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { DAGNode } from "../types/task";
 import { adminAuthMiddleware } from "./middleware/auth";
 import { compressionMiddleware } from "./middleware/compression";
