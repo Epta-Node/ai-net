@@ -51,6 +51,12 @@ pub enum Error {
     SlaViolation = 25,
     /// Invalid SLA parameters.
     InvalidSla = 26,
+    /// Star rating value is outside the valid range [1, 5].
+    InvalidRating = 27,
+    /// Caller has exceeded the per-window submission limit for an agent.
+    RateLimitExceeded = 28,
+    /// Configuration value is out of accepted bounds.
+    InvalidConfig = 29,
 }
 
 impl Error {

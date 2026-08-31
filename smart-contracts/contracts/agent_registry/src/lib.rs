@@ -32,6 +32,7 @@
 //! Callers inspect the returned `Vec<BatchResult>` / `Vec<VoidBatchResult>`:
 //! all-success means the batch committed; any failure means **no** writes occurred.
 
+pub mod shared_exit_codes;
 mod errors;
 mod events;
 mod upgrade;
@@ -40,13 +41,15 @@ mod upgrade;
 mod upgrade_tests;
 
 pub use upgrade::*;
+pub use shared_exit_codes::CommonExitCode;
 
 use events::{
-    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, ErrorReportedEvent,
-    ErrorResolvedEvent, OperationApproved, OperationCancelled, OperationExecuted,
-    OperationProposed, RegistryInitializedEvent, AnalyticsRecordedEvent,
-    LeaderboardUpdatedEvent, SlaSetEvent, SlaViolationDetectedEvent, SlaBonusAwardedEvent,
+    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, AnalyticsRecordedEvent,
+    ErrorReportedEvent, ErrorResolvedEvent, LeaderboardUpdatedEvent, OperationApproved,
+    OperationCancelled, OperationExecuted, OperationProposed, RegistryInitializedEvent,
+    SlaBonusAwardedEvent, SlaSetEvent, SlaViolationDetectedEvent,
 };
+pub use types::Attestation;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
     TryFromVal, Val, Vec,
@@ -1916,19 +1919,19 @@ impl AgentRegistryContract {
         earnings: i128,
     ) -> Result<(), Error> {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        let mut analytics: AgentAnalytics = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(AgentAnalytics {
-                agent_id: agent_id.clone(),
-                total_tasks: 0,
-                successful_tasks: 0,
-                failed_tasks: 0,
-                total_earnings: 0,
-                avg_response_time: 0,
-                last_updated: env.ledger().sequence() as u64,
-            });
+        let mut analytics: AgentAnalytics =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(AgentAnalytics {
+                    agent_id: agent_id.clone(),
+                    total_tasks: 0,
+                    successful_tasks: 0,
+                    failed_tasks: 0,
+                    total_earnings: 0,
+                    avg_response_time: 0,
+                    last_updated: env.ledger().sequence() as u64,
+                });
 
         let old_total = analytics.total_tasks;
         analytics.total_tasks += 1;
@@ -1979,15 +1982,18 @@ impl AgentRegistryContract {
     /// Get aggregated analytics for an agent.
     pub fn get_analytics(env: Env, agent_id: Symbol) -> AgentAnalytics {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        env.storage().persistent().get(&key).unwrap_or(AgentAnalytics {
-            agent_id,
-            total_tasks: 0,
-            successful_tasks: 0,
-            failed_tasks: 0,
-            total_earnings: 0,
-            avg_response_time: 0,
-            last_updated: 0,
-        })
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(AgentAnalytics {
+                agent_id,
+                total_tasks: 0,
+                successful_tasks: 0,
+                failed_tasks: 0,
+                total_earnings: 0,
+                avg_response_time: 0,
+                last_updated: 0,
+            })
     }
 
     /// Get top N agents by a configurable metric.
@@ -2035,8 +2041,7 @@ impl AgentRegistryContract {
             let mut j = i + 1;
             let mut max_idx = i;
             while j < entries.len() {
-                if entries.get(j).unwrap().metric_value
-                    > entries.get(max_idx).unwrap().metric_value
+                if entries.get(j).unwrap().metric_value > entries.get(max_idx).unwrap().metric_value
                 {
                     max_idx = j;
                 }
@@ -2256,6 +2261,27 @@ impl AgentRegistryContract {
         };
 
         Some((sla, compliance))
+    }
+
+    /// Map a raw error code from any ai-net contract to its standardized
+    /// [`CommonExitCode`] equivalent.
+    ///
+    /// This is the single entry-point for cross-contract error interpretation.
+    /// Callers pass the raw `u32` error code returned by any contract call and
+    /// receive the standardized [`CommonExitCode`] if the code falls within the
+    /// reserved common range (1..=15), or `None` if it is contract-specific.
+    ///
+    /// ```text
+    /// // Off-chain usage:
+    /// let result = registry.error_mapper(raw_error_code);
+    /// match result {
+    ///     Some(CommonExitCode::NotFound) => { /* handle */ }
+    ///     Some(CommonExitCode::Unauthorized) => { /* handle */ }
+    ///     None => { /* contract-specific code, inspect locally */ }
+    /// }
+    /// ```
+    pub fn error_mapper(_env: Env, raw_code: u32) -> Option<CommonExitCode> {
+        shared_exit_codes::CommonExitCode::from_raw(raw_code)
     }
 }
 

@@ -3,8 +3,9 @@
 mod types;
 
 pub use types::{
-    DataKey, Error, TaskMetadata, TaskMetadataStored, TaskStatus, TaskStatusUpdated,
-    DEFAULT_TTL_DAYS, LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TTL_DAYS,
+    DataKey, Error, TaskCreatedEvent, TaskFinalizedEvent, TaskMetadata, TaskStatus,
+    TaskUpdatedEvent, DEFAULT_TTL_DAYS, LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TTL_DAYS,
+    TASK_LIFECYCLE_EVENT_VERSION,
 };
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, Vec};
@@ -53,6 +54,10 @@ fn can_transition(from: TaskStatus, to: TaskStatus) -> bool {
             | (TaskStatus::Running, TaskStatus::Completed)
             | (TaskStatus::Running, TaskStatus::Failed)
     )
+}
+
+fn is_terminal(status: TaskStatus) -> bool {
+    matches!(status, TaskStatus::Completed | TaskStatus::Failed)
 }
 
 #[contract]
@@ -114,10 +119,13 @@ impl TaskStoreContract {
             .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
 
         env.events().publish(
-            (symbol_short!("task_meta"), symbol_short!("stored")),
-            TaskMetadataStored {
+            (symbol_short!("task_meta"), symbol_short!("created")),
+            TaskCreatedEvent {
+                version: TASK_LIFECYCLE_EVENT_VERSION,
                 task_id,
                 prompt_hash,
+                assigned_agents: metadata.assigned_agents,
+                created_at,
                 expires_at,
             },
         );
@@ -154,15 +162,35 @@ impl TaskStoreContract {
         metadata.status = new_status;
         env.storage().persistent().set(&key, &metadata);
 
-        env.events().publish(
-            (symbol_short!("task_meta"), symbol_short!("status")),
-            TaskStatusUpdated {
-                task_id,
-                agent,
-                old_status,
-                new_status,
-            },
-        );
+        // Every successful transition emits exactly one lifecycle event:
+        // terminal transitions (-> Completed / -> Failed) emit `finalized`,
+        // everything else emits `updated` — never both.
+        let timestamp = env.ledger().timestamp();
+        if is_terminal(new_status) {
+            env.events().publish(
+                (symbol_short!("task_meta"), symbol_short!("finalized")),
+                TaskFinalizedEvent {
+                    version: TASK_LIFECYCLE_EVENT_VERSION,
+                    task_id,
+                    agent,
+                    old_status,
+                    final_status: new_status,
+                    finalized_at: timestamp,
+                },
+            );
+        } else {
+            env.events().publish(
+                (symbol_short!("task_meta"), symbol_short!("updated")),
+                TaskUpdatedEvent {
+                    version: TASK_LIFECYCLE_EVENT_VERSION,
+                    task_id,
+                    agent,
+                    old_status,
+                    new_status,
+                    updated_at: timestamp,
+                },
+            );
+        }
 
         Ok(())
     }
@@ -289,25 +317,105 @@ mod test {
     }
 
     #[test]
-    fn emits_storage_and_status_events() {
+    fn emits_exactly_one_created_event_on_store() {
         let fixture = fixture();
         store(&fixture, 1);
-        let stored_events = fixture.env.events().all();
-        assert_eq!(stored_events.len(), 1);
+
+        let events = fixture.env.events().all();
+        assert_eq!(events.len(), 1);
         assert_eq!(
-            stored_events.get(0).unwrap().1,
-            (symbol_short!("task_meta"), symbol_short!("stored")).into_val(&fixture.env)
+            events.get(0).unwrap().1,
+            (symbol_short!("task_meta"), symbol_short!("created")).into_val(&fixture.env)
         );
+    }
+
+    #[test]
+    fn emits_exactly_one_updated_event_on_non_terminal_transition() {
+        let fixture = fixture();
+        store(&fixture, 1);
 
         fixture
             .client
             .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Running);
 
-        let status_events = fixture.env.events().all();
-        assert_eq!(status_events.len(), 1);
+        let events = fixture.env.events().all();
+        assert_eq!(events.len(), 1);
         assert_eq!(
-            status_events.get(0).unwrap().1,
-            (symbol_short!("task_meta"), symbol_short!("status")).into_val(&fixture.env)
+            events.get(0).unwrap().1,
+            (symbol_short!("task_meta"), symbol_short!("updated")).into_val(&fixture.env)
         );
+    }
+
+    #[test]
+    fn emits_exactly_one_finalized_event_on_terminal_transition() {
+        let fixture = fixture();
+        store(&fixture, 1);
+        fixture
+            .client
+            .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Running);
+
+        fixture
+            .client
+            .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Completed);
+
+        // No `updated` event alongside it — exactly one lifecycle event
+        // for this transition, and it's `finalized`, not `updated`.
+        let events = fixture.env.events().all();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events.get(0).unwrap().1,
+            (symbol_short!("task_meta"), symbol_short!("finalized")).into_val(&fixture.env)
+        );
+    }
+
+    #[test]
+    fn finalized_event_fires_for_the_failed_terminal_status_too() {
+        let fixture = fixture();
+        store(&fixture, 1);
+
+        fixture
+            .client
+            .update_task_status(&fixture.task_id, &fixture.agent, &TaskStatus::Failed);
+
+        let events = fixture.env.events().all();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events.get(0).unwrap().1,
+            (symbol_short!("task_meta"), symbol_short!("finalized")).into_val(&fixture.env)
+        );
+    }
+
+    #[test]
+    fn created_event_payload_matches_stored_metadata() {
+        let fixture = fixture();
+        store(&fixture, 1);
+
+        let metadata = fixture.client.get_task_metadata(&fixture.task_id);
+        let events = fixture.env.events().all();
+        let (_contract_id, _topics, data) = events.get(0).unwrap();
+        let payload: TaskCreatedEvent = data.into_val(&fixture.env);
+
+        assert_eq!(payload.version, TASK_LIFECYCLE_EVENT_VERSION);
+        assert_eq!(payload.task_id, fixture.task_id);
+        assert_eq!(payload.prompt_hash, fixture.prompt_hash);
+        assert_eq!(payload.assigned_agents, metadata.assigned_agents);
+        assert_eq!(payload.created_at, metadata.created_at);
+        assert_eq!(payload.expires_at, metadata.expires_at);
+    }
+
+    #[test]
+    fn a_rejected_transition_emits_no_lifecycle_event() {
+        let fixture = fixture();
+        store(&fixture, 1);
+
+        // Pending -> Completed is not a valid transition (must pass through
+        // Running first) and is rejected before any event is published.
+        let _ = fixture.client.try_update_task_status(
+            &fixture.task_id,
+            &fixture.agent,
+            &TaskStatus::Completed,
+        );
+
+        assert_eq!(fixture.env.events().all().len(), 0);
     }
 }

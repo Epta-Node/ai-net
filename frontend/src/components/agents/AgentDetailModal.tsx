@@ -17,7 +17,20 @@ interface AgentDetailModalProps {
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
-  const { data: reputationData, isLoading: reputationLoading } = useAgentReputation(agent?.id)
+  // Called unconditionally (hook rules) — it no-ops on an empty id, which is
+  // what the closed-modal case passes.
+  const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id ?? '')
+
+  useEffect(() => {
+    if (!agent) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [agent, onClose])
+
+  if (!agent) return null
 
   return (
     <Modal

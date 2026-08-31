@@ -1,6 +1,9 @@
 import Database from "better-sqlite3";
 import path from "path";
 import { createLogger } from "../utils/logger";
+import { migrateToLatest } from "./migrator";
+
+const MIGRATIONS_DIR = path.join(__dirname, "migrations", "payments");
 
 export type PaymentStatus = "locked" | "released" | "refunded";
 
@@ -30,17 +33,7 @@ export function getDb(dbPath?: string): Database.Database {
         logger.error({ err: error }, "payment database error");
       },
     );
-    _db.exec(`
-      CREATE TABLE IF NOT EXISTS payments (
-        taskId       TEXT NOT NULL,
-        nodeId       TEXT NOT NULL,
-        balanceId    TEXT NOT NULL,
-        status       TEXT NOT NULL DEFAULT 'locked',
-        amountStroops TEXT NOT NULL,
-        txHash       TEXT,
-        PRIMARY KEY (taskId, nodeId)
-      )
-    `);
+    migrateToLatest(_db, MIGRATIONS_DIR);
   }
   return _db;
 }

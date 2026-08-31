@@ -5,6 +5,10 @@
 .breadcrumb ol {
   display: flex;
   align-items: center;
+  /* Wrap instead of overflowing: a deep trail must never make the page scroll
+     sideways on a narrow viewport. */
+  flex-wrap: wrap;
+  row-gap: 4px;
   list-style: none;
   margin: 0;
   padding: 0;
