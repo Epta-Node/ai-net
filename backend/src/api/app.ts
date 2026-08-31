@@ -25,6 +25,7 @@ import {
 } from "../payment";
 import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
+import { metricsRouter } from "./routes/metrics";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
@@ -165,6 +166,10 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", healthRouter);
+
+  // ── Metrics routes (Issue #499) ───────────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+  app.use("/api/metrics", metricsRouter);
 
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", createStatsRouter(getTaskDb()));

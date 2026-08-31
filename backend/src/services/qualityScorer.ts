@@ -20,6 +20,8 @@ import type {
   QualityScoreRecord,
   QualityScoringRules,
   QualityTrend,
+  ReputationBreakdown,
+  ReputationEvaluationInput,
 } from './qualityScorer.types';
 import { ResearchOutputSchema } from '../agents/research/research';
 import { CodingOutputSchema } from '../agents/coding/coding';
@@ -300,6 +302,135 @@ export class QualityScorer {
 }
 
 // ─── Reputation feedback ─────────────────────────────────────────────────────
+
+// ─── Reputation feedback (Issue #497) ─────────────────────────────────────────
+
+export const MIN_REPUTATION = 0.0;
+export const MAX_REPUTATION = 5.0;
+export const DEFAULT_REPUTATION = 2.5;
+export const INACTIVITY_DECAY_RATE_PER_MONTH = 0.1;
+
+/**
+ * Compute reputation delta for an agent task outcome.
+ *
+ * Requirements:
+ *  - Task success increases reputation; failure decreases it.
+ *  - Output quality score contributes to reputation delta.
+ *  - Response latency gives slight positive bonus when fast (<1000ms).
+ *  - Higher bond-backed agents receive a bounded multiplier (1.0x - 1.5x).
+ *  - Clamped so reputation stays within 0.0 - 5.0.
+ */
+export function computeReputationDelta(input: ReputationEvaluationInput): number {
+  const { outcome, qualityScore = 75, latencyMs = 500, bondAmountXLM = 0, currentReputation = DEFAULT_REPUTATION } = input;
+
+  if (outcome === 'failure') {
+    // Failure decreases reputation
+    const penalty = -0.20;
+    const proposed = currentReputation + penalty;
+    const clamped = clamp(proposed, MIN_REPUTATION, MAX_REPUTATION);
+    return round2(clamped - currentReputation);
+  }
+
+  // 1. Output quality contribution: normalized 0.0 - 1.0
+  const normalizedQuality = clamp(qualityScore, 0, 100) / 100;
+  const baseSuccessDelta = 0.10 * normalizedQuality;
+
+  // 2. Response latency bonus (bounded: up to +0.03)
+  const latencyBonus = latencyMs < 1000 ? Math.max(0, (1000 - latencyMs) / 1000) * 0.03 : 0;
+
+  // 3. Staking/bond weight multiplier (bounded: 1.0 - 1.5x)
+  const bondWeightMultiplier = 1.0 + Math.min(0.5, Math.max(0, bondAmountXLM) / 1000);
+
+  const rawDelta = (baseSuccessDelta + latencyBonus) * bondWeightMultiplier;
+  const proposed = currentReputation + rawDelta;
+  const clamped = clamp(proposed, MIN_REPUTATION, MAX_REPUTATION);
+
+  return round2(clamped - currentReputation);
+}
+
+/**
+ * Inactive agents' reputation decays over time (0.1 / month of inactivity).
+ */
+export function applyInactivityDecay(
+  reputation: number,
+  lastActiveDate: string | Date | number,
+  now: string | Date | number = Date.now(),
+): { decayedReputation: number; decayApplied: number; monthsInactive: number } {
+  const lastActiveMs = typeof lastActiveDate === 'number'
+    ? lastActiveDate
+    : (lastActiveDate instanceof Date ? lastActiveDate.getTime() : new Date(lastActiveDate).getTime());
+  const nowMs = typeof now === 'number'
+    ? now
+    : (now instanceof Date ? now.getTime() : new Date(now).getTime());
+
+  if (Number.isNaN(lastActiveMs) || lastActiveMs >= nowMs) {
+    return { decayedReputation: clamp(reputation, MIN_REPUTATION, MAX_REPUTATION), decayApplied: 0, monthsInactive: 0 };
+  }
+
+  const msPerMonth = 30 * 24 * 60 * 60 * 1000;
+  const monthsInactive = (nowMs - lastActiveMs) / msPerMonth;
+  const decayApplied = round2(monthsInactive * INACTIVITY_DECAY_RATE_PER_MONTH);
+  const decayedReputation = clamp(round2(reputation - decayApplied), MIN_REPUTATION, MAX_REPUTATION);
+
+  return {
+    decayedReputation,
+    decayApplied,
+    monthsInactive: round2(monthsInactive),
+  };
+}
+
+/**
+ * Computes full reputation breakdown for an agent (success, quality, latency, bond).
+ */
+export function calculateReputationBreakdown(params: {
+  reputationScore: number;
+  tasksCompleted?: number;
+  tasksFailed?: number;
+  avgQualityScore?: number;
+  avgLatencyMs?: number;
+  bondAmountXLM?: number;
+  lastActiveAt?: string;
+  now?: string | Date | number;
+}): ReputationBreakdown {
+  const {
+    reputationScore,
+    tasksCompleted = 0,
+    tasksFailed = 0,
+    avgQualityScore = 80,
+    avgLatencyMs = 500,
+    bondAmountXLM = 0,
+    lastActiveAt,
+    now,
+  } = params;
+
+  const totalTasks = tasksCompleted + tasksFailed;
+  const taskSuccessScore = totalTasks > 0 ? round2((tasksCompleted / totalTasks) * 5.0) : 2.5;
+  const qualityScore = round2((clamp(avgQualityScore, 0, 100) / 100) * 5.0);
+  const latencyScore = round2(Math.max(0, Math.min(5.0, 5.0 - (avgLatencyMs / 1000))));
+  const bondWeightMultiplier = round2(1.0 + Math.min(0.5, Math.max(0, bondAmountXLM) / 1000));
+
+  let decayApplied = 0;
+  let overallScore = clamp(reputationScore, MIN_REPUTATION, MAX_REPUTATION);
+
+  if (lastActiveAt) {
+    const decayResult = applyInactivityDecay(overallScore, lastActiveAt, now);
+    decayApplied = decayResult.decayApplied;
+    overallScore = decayResult.decayedReputation;
+  }
+
+  return {
+    overallScore: round2(overallScore),
+    taskSuccessScore,
+    qualityScore,
+    latencyScore,
+    bondWeightMultiplier,
+    bondAmountXLM,
+    tasksCompleted,
+    tasksFailed,
+    lastDecayAt: lastActiveAt,
+    decayApplied,
+  };
+}
 
 /**
  * Map a normalized quality score (0–100) to a reputation delta.

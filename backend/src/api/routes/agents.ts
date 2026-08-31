@@ -5,6 +5,7 @@ import { RegisterAgentSchema } from "../schemas/agent.schema";
 import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
 import { NotFoundError, ValidationError, AuthenticationError } from "../../errors";
+import { calculateReputationBreakdown, computeReputationDelta, DEFAULT_REPUTATION } from "../../services/qualityScorer";
 
 export interface AgentsRouterOptions {
   healthTimeoutMs?: number;
@@ -141,7 +142,19 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       if (!agent) {
         throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
       }
-      res.json(agent);
+      const breakdown = calculateReputationBreakdown({
+        reputationScore: agent.reputationScore,
+        tasksCompleted: agent.tasksCompleted ?? 0,
+        tasksFailed: agent.tasksFailed ?? 0,
+        bondAmountXLM: agent.bondAmountXLM ?? 0,
+        lastActiveAt: agent.lastActiveAt ?? agent.lastSeenAt,
+      });
+
+      res.json({
+        ...agent,
+        reputationScore: breakdown.overallScore,
+        reputation: breakdown,
+      });
     } catch (err) {
       next(err);
     }
@@ -294,6 +307,18 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       }
       
       const data = parse.data;
+      const db = getDb();
+
+      // Sybil resistance: enforce maximum agents per Stellar account
+      const maxAgentsPerAccount = Number(process.env.MAX_AGENTS_PER_ACCOUNT || 5);
+      const currentCount = db.countByStellarKey(data.stellarPublicKey);
+      if (currentCount >= maxAgentsPerAccount) {
+        throw new ValidationError(
+          `Agent limit per Stellar account reached (max: ${maxAgentsPerAccount})`,
+          { stellarPublicKey: data.stellarPublicKey, code: "AgentRegistrationLimitExceeded", limit: maxAgentsPerAccount },
+          correlationId,
+        );
+      }
       
       // Verify Stellar account exists
       if (process.env.SKIP_STELLAR_ACCOUNT_VERIFY !== "true") {
@@ -317,21 +342,76 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
         }
       }
       
-      const db = getDb();
+      const now = new Date().toISOString();
       const agent = {
         id: data.agentId,
         capabilities: data.capabilities,
         pricingXLM: data.pricingXLM,
         endpoint: data.endpoint,
         stellarPublicKey: data.stellarPublicKey,
-        reputationScore: 0,
-        lastSeenAt: new Date().toISOString(),
+        reputationScore: DEFAULT_REPUTATION,
+        lastSeenAt: now,
+        lastActiveAt: now,
+        bondAmountXLM: data.bondAmountXLM ?? 0,
+        tasksCompleted: 0,
+        tasksFailed: 0,
         status: 'online' as const
       };
       
       db.upsert(agent);
       
       res.status(201).json(agent);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @openapi
+   * /api/agents/{id}/task-result:
+   *   post:
+   *     summary: Record task outcome and update agent reputation
+   *     description: Computes reputation delta incorporating outcome, output quality, response latency, and bond multiplier.
+   *     tags: [Agents]
+   *     security: []
+   */
+  router.post("/:id/task-result", (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const correlationId = res.locals.correlationId as string | undefined;
+      const db = getDb();
+      const agent = db.findById(req.params.id);
+      if (!agent) {
+        throw new NotFoundError("Agent", req.params.id, undefined, correlationId);
+      }
+
+      const outcome = req.body.outcome === "failure" ? "failure" : "success";
+      const qualityScore = typeof req.body.qualityScore === "number" ? req.body.qualityScore : undefined;
+      const latencyMs = typeof req.body.latencyMs === "number" ? req.body.latencyMs : undefined;
+
+      const delta = computeReputationDelta({
+        outcome,
+        qualityScore,
+        latencyMs,
+        bondAmountXLM: agent.bondAmountXLM ?? 0,
+        currentReputation: agent.reputationScore,
+      });
+
+      db.updateReputationWithStats(agent.id, delta, outcome);
+      const updated = db.findById(agent.id) ?? agent;
+      const breakdown = calculateReputationBreakdown({
+        reputationScore: updated.reputationScore,
+        tasksCompleted: updated.tasksCompleted ?? 0,
+        tasksFailed: updated.tasksFailed ?? 0,
+        bondAmountXLM: updated.bondAmountXLM ?? 0,
+        lastActiveAt: updated.lastActiveAt,
+      });
+
+      res.json({
+        agentId: agent.id,
+        reputationDelta: delta,
+        reputationScore: breakdown.overallScore,
+        reputation: breakdown,
+      });
     } catch (err) {
       next(err);
     }

@@ -201,3 +201,19 @@ export interface MetricsSources {
   collectTasks?: () => Promise<TaskMetrics> | TaskMetrics;
   collectPayments?: () => Promise<PaymentMetrics> | PaymentMetrics;
 }
+
+/** Prometheus histogram bucket definition and counts. */
+export interface PrometheusHistogram {
+  buckets: Record<number, number>; // upper bound (le) -> cumulative count
+  sum: number;
+  count: number;
+}
+
+/** Scrape health verdict for Prometheus endpoint. */
+export interface ScrapeHealth {
+  status: "ok" | "degraded" | "error";
+  uptimeSeconds: number;
+  lastScrapeTimestamp: string;
+  metricFamiliesCount: number;
+  registeredOnce: boolean;
+}

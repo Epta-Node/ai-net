@@ -65,14 +65,14 @@ describe("Agents API route", () => {
     const response = await request(createTestApp([codingAgent])).get("/api/agents");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual([codingAgent]);
+    expect(response.body).toEqual([expect.objectContaining(codingAgent)]);
   });
 
   it("returns a single agent by id", async () => {
     const response = await request(createTestApp([codingAgent])).get("/api/agents/coding-1");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual(codingAgent);
+    expect(response.body).toEqual(expect.objectContaining({ ...codingAgent, reputation: expect.any(Object) }));
   });
 
   it("returns 404 for an unknown agent id", async () => {
