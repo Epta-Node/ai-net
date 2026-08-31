@@ -28,7 +28,7 @@ import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createTasksRouter } from "./routes/tasks";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
+import { rateLimitMiddleware, registerRateLimitMiddleware, globalRateLimitMiddleware } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
@@ -57,6 +57,7 @@ import {
   type JobQueue,
 } from "../queue";
 import { createAdminQueueRouter } from "./routes/admin";
+import { createRateLimitRouter } from "./routes/ratelimit";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
@@ -130,6 +131,7 @@ export function createApp(opts: AppOptions = {}): {
   // Samples every response into the health dashboard's rolling window. Mounted
   // before the routers so latency covers the full handler chain.
   app.use(metricsMiddleware);
+  app.use(globalRateLimitMiddleware);
   app.use(versioningMiddleware);
 
   // ── Response compression ────────────────────────────────────────────────────
@@ -210,9 +212,10 @@ export function createApp(opts: AppOptions = {}): {
     }
   });
 
-  // ── Admin Queue routes ─────────────────────────────────────────────────────
+  // ── Admin Queue & Rate Limit routes ──────────────────────────────────────────
   app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
   app.use("/api/admin", createAdminQueueRouter(jobQueue));
+  app.use("/api/ratelimit", createRateLimitRouter());
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));

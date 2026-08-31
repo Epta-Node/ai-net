@@ -47,7 +47,7 @@ export function errorHandler(
       `AppError: ${err.code}`,
     );
 
-    const serialized = err.serialize(isDevelopment);
+    const serialized = err.serialize(req.path, isDevelopment);
 
     res.status(err.statusCode).json({ error: serialized });
     return;
@@ -74,20 +74,20 @@ export function errorHandler(
     error: {
       code:
         isDevelopment
-          ? (err as any)?.code ?? "INTERNAL_SERVER_ERROR"
-          : "INTERNAL_SERVER_ERROR",
+          ? (err as any)?.code ?? "INTERNAL_ERROR"
+          : "INTERNAL_ERROR",
       message: isDevelopment
         ? (err instanceof Error ? err.message : "An unexpected error occurred")
         : "An unexpected error occurred. Please try again later.",
       correlationId,
       timestamp: new Date().toISOString(),
+      path: req.path,
       ...(isDevelopment && err instanceof Error
         ? { stack: err.stack }
         : {}),
     },
     // Legacy fields kept for backward-compatibility with existing tests
     statusCode,
-    path: req.path,
     requestId: res.locals.requestId,
   };
 

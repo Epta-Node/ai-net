@@ -9,7 +9,7 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
-import { NotFoundError, ValidationError, RateLimitError, AppError } from "../../errors";
+import { NotFoundError, ValidationError, RateLimitError, AppError, ForbiddenError, ConflictError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 
@@ -373,7 +373,7 @@ export function createTasksRouter(
       }
       const requesterKey = req.headers["walletpublickey"] as string;
       if (!requesterKey || requesterKey !== task.walletPublicKey) {
-        throw new AppError("Access denied", 403, "FORBIDDEN", undefined, correlationId);
+        throw new ForbiddenError("Access denied", undefined, correlationId);
       }
       res.json(task);
     } catch (err) {
@@ -439,15 +439,12 @@ export function createTasksRouter(
 
       const requesterKey = req.headers["walletpublickey"] as string;
       if (!requesterKey || requesterKey !== task.walletPublicKey) {
-        throw new AppError("Not authorized to cancel this task", 403, "FORBIDDEN", undefined, correlationId);
+        throw new ForbiddenError("Not authorized to cancel this task", undefined, correlationId);
       }
 
       if (task.status !== "queued") {
-        // 409 Conflict — use AppError directly since there's no ConflictError subclass
-        throw new AppError(
+        throw new ConflictError(
           `Cannot cancel task in '${task.status}' status`,
-          409,
-          "CONFLICT",
           { currentStatus: task.status },
           correlationId,
         );
