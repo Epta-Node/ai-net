@@ -16,12 +16,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   min-width: 280px;
   max-width: 360px;
   padding: 14px 16px;
-  border-radius: 12px;
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
   border: 1px solid transparent;
   background: rgba(15, 23, 42, 0.96);
   color: #f8fafc;
@@ -32,23 +32,27 @@
 }
 
 .toast--success {
-  background: rgba(20, 83, 45, 0.96);
-  border-color: rgba(34, 197, 94, 0.65);
+  background: var(--status-success-surface-muted);
+  border-color: var(--status-success-border);
+  color: var(--status-success-text);
 }
 
 .toast--error {
-  background: rgba(127, 29, 29, 0.96);
-  border-color: rgba(248, 113, 113, 0.7);
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-border-strong);
+  color: var(--status-danger-text);
 }
 
 .toast--warning {
-  background: rgba(120, 53, 15, 0.96);
-  border-color: rgba(251, 191, 36, 0.7);
+  background: var(--status-warning-surface);
+  border-color: var(--status-warning-border-strong);
+  color: var(--status-warning-text);
 }
 
 .toast--info {
-  background: rgba(30, 41, 59, 0.96);
-  border-color: rgba(96, 165, 250, 0.6);
+  background: var(--info-surface);
+  border-color: var(--info-border);
+  color: var(--accent-info);
 }
 
 .toast__message {
@@ -59,6 +63,7 @@
 .toast__dismiss {
   flex-shrink: 0;
   appearance: none;
+  flex-shrink: 0;
   border: none;
   background: transparent;
   color: inherit;
@@ -87,8 +92,8 @@
 
 @media (max-width: 480px) {
   .toast-container {
-    left: 12px;
-    right: 12px;
+    left: var(--space-3);
+    right: var(--space-3);
     max-width: none;
   }
 

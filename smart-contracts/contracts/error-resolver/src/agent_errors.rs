@@ -3,6 +3,8 @@ use soroban_sdk::{
     Symbol, Vec,
 };
 
+const CONTRACT_VERSION: &str = "1.0.0";
+
 /// On-chain per-agent error ledger. Distinct from the off-chain
 /// `ErrorResolver` lookup table (see `lookup.rs`): this contract tracks how
 /// many errors have been reported for a given agent, so `agent-registry` can
@@ -10,6 +12,7 @@ use soroban_sdk::{
 #[contracttype]
 pub enum DataKey {
     Admin,
+    Version,
     AuthorizedCallers,
     AgentErrorCount(Symbol),
     Signers,
@@ -182,7 +185,11 @@ impl ErrorResolverContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(ContractError::AlreadyInitialized);
         }
+        admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
         env.storage()
             .instance()
             .set(&DataKey::AuthorizedCallers, &Vec::<Address>::new(&env));

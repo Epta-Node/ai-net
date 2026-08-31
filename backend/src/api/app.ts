@@ -12,13 +12,18 @@ import { createServer, Server as HttpServer } from "http";
 import swaggerUi from "swagger-ui-express";
 
 import {
+  createTaskJobHandler,
   type DispatchFn,
   type PaymentReleaseFn,
 } from "../coordinator/coordinator";
 import { httpDispatch } from "../coordinator/dispatch";
-import type { AgentRegistry } from "../types/agent";
-import { getTask } from "../coordinator/taskStore";
 import { eventBus } from "../coordinator/eventBus";
+import { getTask } from "../coordinator/taskStore";
+import { getTaskDb } from "../db/tasks";
+import { createPaymentReleaseFn, type StellarReleasePaymentFn } from "../payment";
+import { getGlobalJobQueue, JobWorker, type JobQueue } from "../queue";
+import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
+import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { EventStore } from "../events/eventStore";
 import {
   attachTaskStream,
@@ -39,10 +44,20 @@ import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authed
 import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
+import { createCorsMiddleware } from "./middleware/cors";
+import { errorHandler } from "./middleware/errorHandler";
+import { readOnlyMiddleware } from "./middleware/readOnly";
+import { registerRateLimitMiddleware } from "./middleware/rateLimit";
 import { requestId } from "./middleware/requestId";
 import { requestLogger } from "./middleware/requestLogger";
-import { errorHandler } from "./middleware/errorHandler";
 import { versioningMiddleware } from "./middleware/versioning";
+import { getOpenapiJson, getOpenapiYaml, openapiSpec, swaggerUiOptions } from "./docs";
+import { agentsRouter } from "./routes/agents";
+import { createAdminRouter } from "./routes/admin";
+import { healthRouter } from "./routes/health";
+import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
+import { createStatsRouter } from "./routes/stats";
+import { attachTaskStream, getStreamConnectionCount, type TaskStreamOptions } from "./routes/stream";
 import { createV1TasksRouter } from "./routes/v1/tasks";
 import { createV2TasksRouter } from "./routes/v2/tasks";
 import { createAuthRouter } from "./routes/auth";
@@ -114,6 +129,11 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestLogger);
   app.use(metricsMiddleware);
   app.use(versioningMiddleware);
+  app.use(
+    readOnlyMiddleware({
+      exemptPaths: ["/api/admin", "/api/reconciliation"],
+    }),
+  );
 
   if (!opts.disableCompression && config.NODE_ENV !== "test") {
     app.use(...compressionMiddleware());
@@ -188,6 +208,7 @@ export function createApp(opts: AppOptions = {}): {
     } else {
       return v2TasksRouter(req, res, next);
     }
+    return v2TasksRouter(req, res, next);
   });
 
   // ── Admin Queue routes ─────────────────────────────────────────────────────

@@ -22,9 +22,9 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
         {t('agent.research.empty')}
@@ -37,7 +37,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
       className="markdown-body"
       id="research-markdown"
       style={{
-        color: '#f8fafc',
+        color: 'var(--surface-primary)',
         lineHeight: '1.7',
         fontSize: '1rem',
       }}

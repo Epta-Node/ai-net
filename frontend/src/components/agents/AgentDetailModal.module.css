@@ -63,22 +63,22 @@
 .status {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
 }
 
 .statusActive {
-  background: rgba(16, 185, 129, 0.15);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #6ee7b7;
+  background: var(--status-success-surface);
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success-text-strong);
 }
 
 .statusInactive {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  background: var(--status-danger-surface);
+  border: 1px solid var(--status-danger-surface-strong);
+  color: var(--status-danger-text);
 }
 
 .pills {
@@ -88,11 +88,11 @@
 }
 
 .pill {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  background: var(--accent-surface);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-text-soft);
   padding: 4px 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -102,12 +102,12 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #818cf8;
+  color: var(--accent-text-muted);
   text-decoration: none;
 }
 
 .txLink:hover {
-  color: #a5b4fc;
+  color: var(--accent-text-soft);
   text-decoration: underline;
 }
 
