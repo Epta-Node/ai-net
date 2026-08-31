@@ -5,6 +5,10 @@ members = [
     "contracts/error-registry",
     "contracts/agent_bidding",
     "contracts/upgrade-manager",
+    "contracts/price_oracle",
+    "contracts/oracle_manager",
+    "contracts/agent_marketplace",
+    "contracts/task_store",
 ]
 resolver = "2"
 

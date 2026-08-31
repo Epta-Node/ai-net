@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Symbol, Vec};
 
 pub const DEFAULT_TTL_DAYS: u32 = 90;
 pub const MAX_TTL_DAYS: u32 = 365;
@@ -20,6 +20,12 @@ pub enum TaskStatus {
     Failed = 3,
 }
 
+/// Stored state for a single task.
+///
+/// `quoted_price_stroops` is `None` when no OracleManager is configured at the
+/// time the task was submitted.  When an OracleManager _is_ configured and
+/// successfully returns a price, the value is stamped here at creation time so
+/// that the agreed price is immutable for the lifetime of the task.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskMetadata {
@@ -30,12 +36,22 @@ pub struct TaskMetadata {
     pub status: TaskStatus,
     pub created_at: u64,
     pub expires_at: u64,
+    /// Oracle-quoted price in stroops, stamped at creation time.
+    /// `None` if no OracleManager is configured.
+    pub quoted_price_stroops: Option<i128>,
+    /// Asset pair used to fetch the quoted price (e.g. `XLM_USD`).
+    /// `None` when `quoted_price_stroops` is `None`.
+    pub price_pair: Option<Symbol>,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
     Task(BytesN<32>),
+    /// Admin address — the only address permitted to call `set_oracle_manager`.
+    Admin,
+    /// Optional OracleManager contract address used to resolve quoted prices.
+    OracleManager,
 }
 
 /// Emitted exactly once per successful `store_task_metadata` call, under
@@ -49,6 +65,9 @@ pub struct TaskCreatedEvent {
     pub assigned_agents: Vec<Address>,
     pub created_at: u64,
     pub expires_at: u64,
+    /// Oracle-quoted price in stroops at the moment of task creation.
+    /// `None` means no oracle was configured.
+    pub quoted_price_stroops: Option<i128>,
 }
 
 /// Emitted for a successful non-terminal status transition (currently only
@@ -81,6 +100,14 @@ pub struct TaskFinalizedEvent {
     pub finalized_at: u64,
 }
 
+/// Emitted when the admin sets a new OracleManager address.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleManagerSetEvent {
+    /// The new OracleManager contract address; `None` means it was cleared.
+    pub oracle_manager: Option<Address>,
+}
+
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -94,4 +121,14 @@ pub enum Error {
     NotAssignedAgent = 7,
     InvalidStatusTransition = 8,
     Expired = 9,
+    /// Caller is not the contract admin.
+    Unauthorized = 10,
+    /// Contract has already been initialized.
+    AlreadyInitialized = 11,
+    /// An OracleManager is configured but returned no usable price.
+    OraclePriceUnavailable = 12,
+    /// No price pair was supplied when an OracleManager is configured.
+    MissingPricePair = 13,
+    /// Contract has not been initialized.
+    NotInitialized = 14,
 }

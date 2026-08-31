@@ -13,6 +13,8 @@ dependencies = [
 name = "agent-marketplace"
 version = "0.1.0"
 dependencies = [
+ "oracle-manager",
+ "price-oracle",
  "soroban-sdk",
 ]
 
@@ -25,6 +27,7 @@ dependencies = [
  "rand_core",
  "soroban-sdk",
  "tokio",
+ "upgrade-manager",
 ]
 
 [[package]]
@@ -489,13 +492,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dispute-resolution"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -917,6 +913,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "oracle-manager"
+version = "0.1.0"
+dependencies = [
+ "price-oracle",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -973,6 +977,13 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "price-oracle"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
 ]
 
 [[package]]
@@ -1540,6 +1551,8 @@ dependencies = [
 name = "task-store"
 version = "0.1.0"
 dependencies = [
+ "oracle-manager",
+ "price-oracle",
  "soroban-sdk",
 ]
 
@@ -1681,6 +1694,13 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "upgrade-manager"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
 
 [[package]]
 name = "version_check"
