@@ -9,6 +9,7 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { idempotencyMiddleware } from "../../middleware/idempotency";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
@@ -50,8 +51,8 @@ export function createV2TasksRouter(
   const tasksRouter = Router();
   const jobQueue = queue ?? getGlobalJobQueue();
 
-  // POST /api/tasks — v2 format with enhanced response
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+  // POST /api/tasks — v2 format with enhanced response, idempotent
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??

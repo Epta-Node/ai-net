@@ -9,6 +9,7 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
+import { idempotencyMiddleware } from "../middleware/idempotency";
 import { NotFoundError, ValidationError, RateLimitError, AppError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
@@ -145,8 +146,8 @@ export function createTasksRouter(
    *             schema:
    *               $ref: '#/components/schemas/InternalServerError'
    */
-  // POST /api/tasks — rate-limited, then Zod-validated
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  // POST /api/tasks — idempotent, rate-limited, then Zod-validated
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
     try {
       const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
       // Body first, then the header (both spellings accepted), then "anonymous".
