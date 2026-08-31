@@ -160,6 +160,10 @@ pub struct Escrow {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
+    /// Contract admin address.
+    Admin,
+    /// Whether the contract is paused.
+    Paused,
     /// Stores the root [`Auction`] record for a task.
     Auction(Symbol),
     /// Stores a single [`SealedBid`] for a given (task, bidder) pair.

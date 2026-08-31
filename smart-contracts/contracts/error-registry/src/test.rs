@@ -1,14 +1,17 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Ledger as _, BytesN, Env, Symbol};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, BytesN, Env, Symbol};
 
 /// Build a contract client with the ledger clock pinned to `start_ts`.
 fn setup(start_ts: u64) -> (Env, ErrorRegistryContractClient<'static>) {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(start_ts);
     let id = env.register(ErrorRegistryContract, ());
     let client = ErrorRegistryContractClient::new(&env, &id);
+    let admin = Address::generate(&env);
+    client.initialize(&admin);
     (env, client)
 }
 
@@ -363,4 +366,58 @@ fn cleanup_on_empty_registry_is_safe() {
     assert_eq!(stats.scanned, 0);
     assert_eq!(stats.removed, 0);
     assert_eq!(stats.remaining, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Pause / unpause
+// ---------------------------------------------------------------------------
+
+#[test]
+fn initialize_sets_admin_and_unpaused() {
+    let (_env, client) = setup(1_000);
+    assert!(client.get_admin().is_some());
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn pause_blocks_submit_error() {
+    let (env, client) = setup(1_000);
+    client.pause();
+
+    let error_id = id(&env, 100);
+    let res = client.try_submit_error(&error_id, &1, &sym(&env, "m"), &sym(&env, "a"), &1_000);
+    assert_eq!(res, Err(Ok(Error::ContractPaused)));
+}
+
+#[test]
+fn unpause_allows_submit_error() {
+    let (env, client) = setup(1_000);
+    client.pause();
+    client.unpause();
+
+    let error_id = submit(&client, &env, 101, 42, 1_000);
+    assert!(client.get_error(&error_id).is_some());
+}
+
+#[test]
+fn get_error_still_works_when_paused() {
+    let (env, client) = setup(1_000);
+    let error_id = submit(&client, &env, 102, 42, 1_000);
+    client.pause();
+
+    // Reads should still work when paused.
+    assert!(client.get_error(&error_id).is_some());
+}
+
+#[test]
+fn cleanup_still_works_when_paused() {
+    let (env, client) = setup(1_000);
+    submit(&client, &env, 103, 1, 100); // expires 1_100
+
+    client.pause();
+    env.ledger().set_timestamp(2_000);
+
+    // Cleanup is permissionless and should still work when paused.
+    let stats = client.cleanup_expired_errors(&0);
+    assert_eq!(stats.removed, 1);
 }

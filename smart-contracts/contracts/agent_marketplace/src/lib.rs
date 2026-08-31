@@ -11,9 +11,7 @@ mod types;
 pub use errors::Error;
 pub use types::*;
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone)]
@@ -63,11 +61,30 @@ impl AgentMarketplaceContract {
         Ok(())
     }
 
-    /// Admin: pause or unpause the marketplace.
-    pub fn pause(env: Env, paused: bool) -> Result<(), Error> {
+    /// Admin: pause.
+    pub fn pause(env: Env) -> Result<(), Error> {
         require_admin(&env)?;
-        env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("market"), symbol_short!("paused")), ());
         Ok(())
+    }
+
+    /// Admin: unpause.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("market"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// List a service on the marketplace.
@@ -146,11 +163,7 @@ impl AgentMarketplaceContract {
         let mut results = Vec::new(&env);
         for id in ids.iter() {
             let key = DataKey::ServiceListing(id);
-            if let Some(listing) = env
-                .storage()
-                .persistent()
-                .get::<_, ServiceListing>(&key)
-            {
+            if let Some(listing) = env.storage().persistent().get::<_, ServiceListing>(&key) {
                 if !listing.active {
                     continue;
                 }
@@ -227,6 +240,8 @@ impl AgentMarketplaceContract {
 
     /// Complete a booking and release escrow payment to the agent owner.
     pub fn complete_booking(env: Env, booking_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         let booking_key = DataKey::Booking(booking_id.clone());
         let mut booking: Booking = env
             .storage()
@@ -252,9 +267,7 @@ impl AgentMarketplaceContract {
         listing.owner.require_auth();
 
         booking.completed = true;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         env.events().publish(
             (symbol_short!("market"), symbol_short!("svc_comp")),
@@ -269,6 +282,8 @@ impl AgentMarketplaceContract {
 
     /// Cancel a booking and refund the client.
     pub fn cancel_booking(env: Env, booking_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         let booking_key = DataKey::Booking(booking_id.clone());
         let mut booking: Booking = env
             .storage()
@@ -286,9 +301,7 @@ impl AgentMarketplaceContract {
         booking.client.require_auth();
 
         booking.cancelled = true;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         env.events().publish(
             (symbol_short!("market"), symbol_short!("svc_canc")),
@@ -302,11 +315,9 @@ impl AgentMarketplaceContract {
     }
 
     /// Rate a completed booking (1-5 stars).
-    pub fn rate_booking(
-        env: Env,
-        booking_id: Symbol,
-        rating: u32,
-    ) -> Result<(), Error> {
+    pub fn rate_booking(env: Env, booking_id: Symbol, rating: u32) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         if rating < 1 || rating > 5 {
             return Err(Error::InvalidPrice);
         }
@@ -328,27 +339,23 @@ impl AgentMarketplaceContract {
         booking.client.require_auth();
 
         booking.rating = rating;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         // Update agent rating aggregate
         let rating_key = DataKey::AgentRating(booking.agent_id.clone());
-        let mut agent_rating: AgentRating = env
-            .storage()
-            .persistent()
-            .get(&rating_key)
-            .unwrap_or(AgentRating {
-                agent_id: booking.agent_id.clone(),
-                total_ratings: 0,
-                rating_sum: 0,
-            });
+        let mut agent_rating: AgentRating =
+            env.storage()
+                .persistent()
+                .get(&rating_key)
+                .unwrap_or(AgentRating {
+                    agent_id: booking.agent_id.clone(),
+                    total_ratings: 0,
+                    rating_sum: 0,
+                });
 
         agent_rating.total_ratings += 1;
         agent_rating.rating_sum += rating as u64;
-        env.storage()
-            .persistent()
-            .set(&rating_key, &agent_rating);
+        env.storage().persistent().set(&rating_key, &agent_rating);
 
         Ok(())
     }

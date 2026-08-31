@@ -55,8 +55,8 @@
 //! but that situation does not exist here.
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, BytesN, Env, Map, Symbol,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map,
+    Symbol, Vec,
 };
 
 /// Maximum allowed TTL for a single record: **90 days** (in seconds).
@@ -113,6 +113,10 @@ pub struct CleanupStats {
 /// Storage keys. All entries live in `persistent` storage.
 #[contracttype]
 pub enum DataKey {
+    /// Contract admin address (instance storage).
+    Admin,
+    /// Whether the contract is paused (instance storage).
+    Paused,
     /// Primary storage: `error_id` -> [`ErrorRecord`].
     Record(BytesN<32>),
     /// Secondary lookup index: `error_code` -> `Vec<error_id>`.
@@ -130,13 +134,81 @@ pub enum Error {
     InvalidTtl = 2,
     /// `created_at + ttl_seconds` would overflow `u64`.
     TtlOverflow = 3,
+    /// The contract is paused and cannot accept mutations.
+    ContractPaused = 4,
 }
 
 #[contract]
 pub struct ErrorRegistryContract;
 
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::ContractPaused)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
+}
+
 #[contractimpl]
 impl ErrorRegistryContract {
+    /// Initialise the contract with an admin. Can only be called once.
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyExists);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+
+        env.events()
+            .publish((symbol_short!("errreg"), symbol_short!("init")), admin);
+        Ok(())
+    }
+
+    /// Return the current admin address, if set.
+    pub fn get_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("errreg"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("errreg"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     /// Submit a new error report with an explicit TTL.
     ///
     /// * `error_id` — unique 32-byte key for the record (caller-supplied, e.g. a
@@ -157,6 +229,7 @@ impl ErrorRegistryContract {
         agent_id: Symbol,
         ttl_seconds: u64,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         validate_ttl(ttl_seconds)?;
 
         let error_key = DataKey::Record(error_id.clone());

@@ -50,4 +50,6 @@ pub enum Error {
     WinnerNotDetermined = 16,
     /// The escrow for this auction has already been created.
     EscrowAlreadyCreated = 17,
+    /// The contract is paused and cannot accept mutations.
+    ContractPaused = 18,
 }

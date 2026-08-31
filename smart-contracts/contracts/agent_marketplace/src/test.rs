@@ -140,13 +140,12 @@ fn search_services_filters_by_price() {
         &24_u32,
     );
 
-    let results = client.search_services(
-        &Symbol::new(&env, "research"),
-        &1_000_000_i128,
-        &0_u32,
-    );
+    let results = client.search_services(&Symbol::new(&env, "research"), &1_000_000_i128, &0_u32);
     assert_eq!(results.len(), 1);
-    assert_eq!(results.get(0).unwrap().listing_id, Symbol::new(&env, "svc_cheap"));
+    assert_eq!(
+        results.get(0).unwrap().listing_id,
+        Symbol::new(&env, "svc_cheap")
+    );
 }
 
 #[test]
@@ -337,7 +336,7 @@ fn rate_invalid_score() {
 #[test]
 fn pause_blocks_listing() {
     let (env, client, _admin) = setup_with_admin();
-    client.pause(&true);
+    client.pause();
 
     let owner = Address::generate(&env);
     assert_eq!(
@@ -352,4 +351,87 @@ fn pause_blocks_listing() {
         ),
         Err(Ok(Error::ContractPaused))
     );
+}
+
+#[test]
+fn unpause_allows_listing() {
+    let (env, client, _admin) = setup_with_admin();
+    client.pause();
+    client.unpause();
+
+    let owner = Address::generate(&env);
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+    assert!(client.get_listing(&Symbol::new(&env, "svc1")).is_some());
+}
+
+#[test]
+fn is_paused_reflects_state() {
+    let (_env, client, _admin) = setup_with_admin();
+    assert!(!client.is_paused());
+    client.pause();
+    assert!(client.is_paused());
+    client.unpause();
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn pause_blocks_complete_booking() {
+    let (env, client, _admin) = setup_with_admin();
+    let owner = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+
+    let booking_id = Symbol::new(&env, "bk1");
+    client.book_agent(
+        &Symbol::new(&env, "svc1"),
+        &client_addr,
+        &1_000_000_i128,
+        &booking_id,
+    );
+
+    client.pause();
+
+    assert_eq!(
+        client.try_complete_booking(&booking_id),
+        Err(Ok(Error::ContractPaused))
+    );
+}
+
+#[test]
+fn search_services_still_works_when_paused() {
+    let (env, client, _admin) = setup_with_admin();
+    let owner = Address::generate(&env);
+
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+
+    client.pause();
+
+    // Reads should still work when paused.
+    let results = client.search_services(&Symbol::new(&env, "research"), &0, &0);
+    assert_eq!(results.len(), 1);
 }
