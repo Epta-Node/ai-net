@@ -80,7 +80,7 @@
 .dotPending {
   background: rgba(245, 158, 11, 0.12);
   border-color: rgba(245, 158, 11, 0.4);
-  color: #fbbf24;
+  color: #FCD34D;
 }
 
 .dotRunning {
@@ -188,6 +188,16 @@
   box-shadow: none;
 }
 
+.selectBtn:active {
+  background: rgba(139, 92, 246, 0.22);
+  transform: scale(0.9);
+}
+
+.selectBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .selectBtnActive {
   border-color: var(--primary);
   background: rgba(139, 92, 246, 0.3);
@@ -248,7 +258,7 @@
 .badgePending {
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #fbbf24;
+  color: #FCD34D;
 }
 
 .badgeRunning {
@@ -305,6 +315,16 @@
   border-color: rgba(56, 189, 248, 0.3);
   transform: none;
   box-shadow: none;
+}
+
+.detailBtn:active {
+  background: rgba(56, 189, 248, 0.18);
+  transform: scale(0.9);
+}
+
+.detailBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ─── Execution bar ─────────────────────────────────────────────── */
@@ -395,9 +415,18 @@
 }
 
 .errorToggle:hover {
-  color: #fca5a5;
+  color: #FCA5A5;
   transform: none;
   box-shadow: none;
+}
+
+.errorToggle:active {
+  color: #FECACA;
+}
+
+.errorToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .errorIcon {

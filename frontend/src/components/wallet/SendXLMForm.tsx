@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
-import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { signTransactionWithFreighter } from '../../services/freighter'
 import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
-import { FormField } from '../common/FormField'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
@@ -20,44 +21,31 @@ export function SendXLMForm() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  const validateField = useCallback(
-    (field: 'destination' | 'amount'): string | undefined => {
-      if (field === 'destination') {
-        if (!destination.trim()) return t('validation.destinationRequired')
-        if (!isValidStellarAddress(destination.trim()))
-          return t('validation.invalidStellarAddress')
-        return undefined
-      }
-      if (field === 'amount') {
-        if (!amount.trim()) return t('validation.amountRequired')
-        const parsed = parseFloat(amount)
-        if (isNaN(parsed) || parsed <= 0) return t('validation.amountPositive')
-        const availableBalance = parseFloat(balance)
-        if (parsed > availableBalance) return t('validation.insufficientBalance')
-        return undefined
-      }
-      return undefined
+  // Extend the base schema with a balance check that depends on the live
+  // wallet balance, so it stays fresh whenever the account changes.
+  const schemaWithBalance = useMemo(() => {
+    return walletTransferSchema.extend({
+      amount: walletTransferSchema.shape.amount.refine(
+        (val) => val <= parseFloat(balance),
+        t('validation.insufficientBalance')
+      )
+    })
+  }, [balance, t])
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<WalletTransferValues>({
+    mode: 'onBlur',
+    resolver: zodResolver(schemaWithBalance),
+    defaultValues: {
+      destination: '',
+      amount: undefined,
+      memo: '',
     },
-    // `t` belongs here: these messages are re-validated and re-rendered, so a
-    // stale closure would keep showing them in the previous language.
-    [destination, amount, balance, t]
-  )
-
-  const handleDestinationBlur = () => {
-    const err = validateField('destination')
-    setErrors((prev) => ({ ...prev, destination: err }))
-  }
-
-  const handleAmountBlur = () => {
-    const err = validateField('amount')
-    setErrors((prev) => ({ ...prev, amount: err }))
-  }
-
-  const handleSendClick = () => {
-    const destErr = validateField('destination')
-    const amtErr = validateField('amount')
-    const newErrors = { destination: destErr, amount: amtErr }
-    setErrors(newErrors)
+  })
 
   const handleSendClick = (data: WalletTransferValues) => {
     setConfirmation({
@@ -161,74 +149,79 @@ export function SendXLMForm() {
     <div className={styles.container}>
       <h3 className={styles.heading}>{t('wallet.send.heading')}</h3>
 
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="send-destination">
-          {t('wallet.send.destinationLabel')}
-        </label>
-        <input
-          id="send-destination"
-          placeholder="GABCD...1234"
-          error={errors.destination?.message}
-          isTouched={touchedFields.destination}
-          disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('destination')}
-        />
+      <form onSubmit={handleSubmit(handleSendClick)} noValidate>
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-destination">
+            {t('wallet.send.destinationLabel')}
+          </label>
+          <input
+            id="send-destination"
+            className={`${styles.input} ${errors.destination ? styles.inputError : ''}`}
+            type="text"
+            placeholder="GABCD...1234"
+            disabled={Boolean(successTx) || submitting}
+            {...register('destination')}
+          />
+          {errors.destination && (
+            <p id="destination-error" className={styles.error} role="alert">
+              {errors.destination.message}
+            </p>
+          )}
+        </div>
 
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="send-amount">
-          {t('wallet.send.amountLabel')}
-        </label>
-        <input
-          id="send-amount"
-          className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
-          type="number"
-          id="send-amount"
-          step="0.0000001"
-          min="0"
-          placeholder="0.0"
-          error={errors.amount?.message}
-          isTouched={touchedFields.amount}
-          helperText={`Available balance: ${parseFloat(balance).toFixed(7)} XLM`}
-          disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('amount')}
-        />
-        <p className={styles.helper}>
-          {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
-        </p>
-        {errors.amount && (
-          <p id="amount-error" className={styles.error} role="alert">
-            {errors.amount}
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-amount">
+            {t('wallet.send.amountLabel')}
+          </label>
+          <input
+            id="send-amount"
+            className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
+            type="number"
+            step="0.0000001"
+            min="0"
+            placeholder="0.0"
+            disabled={Boolean(successTx) || submitting}
+            {...register('amount')}
+          />
+          <p className={styles.helper}>
+            {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
           </p>
-        )}
-      </div>
+          {errors.amount && (
+            <p id="amount-error" className={styles.error} role="alert">
+              {errors.amount.message}
+            </p>
+          )}
+        </div>
 
-      <div className={styles.field}>
-        <label className={styles.label} htmlFor="send-memo">
-          {t('wallet.send.memoLabel')}
-        </label>
-        <input
-          id="send-memo"
-          className={styles.input}
-          type="text"
-          placeholder={t('wallet.send.memoPlaceholder')}
-          maxLength={28}
-          error={errors.memo?.message}
-          isTouched={touchedFields.memo}
-          disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('memo')}
-        />
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-memo">
+            {t('wallet.send.memoLabel')}
+          </label>
+          <input
+            id="send-memo"
+            className={`${styles.input} ${errors.memo ? styles.inputError : ''}`}
+            type="text"
+            placeholder={t('wallet.send.memoPlaceholder')}
+            maxLength={28}
+            disabled={Boolean(successTx) || submitting}
+            {...register('memo')}
+          />
+          {errors.memo && (
+            <p id="memo-error" className={styles.error} role="alert">
+              {errors.memo.message}
+            </p>
+          )}
+        </div>
 
-      <button
-        id="btn-send-xlm"
-        className={styles.sendButton}
-        onClick={handleSendClick}
-        disabled={submitting || Boolean(successTx)}
-      >
-        {submitting ? t('wallet.send.sending') : t('wallet.send.send')}
-      </button>
+        <button
+          id="btn-send-xlm"
+          type="submit"
+          className={styles.sendButton}
+          disabled={submitting || Boolean(successTx)}
+        >
+          {submitting ? t('wallet.send.sending') : t('wallet.send.send')}
+        </button>
+      </form>
 
       {submitError && (
         <p className={styles.error} role="alert" style={{ marginTop: 12 }}>

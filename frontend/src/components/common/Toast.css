@@ -95,6 +95,11 @@
   opacity: 1;
 }
 
+.toast button:active {
+  opacity: 0.5;
+  transform: scale(0.92);
+}
+
 .toast-success {
   background: #f0fdf4;
   border: 1px solid #86efac;

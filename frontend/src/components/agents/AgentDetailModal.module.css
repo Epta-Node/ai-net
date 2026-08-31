@@ -64,6 +64,16 @@
   box-shadow: none;
 }
 
+.closeButton:active {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(0.92);
+}
+
+.closeButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -117,13 +127,13 @@
 .statusActive {
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #6ee7b7;
+  color: #6EE7B7;
 }
 
 .statusInactive {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  color: #FCA5A5;
 }
 
 .pills {
@@ -135,7 +145,7 @@
 .pill {
   background: rgba(99, 102, 241, 0.15);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  color: #C7D2FE;
   padding: 4px 12px;
   border-radius: 9999px;
   font-size: 0.75rem;
@@ -152,7 +162,7 @@
 }
 
 .txLink:hover {
-  color: #a5b4fc;
+  color: #C7D2FE;
   text-decoration: underline;
 }
 

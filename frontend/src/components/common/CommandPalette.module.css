@@ -101,6 +101,11 @@
   color: #e2e8f0;
 }
 
+.closeButton:active {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(0.92);
+}
+
 .resultsWrapper {
   flex: 1;
   overflow-y: auto;
@@ -221,6 +226,16 @@
 
 .resultItem:hover {
   background: rgba(99, 102, 241, 0.08);
+}
+
+.resultItem:active {
+  background: rgba(99, 102, 241, 0.18);
+  transform: scale(0.99);
+}
+
+.resultItem:focus-visible {
+  outline: 2px solid rgba(129, 140, 248, 0.8);
+  outline-offset: -2px;
 }
 
 .resultIcon {

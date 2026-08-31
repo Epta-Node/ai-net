@@ -57,6 +57,16 @@
   box-shadow: none;
 }
 
+.retryButton:active {
+  background: rgba(239, 68, 68, 0.4);
+  transform: scale(0.96);
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Page skeleton */
 .filterSkeleton {
   display: flex;

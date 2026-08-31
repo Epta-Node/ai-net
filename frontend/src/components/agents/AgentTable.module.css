@@ -45,6 +45,15 @@
   color: var(--text-primary);
 }
 
+.sortButton:active {
+  transform: scale(0.95);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .row {
   cursor: pointer;
   transition: background 0.15s ease;
@@ -52,6 +61,10 @@
 
 .row:hover td {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.row:active td {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .row:focus-visible {
@@ -79,7 +92,7 @@
 .pill {
   background: rgba(99, 102, 241, 0.15);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  color: #C7D2FE;
   padding: 3px 10px;
   border-radius: 9999px;
   font-size: 0.72rem;
@@ -119,7 +132,7 @@
 }
 
 .starFg {
-  color: #fbbf24;
+  color: #FCD34D;
   fill: #fbbf24;
 }
 
@@ -143,13 +156,13 @@
 .statusActive {
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #6ee7b7;
+  color: #6EE7B7;
 }
 
 .statusInactive {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  color: #FCA5A5;
 }
 
 .detailsButton {
@@ -168,6 +181,15 @@
   border-color: rgba(99, 102, 241, 0.4);
   transform: none;
   box-shadow: none;
+}
+
+.detailsButton:active {
+  transform: scale(0.95);
+}
+
+.detailsButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Skeleton */

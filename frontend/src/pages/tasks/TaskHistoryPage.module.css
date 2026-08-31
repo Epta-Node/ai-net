@@ -72,6 +72,16 @@
   box-shadow: none;
 }
 
+.compareBtn:active {
+  background: var(--primary-active, #6d28d9);
+  transform: scale(0.96);
+}
+
+.compareBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .clearBtn {
   display: inline-flex;
   align-items: center;
@@ -92,6 +102,16 @@
   background: rgba(139, 92, 246, 0.12);
   transform: none;
   box-shadow: none;
+}
+
+.clearBtn:active {
+  background: rgba(139, 92, 246, 0.22);
+  transform: scale(0.95);
+}
+
+.clearBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ─── Error ─────────────────────────────────────────────────────── */
@@ -131,6 +151,16 @@
   background: rgba(239, 68, 68, 0.25);
   transform: none;
   box-shadow: none;
+}
+
+.retryButton:active {
+  background: rgba(239, 68, 68, 0.35);
+  transform: scale(0.96);
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ─── Responsive ────────────────────────────────────────────────── */

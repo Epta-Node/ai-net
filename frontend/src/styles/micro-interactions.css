@@ -50,13 +50,45 @@
   transition-duration: 500ms;
 }
 
+/* ─── Shared press state (issue #380) ─────────────────────────────────────
+   Tactile "pressed" feedback for buttons, chips, toggles and nav items.
+   Apply by adding the .pressable class alongside existing styles. */
+.pressable {
+  transition-property: transform, filter, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+.pressable:active:not(:disabled) {
+  transform: scale(var(--press-scale, 0.97));
+  filter: brightness(var(--press-brightness, 0.92));
+}
+
+.pressable:active:not(:disabled):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Elevated press variant for raised elements (cards, modals). */
+.pressable-elevated:active:not(:disabled) {
+  transform: scale(var(--press-scale, 0.97)) translateY(1px);
+  box-shadow: var(--elevation-1, 0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hover-lift,
   .hover-glow,
   .hover-scale,
   .transition-fast,
   .transition-normal,
-  .transition-slow {
+  .transition-slow,
+  .pressable,
+  .pressable-elevated {
     transition-duration: 0.01ms !important;
+  }
+
+  .pressable:active:not(:disabled),
+  .pressable-elevated:active:not(:disabled) {
+    transform: none;
   }
 }

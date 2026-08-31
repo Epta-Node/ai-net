@@ -140,6 +140,17 @@
 
 .pageButton:hover:not(:disabled) {
   background: var(--bg-surface-alt);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.pageButton:active:not(:disabled) {
+  background: rgba(99, 102, 241, 0.25);
+  transform: scale(0.94);
+}
+
+.pageButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .pageButton:disabled {
@@ -281,6 +292,17 @@
 .txLink:hover {
   color: #4f46e5;
   opacity: 0.8;
+}
+
+.txLink:active {
+  opacity: 0.6;
+  transform: scale(0.92);
+}
+
+.txLink:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Empty state */

@@ -53,6 +53,16 @@
   color: var(--text-primary, #1a202c);
 }
 
+.nav-item:active {
+  background: var(--bg-surface-alt, #e2e8f0);
+  color: var(--text-primary, #1a202c);
+  transform: scale(0.97);
+}
+
+.nav-item:active .nav-icon {
+  transform: scale(0.92);
+}
+
 .nav-item.active {
   background: var(--primary-light, rgba(59, 130, 246, 0.1));
   color: var(--primary, #3b82f6);

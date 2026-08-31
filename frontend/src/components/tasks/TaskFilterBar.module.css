@@ -134,10 +134,25 @@ input[type='search'].searchInput {
   box-shadow: none;
 }
 
+.toggleButton:active {
+  background: rgba(255, 255, 255, 0.09);
+  transform: scale(0.95);
+}
+
+.toggleButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .toggleButtonActive,
 .toggleButtonActive:hover {
   background: var(--primary);
   color: #fff;
+}
+
+.toggleButtonActive:active {
+  background: var(--primary-hover, #7c3aed);
+  transform: scale(0.95);
 }
 
 /* Coloured variants – status active states */
@@ -200,11 +215,26 @@ input[type='search'].searchInput {
   box-shadow: none;
 }
 
+.capChip:active {
+  background: rgba(139, 92, 246, 0.18);
+  transform: scale(0.95);
+}
+
+.capChip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .capChipActive,
 .capChipActive:hover {
   background: rgba(139, 92, 246, 0.25);
   border-color: var(--primary);
-  color: #c7d2fe;
+  color: #C7D2FE;
+}
+
+.capChipActive:active {
+  background: rgba(139, 92, 246, 0.35);
+  transform: scale(0.95);
 }
 
 /* ── Date range ── */
@@ -273,6 +303,16 @@ input[type='search'].searchInput {
   box-shadow: none;
 }
 
+.iconAction:active {
+  background: rgba(139, 92, 246, 0.22);
+  transform: scale(0.92);
+}
+
+.iconAction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .resetButton {
   display: inline-flex;
   align-items: center;
@@ -291,9 +331,19 @@ input[type='search'].searchInput {
 .resetButton:hover {
   background: rgba(239, 68, 68, 0.1);
   border-color: rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  color: #FCA5A5;
   transform: none;
   box-shadow: none;
+}
+
+.resetButton:active {
+  background: rgba(239, 68, 68, 0.18);
+  transform: scale(0.96);
+}
+
+.resetButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── Responsive ── */

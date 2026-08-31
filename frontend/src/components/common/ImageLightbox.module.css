@@ -97,6 +97,10 @@
   color: #ffffff;
 }
 
+.closeBtn:active {
+  transform: scale(0.94);
+}
+
 .mainStage {
   flex: 1;
   position: relative;
@@ -154,6 +158,10 @@
   transform: translateY(-50%) scale(1.08);
 }
 
+.navBtn:active {
+  transform: translateY(-50%) scale(0.94);
+}
+
 .navBtnLeft {
   left: 20px;
 }
@@ -189,6 +197,11 @@
 .thumbItem:hover {
   opacity: 0.9;
   border-color: rgba(255, 255, 255, 0.4);
+}
+
+.thumbItem:active {
+  transform: scale(0.94);
+  opacity: 1;
 }
 
 .thumbActive {

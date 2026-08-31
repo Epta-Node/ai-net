@@ -59,6 +59,11 @@
   background: var(--bg-secondary, #f1f5f9);
 }
 
+.sidebar-toggle:active {
+  background: var(--bg-surface-alt, #e2e8f0);
+  transform: scale(0.94);
+}
+
 .logo {
   font-size: 20px;
   font-weight: 700;
@@ -104,6 +109,13 @@
   border-color: var(--border-color, #2a3040);
   color: var(--text-primary, #f5f7fa);
   transform: translateY(-1px);
+}
+
+.notification-bell-btn:active {
+  background: var(--bg-secondary, #1a1f2e);
+  border-color: var(--border-color, #2a3040);
+  color: var(--text-primary, #f5f7fa);
+  transform: translateY(0) scale(0.94);
 }
 
 .notification-bell-btn.active {
@@ -177,6 +189,11 @@
   background: #dc2626;
 }
 
+.disconnect-btn:active {
+  background: #b91c1c;
+  transform: scale(0.96);
+}
+
 .language-switcher {
   display: flex;
   align-items: center;
@@ -205,6 +222,12 @@
 .language-option:hover {
   background: var(--bg-primary, #ffffff);
   color: var(--text-primary, #1a202c);
+}
+
+.language-option:active {
+  background: var(--bg-secondary, #f1f5f9);
+  color: var(--text-primary, #1a202c);
+  transform: scale(0.96);
 }
 
 .language-option.active {
