@@ -2307,3 +2307,5 @@ fn get_metadata_u32(
 mod test;
 #[cfg(test)]
 mod test_multisig;
+#[cfg(test)]
+mod property_tests;

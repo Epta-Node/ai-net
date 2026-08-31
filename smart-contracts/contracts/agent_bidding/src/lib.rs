@@ -52,6 +52,8 @@
 //! must produce commitments using this exact encoding.
 
 mod errors;
+#[cfg(test)]
+mod property_tests;
 mod types;
 
 pub use errors::Error;
