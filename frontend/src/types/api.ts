@@ -71,6 +71,9 @@ export interface NetworkStats {
   uptimePercent: number;
   tasksLast24h?: TimePoint[];
   xlmLast24h?: TimePoint[];
+  /** 7-day daily series for sparklines */
+  tasksLast7d?: TimePoint[];
+  xlmLast7d?: TimePoint[];
 }
 
 export interface PaymentEvent {
