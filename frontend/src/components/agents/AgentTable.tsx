@@ -23,21 +23,13 @@ function truncateId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <ArrowUpDown size={12} aria-hidden="true" />
-  return dir === 'asc' ? (
-    <ArrowUp size={12} aria-hidden="true" />
-  ) : (
-    <ArrowDown size={12} aria-hidden="true" />
-  )
-}
 
 export function AgentTable({
   agents,
   loading,
-  sortKey,
-  sortDir,
-  onSort,
+  sortKey: _sortKey,
+  sortDir: _sortDir,
+  onSort: _onSort,
   onRowClick,
 }: AgentTableProps) {
   const { t } = useTranslation()

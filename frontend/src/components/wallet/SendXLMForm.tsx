@@ -4,18 +4,29 @@ import { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { signTransactionWithFreighter } from '../../services/freighter'
-import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
-import { FormField } from '../common/FormField'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
+
+function isValidStellarAddress(address: string): boolean {
+  try {
+    Keypair.fromPublicKey(address)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function SendXLMForm() {
   const { t } = useTranslation()
   const { publicKey, keypair, connected, connectionMethod } = useWallet()
   const { balance } = useWalletBalance(publicKey)
 
-  const [confirmation, setConfirmation] = useState<WalletTransferValues | null>(null)
+  const [destination, setDestination] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [errors, setErrors] = useState<{ destination?: string; amount?: string }>({})
+  const [confirmation, setConfirmation] = useState<{ destination: string; amount: string; memo: string } | null>(null)
   const [successTx, setSuccessTx] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -56,14 +67,14 @@ export function SendXLMForm() {
   const handleSendClick = () => {
     const destErr = validateField('destination')
     const amtErr = validateField('amount')
-    const newErrors = { destination: destErr, amount: amtErr }
-    setErrors(newErrors)
+    setErrors({ destination: destErr, amount: amtErr })
 
-  const handleSendClick = (data: WalletTransferValues) => {
+    if (destErr || amtErr) return
+
     setConfirmation({
-      destination: data.destination.trim(),
-      amount: data.amount,
-      memo: data.memo?.trim() || '',
+      destination: destination.trim(),
+      amount: amount.trim(),
+      memo: memo.trim(),
     })
   }
 
@@ -135,7 +146,10 @@ export function SendXLMForm() {
 
       const txHash = submitData.hash
       setSuccessTx(txHash)
-      reset()
+      setDestination('')
+      setAmount('')
+      setMemo('')
+      setErrors({})
       setConfirmation(null)
     } catch (err) {
       const message = err instanceof Error ? err.message : t('wallet.send.failedToSend')
@@ -167,13 +181,20 @@ export function SendXLMForm() {
         </label>
         <input
           id="send-destination"
+          className={`${styles.input} ${errors.destination ? styles.inputError : ''}`}
+          type="text"
           placeholder="GABCD...1234"
-          error={errors.destination?.message}
-          isTouched={touchedFields.destination}
+          value={destination}
+          onChange={(e) => setDestination(e.target.value)}
+          onBlur={handleDestinationBlur}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('destination')}
         />
+        {errors.destination && (
+          <p id="destination-error" className={styles.error} role="alert">
+            {errors.destination}
+          </p>
+        )}
+      </div>
 
       <div className={styles.field}>
         <label className={styles.label} htmlFor="send-amount">
@@ -183,16 +204,13 @@ export function SendXLMForm() {
           id="send-amount"
           className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
           type="number"
-          id="send-amount"
           step="0.0000001"
           min="0"
           placeholder="0.0"
-          error={errors.amount?.message}
-          isTouched={touchedFields.amount}
-          helperText={`Available balance: ${parseFloat(balance).toFixed(7)} XLM`}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onBlur={handleAmountBlur}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('amount')}
         />
         <p className={styles.helper}>
           {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
@@ -214,12 +232,11 @@ export function SendXLMForm() {
           type="text"
           placeholder={t('wallet.send.memoPlaceholder')}
           maxLength={28}
-          error={errors.memo?.message}
-          isTouched={touchedFields.memo}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('memo')}
         />
+      </div>
 
       <button
         id="btn-send-xlm"

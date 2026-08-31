@@ -89,7 +89,7 @@ export function DataTable<T>({
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
 
-  const handleSelect = (key: string | number, row: T) => {
+  const handleSelect = (_key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 

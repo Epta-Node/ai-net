@@ -9,7 +9,6 @@ import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
 import { RecentTasksTable } from '../components/dashboard/RecentTasksTable';
-import { useToast } from '../hooks/useToast';
 import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonTable } from '../components/common/Skeleton';
 import styles from './dashboard.module.css';
 import type { TimePoint } from '../types/api';
@@ -82,11 +81,6 @@ export const DashboardPage: React.FC = () => {
     return <Navigate to="/" replace />;
   }
 
-  React.useEffect(() => {
-    if (error) {
-      showToast(error.message || 'Unable to load dashboard data.', 'error');
-    }
-  }, [error, showToast]);
 
   if (!address) return null; // render nothing while redirecting
   if (loading) {

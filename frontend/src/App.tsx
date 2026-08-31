@@ -17,41 +17,16 @@ import RendererDemoPage from './pages/RendererDemoPage'
 import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
-import { ProtectedRoute } from './components/common/ProtectedRoute'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import './components/common/Toast.css'
 
 /**
- * Everything that needs router context lives here, so `<Router>` (mounted by
- * `App` below) is already in place before `useCommandPalette` calls
- * `useNavigate`.
+ * AppContent lives inside <Router> so that useCommandPalette() (which calls
+ * useNavigate()) has a router context available.
  */
 const AppContent: React.FC = () => {
-  return (
-    <Router>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
-        </Routes>
-      </AppShell>
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
-  )
-}
-
-// Lives INSIDE <Router>: useCommandPalette() calls useNavigate(), which
-// throws the "may be used only in the context of a <Router>" invariant when
-// rendered above it.
-const RoutedContent: React.FC = () => {
   const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
 
   return (
@@ -109,9 +84,11 @@ const App: React.FC = () => {
         <ThemeProvider>
           <WalletProvider>
             <ToastProvider>
-              <Router>
-                <AppContent />
-              </Router>
+              <NotificationProvider>
+                <Router>
+                  <AppContent />
+                </Router>
+              </NotificationProvider>
             </ToastProvider>
           </WalletProvider>
         </ThemeProvider>
