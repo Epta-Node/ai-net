@@ -251,6 +251,7 @@ npm run test:e2e
 - [End-to-End Testing Guide](docs/e2e-testing.md): Automated test execution and validation.
 - [Release Engineering Guide](docs/RELEASE_ENGINEERING.md): Tagging, changelog generation, artifact signing, and release checklists.
 - [Frontend Architecture & Conventions](docs/FRONTEND_ARCHITECTURE.md): Folder structure, naming rules, state management, and component patterns.
+- [Frontend Visual Regression Testing](docs/visual-regression-testing.md): Screenshot coverage per UI surface, diff threshold, and the baseline update flow.
 
 ---
 

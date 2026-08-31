@@ -74,6 +74,54 @@ jobs:
       - name: Unit tests (vitest)
         run: npm test
 
+  frontend-visual:
+    name: frontend-visual-regression
+    # Runs after `frontend` so a broken build fails fast without spending
+    # time on the container pull + Playwright run.
+    needs: [frontend]
+    # Screenshot comparisons are inherently more environment-sensitive than
+    # unit/type checks; don't block merges on this suite yet. Failures are
+    # still visible on the PR checks list and via the uploaded report.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Pinned to the @playwright/test version resolved in package-lock.json.
+    # Visual baselines are pixel-tied to this image's fonts/rendering stack —
+    # bump this tag in lockstep whenever @playwright/test is upgraded, and
+    # regenerate baselines from the same image (see docs/visual-regression-testing.md).
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-jammy
+    env:
+      TZ: UTC
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run visual regression tests
+        run: npm run test:visual
+
+      - name: Upload visual regression report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-report
+          path: frontend/playwright-report-visual/
+          retention-days: 14
+
+      - name: Link visual diffs in job summary
+        if: failure()
+        run: |
+          {
+            echo "### Visual regression diffs detected";
+            echo "Open the **playwright-visual-report** artifact attached to this run (Summary tab → Artifacts) and load \`index.html\` for side-by-side expected/actual/diff images per failing snapshot.";
+          } >> "$GITHUB_STEP_SUMMARY"
+
   contracts:
     name: smart-contracts
     # Run after the lightweight Node jobs so that at most one Rust compilation
