@@ -20,14 +20,14 @@ export const FormField = React.forwardRef<HTMLInputElement | HTMLTextAreaElement
 
     let borderColor = 'var(--border-color)';
     if (isInvalid) {
-      borderColor = '#b91c1c'; // Red for invalid
+      borderColor = 'var(--status-danger-strong)'; // Red for invalid
     } else if (isValid) {
-      borderColor = '#16a34a'; // Green for valid
+      borderColor = 'var(--status-success-strong)'; // Green for valid
     }
 
     return (
-      <div style={{ marginBottom: 20 }} className={className}>
-        <label htmlFor={fieldId} style={{ display: 'block', marginBottom: 8, fontWeight: 600 }}>
+      <div style={{ marginBottom: 'var(--space-5)' }} className={className}>
+        <label htmlFor={fieldId} style={{ display: 'block', marginBottom: 'var(--space-2)', fontWeight: 600 }}>
           {label}
         </label>
         
@@ -38,8 +38,8 @@ export const FormField = React.forwardRef<HTMLInputElement | HTMLTextAreaElement
           aria-describedby={error ? errorId : undefined}
           style={{
             width: '100%',
-            padding: 12,
-            borderRadius: 10,
+            padding: 'var(--space-3)',
+            borderRadius: 'var(--radius-xl)',
             border: `1px solid ${borderColor}`,
             outline: 'none',
             ...props.style,
@@ -48,14 +48,14 @@ export const FormField = React.forwardRef<HTMLInputElement | HTMLTextAreaElement
         />
         
         {helperText && !isInvalid && (
-          <p style={{ marginTop: 8, fontSize: '0.875rem', color: '#6b7280' }}>
+          <p style={{ marginTop: 'var(--space-2)', fontSize: '0.875rem', color: 'var(--text-muted)' }}>
             {helperText}
           </p>
         )}
 
         <div aria-live="polite" id={errorId}>
           {isInvalid && (
-            <p style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#b91c1c', marginTop: 8, fontSize: '0.875rem' }}>
+            <p style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', color: 'var(--status-danger-strong)', marginTop: 'var(--space-2)', fontSize: '0.875rem' }}>
               <AlertCircle size={16} />
               {error}
             </p>
