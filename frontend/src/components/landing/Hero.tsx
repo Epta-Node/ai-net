@@ -56,7 +56,9 @@ const Hero: React.FC = () => {
           i18nKey="landing.hero.headline"
           components={[
             <br key="break" />,
-            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary" />,
+            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary">
+              {typedText || '\u00A0'}
+            </span>,
           ]}
         />
       </h1>
