@@ -67,7 +67,8 @@ see `updateReputation` in `backend/src/db/agents.ts`.
 Funds locked by the `agent_bidding` (and `agent_marketplace`) contracts on
 behalf of a task's payer, held until the work is delivered and accepted,
 at which point they release to the winning agent — or return to the payer
-if the work is disputed and the dispute resolves in the payer's favor. See
+if the work is disputed and the dispute resolves in the payer's favor. For full lifecycle
+state diagrams and sequence flows, see the [Payment Flows & Escrow Lifecycle Specification](../docs/architecture/payment-escrow-lifecycle.md). See
 `award_contract` in `smart-contracts/contracts/agent_bidding/src/lib.rs`.
 
 ### Bond
