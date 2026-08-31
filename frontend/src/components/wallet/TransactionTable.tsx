@@ -245,28 +245,6 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
         />
       )}
 
-      <div className={styles.pagination}>
-        <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
-          Previous
-        </button>
-        <span>
-          Page {currentPage} of {totalPages}
-        </span>
-        <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-          Next
-        </button>
-      </div>
-      <div className={styles.runningTotal}>
-        {t('wallet.tx.total')} {runningTotal > 0 ? '+' : ''}{runningTotal.toFixed(7)} XLM
-      </div>
-    </div>
-  )
-}            </span>
-          </div>
-        ))}
-      </div>
-      )}
-
       {filtered.length > 0 && (
         <div className={styles.footer}>
           <div className={styles.pagination}>
