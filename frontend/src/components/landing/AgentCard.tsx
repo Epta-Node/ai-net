@@ -82,10 +82,10 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
   return (
     <motion.div
       className="bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col cursor-pointer group relative overflow-hidden"
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      variants={cardEntrance(index)}
+      initial="hidden"
+      whileInView="visible"
       viewport={{ once: true, margin: '-30px' }}
-      transition={{ duration: 0.4, delay: index * 0.08 }}
       whileHover={{ y: -4 }}
     >
       <div className="absolute inset-0 bg-gradient-primary opacity-0 group-hover:opacity-[0.03] transition-opacity duration-500" />

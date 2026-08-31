@@ -1,6 +1,14 @@
+/**
+ * Express application factory.
+ *
+ * Wires up middleware, routes, the WebSocket task stream, background
+ * services (job queue/worker, heartbeat cleanup, metrics), and the global
+ * error handler. Called by tests (`opts.disableCompression`, custom
+ * dispatch/queue, etc.) and by the server entry-point (`src/index.ts`).
+ */
+
 import express, { Request, Response, NextFunction } from "express";
 import { createServer, Server as HttpServer } from "http";
-import { randomUUID } from "crypto";
 import swaggerUi from "swagger-ui-express";
 
 import {
@@ -24,7 +32,17 @@ import {
 } from "./routes/stream";
 import { metricsMiddleware, metricsService } from "../services/metrics";
 import type { DAGNode } from "../types/task";
-import { adminAuthMiddleware } from "./middleware/auth";
+import {
+  createPaymentReleaseFn,
+  type StellarReleasePaymentFn,
+} from "../payment";
+import { agentsRouter } from "./routes/agents";
+import { healthRouter } from "./routes/health";
+import { createStatsRouter } from "./routes/stats";
+import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
+import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
+import { authMiddleware } from "./middleware/auth";
+import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
 import { createCorsMiddleware } from "./middleware/cors";
 import { errorHandler } from "./middleware/errorHandler";
@@ -42,31 +60,42 @@ import { createStatsRouter } from "./routes/stats";
 import { attachTaskStream, getStreamConnectionCount, type TaskStreamOptions } from "./routes/stream";
 import { createV1TasksRouter } from "./routes/v1/tasks";
 import { createV2TasksRouter } from "./routes/v2/tasks";
+import { createAuthRouter } from "./routes/auth";
+import { type AuthService } from "../services/auth";
+import { createLogger } from "../utils/logger";
+import { createTaskDb, getTaskDb } from "../db/tasks";
+import { ValidationError, UnauthorizedError, NotFoundError, AppError } from "../errors";
+import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
+import { createTaskJobHandler } from "../coordinator/coordinator";
+import {
+  openapiSpec,
+  swaggerUiOptions,
+  getOpenapiJson,
+  getOpenapiYaml,
+} from "./docs";
+import {
+  getGlobalJobQueue,
+  JobWorker,
+  type JobQueue,
+} from "../queue";
+import { createAdminQueueRouter } from "./routes/admin";
+import { metricsService, metricsMiddleware } from "../services/metrics";
 
 export interface AppOptions {
-  /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry. */
   dispatch?: DispatchFn;
-  /** Called after each node completes; defaults to no-op payment release. */
   releasePayment?: PaymentReleaseFn;
-  /** Override the EventStore used for stream replay. */
   eventStore?: EventStore;
-  /** Heartbeat / auth timing for the WebSocket stream. */
   stream?: TaskStreamOptions;
-  /** Agent registry used to resolve endpoint URLs for HTTP dispatch. */
   agentRegistry?: AgentRegistry;
-  /** Enable background heartbeat cleanup service. */
   enableHeartbeatCleanup?: boolean;
-  /** Custom options for heartbeat cleanup service. */
   heartbeatOptions?: HeartbeatServiceOptions;
-  /** Options for the payment reconciliation router. */
   reconciliation?: ReconciliationRouterOptions;
-  /** Disable response compression. Default: false. */
   disableCompression?: boolean;
-  /** Custom job queue instance. */
   queue?: JobQueue;
-  /** Custom job worker instance. */
   jobWorker?: JobWorker;
-  /** Enable background queue worker. Default: true. */
+  /** Custom auth service instance */
+  authService?: AuthService;
+  /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
 }
 
@@ -84,15 +113,14 @@ export function createApp(opts: AppOptions = {}): {
   httpServer: HttpServer;
   close: (callback?: () => void) => void;
 } {
+  const config = getConfig();
+  const logger = createLogger({ module: "api-app" });
   const app = express();
 
   app.use(express.json());
   app.use((_req, res, next) => {
-    if (process.env.NODE_ENV === "production") {
-      res.setHeader(
-        "Strict-Transport-Security",
-        "max-age=31536000; includeSubDomains; preload",
-      );
+    if (config.NODE_ENV === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }
     next();
   });
@@ -107,7 +135,7 @@ export function createApp(opts: AppOptions = {}): {
     }),
   );
 
-  if (!opts.disableCompression && process.env.NODE_ENV !== "test") {
+  if (!opts.disableCompression && config.NODE_ENV !== "test") {
     app.use(...compressionMiddleware());
   }
 
@@ -129,13 +157,26 @@ export function createApp(opts: AppOptions = {}): {
   }
 
   const heartbeatService = createHeartbeatService(opts.heartbeatOptions);
-  if (opts.enableHeartbeatCleanup || (opts.enableHeartbeatCleanup !== false && process.env.NODE_ENV !== "test")) {
+  if (
+    opts.enableHeartbeatCleanup ||
+    (opts.enableHeartbeatCleanup !== false && config.NODE_ENV !== "test")
+  ) {
     heartbeatService.start();
   }
 
-  app.use("/health", healthRouter);
-  app.use("/api/stats", createStatsRouter(getTaskDb()));
+  // ── Health routes ───────────────────────────────────────────────────────────
+  app.use("/health", publicLimiter.middleware, healthRouter);
 
+  // ── Stats routes ───────────────────────────────────────────────────────────
+  app.use("/api/stats", publicLimiter.middleware, createStatsRouter(getTaskDb()));
+
+  // ── Auth routes ────────────────────────────────────────────────────────────
+  app.use("/api/auth", createAuthRouter(opts.authService));
+
+  // ── Agent routes ───────────────────────────────────────────────────────────
+  // Public reads use the public limiter; registration uses the stricter
+  // per-legacy register limiter (kept for backward compatibility).
+  app.use("/api/agents", publicLimiter.middleware);
   app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
@@ -155,30 +196,52 @@ export function createApp(opts: AppOptions = {}): {
   });
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, swaggerUiOptions));
 
+  // ── Task routes ────────────────────────────────────────────────────────────
+  // Authenticated task creation uses the tighter authed limiter.
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
-  app.use("/api/tasks", (req, res, next) => {
+
+  app.use("/api/tasks", authedLimiter.middleware, (req, res, next) => {
     const apiVersion = res.locals.apiVersion || "1.0";
     if (apiVersion.startsWith("1.")) {
       return v1TasksRouter(req, res, next);
+    } else {
+      return v2TasksRouter(req, res, next);
     }
     return v2TasksRouter(req, res, next);
   });
 
-  app.use(
-    "/api/admin",
-    adminAuthMiddleware,
-    createAdminRouter({ queue: jobQueue, reconciliation: opts.reconciliation }),
-  );
-  app.use("/api/reconciliation", adminAuthMiddleware, createReconciliationRouter(opts.reconciliation));
+  // ── Admin Queue routes ─────────────────────────────────────────────────────
+  app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
+  app.use("/api/admin", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
 
-  const httpServer = createServer(app);
-  const eventStore = opts.eventStore ?? eventBus.store;
+  // ── Feature-flag admin routes (#425) ───────────────────────────────────────
+  app.use("/api/admin/flags", createFlagsRouter());
+
+  // ── Versioning lifecycle endpoint (#426) ───────────────────────────────────
+  app.use("/api/versions", createVersionsRouter());
+
+  // ── Payment reconciliation routes ──────────────────────────────────────────
+  app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
+
+  app.use((_req: Request, res: Response) => {
+    res.status(404).json({
+      error: { message: "Not found", code: "NOT_FOUND" },
+      requestId: res.locals.requestId,
+      traceId: res.locals.traceId,
+    });
+  });
+
+  app.use(errorHandler);
+
   const detachStream = attachTaskStream({
     httpServer,
     eventStore,
     eventBus,
     getTask,
+    heartbeatIntervalMs: config.WS_HEARTBEAT_INTERVAL_MS,
+    pongTimeoutMs: config.WS_PONG_TIMEOUT_MS,
+    inactivityTimeoutMs: config.WS_INACTIVITY_TIMEOUT_MS,
     ...opts.stream,
   });
 
@@ -187,8 +250,6 @@ export function createApp(opts: AppOptions = {}): {
     listening: httpServer.listening,
     connections: getStreamConnectionCount(),
   }));
-
-  app.use(errorHandler);
 
   function close(callback?: () => void): void {
     jobWorker.stop();
@@ -202,11 +263,21 @@ export function createApp(opts: AppOptions = {}): {
     }
   }
 
+  const routeCount = (app as unknown as { _router?: { stack?: unknown[] } })._router?.stack?.length;
+  logger.debug({ routeCount }, "api app initialized");
   return { httpServer, close };
 }
 
+/**
+ * Build a DispatchFn that looks up the cheapest agent for a node's type in the
+ * provided registry and forwards the call to that agent via HTTP.
+ *
+ * If no registry is provided (e.g. during tests that supply their own dispatch)
+ * the returned function throws a clear error so misconfiguration is obvious at
+ * runtime rather than producing a silent no-op.
+ */
 function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
-  return async (taskId: string, node: DAGNode, context: string): Promise<unknown> => {
+  return async (_taskId: string, node: DAGNode, context: string): Promise<unknown> => {
     if (!registry) {
       throw new Error(
         "No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.",
@@ -215,7 +286,7 @@ function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
 
     const agents = await registry.getAgents(node.type);
     if (!agents || agents.length === 0) {
-      throw new Error(`No agent registered for type: ${node.type}`);
+      throw new AppError(`No agent registered for type: ${node.type}`, 500, "AGENT_NOT_FOUND");
     }
 
     const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];

@@ -24,6 +24,7 @@ export interface SerializedError {
 export class AppError extends Error {
   public readonly code: string;
   public readonly statusCode: number;
+  public readonly isOperational: boolean;
   public readonly details?: AppErrorDetails;
   public readonly correlationId: string;
   public readonly timestamp: string;
@@ -39,6 +40,7 @@ export class AppError extends Error {
     this.name = this.constructor.name;
     this.statusCode = statusCode;
     this.code = code;
+    this.isOperational = true;
     this.details = details;
     this.correlationId = correlationId ?? randomUUID();
     this.timestamp = new Date().toISOString();

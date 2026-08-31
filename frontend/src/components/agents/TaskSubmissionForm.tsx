@@ -1,15 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
 import type { TFunction } from 'i18next';
+import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
-import { useToast } from '../../hooks/useToast';
 import { useToast } from '../../context/ToastContext';
-import { FormField } from '../common/FormField';
-import { taskSchema, type TaskFormValues } from '../../schemas/task';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 // Only the label is translated: `value` is the wire format the API and the zod
@@ -43,10 +44,7 @@ export function TaskSubmissionForm() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
-  const { submitTask, status, data } = useTaskSubmit();
-  const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
-  const { showToast } = useToast();
 
   const agentPreferences = useMemo(
     () =>
@@ -64,7 +62,7 @@ export function TaskSubmissionForm() {
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isSubmitting, isSubmitted },
+    formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
     mode: 'onBlur',
     resolver: zodResolver(taskSchema),
@@ -222,14 +220,14 @@ export function TaskSubmissionForm() {
           <button
             type="submit"
             id="btn-submit-task"
-            disabled={isLoading || !isValid}
+            disabled={isLoading}
             style={{
               padding: '12px 20px',
               borderRadius: 'var(--radius-xl)',
               border: 'none',
-              background: (!isValid || isLoading) ? 'var(--text-muted)' : 'var(--accent-info)',
-              color: 'var(--text-inverse)',
-              cursor: (!isValid || isLoading) ? 'not-allowed' : 'pointer',
+              background: isLoading ? '#9ca3af' : '#2563eb',
+              color: '#ffffff',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
               transition: 'background 0.2s',
             }}
           >
