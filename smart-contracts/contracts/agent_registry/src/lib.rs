@@ -126,6 +126,11 @@ pub const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum upper bound on page size to guarantee execution within one ledger footprint budget.
 pub const MAX_PAGE_SIZE: u32 = 50;
 
+/// Billing period applied when `create_subscription` is called with `0` (30 days).
+pub const DEFAULT_SUBSCRIPTION_PERIOD_SECS: u64 = 2_592_000;
+/// Minimum accepted subscription billing period (1 hour).
+pub const MIN_SUBSCRIPTION_PERIOD_SECS: u64 = 3_600;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /// Input / stored agent record.
@@ -519,6 +524,16 @@ fn min_bond(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::MinBond)
         .unwrap_or(DEFAULT_MIN_BOND_STROOPS)
+}
+
+/// Prorated refund for cancelling `sub` at `now`: the payment for the unused
+/// remainder of the current billing period, capped at one full period.
+fn prorated_refund(sub: &Subscription, now: u64) -> i128 {
+    if sub.period_secs == 0 || now >= sub.end_time {
+        return 0;
+    }
+    let window = (sub.end_time - now).min(sub.period_secs);
+    sub.payment_amount.saturating_mul(window as i128) / (sub.period_secs as i128)
 }
 
 #[contractimpl]
