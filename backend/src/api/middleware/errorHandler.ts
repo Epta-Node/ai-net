@@ -132,6 +132,7 @@ export function errorHandler(
       code: "INTERNAL_ERROR",
       correlationId,
       timestamp: new Date().toISOString(),
+      path: req.path,
       ...(isDevelopment && err instanceof Error
         ? { stack: err.stack }
         : {}),
