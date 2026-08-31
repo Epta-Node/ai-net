@@ -365,7 +365,7 @@ impl AgentRegistryContract {
             crate::events::ContractUpgradedEvent {
                 old_version,
                 new_version,
-                wasm_hash: new_wasm_hash,
+                wasm_hash: new_wasm_hash.clone(),
                 admin,
                 upgrade_ledger: env.ledger().sequence(),
             },

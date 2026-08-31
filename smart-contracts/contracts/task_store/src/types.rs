@@ -1,8 +1,8 @@
 use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Vec};
 
-pub const DEFAULT_TTL_DAYS: u32 = 90;
-pub const MAX_TTL_DAYS: u32 = 365;
-pub const MAX_COMPRESSED_DAG_BYTES: u32 = 8 * 1024;
+pub const DEFAULT_TTL_DAYS: u32 = 14;
+pub const MAX_TTL_DAYS: u32 = 30;
+pub const MAX_COMPRESSED_DAG_BYTES: u32 = 4 * 1024;
 pub const LEDGERS_PER_DAY: u32 = 17_280;
 
 /// Schema version stamped on every task lifecycle event payload (see
