@@ -1,11 +1,12 @@
 import cors from 'cors';
+import { allowedOrigins } from '../../config';
 
 export function createCorsMiddleware() {
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'];
+  const origins = allowedOrigins();
 
   return cors({
     origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || origins.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));

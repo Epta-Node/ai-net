@@ -1,8 +1,8 @@
 use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Symbol, Vec};
 
-pub const DEFAULT_TTL_DAYS: u32 = 90;
-pub const MAX_TTL_DAYS: u32 = 365;
-pub const MAX_COMPRESSED_DAG_BYTES: u32 = 8 * 1024;
+pub const DEFAULT_TTL_DAYS: u32 = 14;
+pub const MAX_TTL_DAYS: u32 = 30;
+pub const MAX_COMPRESSED_DAG_BYTES: u32 = 4 * 1024;
 pub const LEDGERS_PER_DAY: u32 = 17_280;
 
 /// Schema version stamped on every task lifecycle event payload (see
@@ -47,6 +47,8 @@ pub struct TaskMetadata {
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
+    Admin,
+    Version,
     Task(BytesN<32>),
     /// Admin address — the only address permitted to call `set_oracle_manager`.
     Admin,
@@ -121,14 +123,8 @@ pub enum Error {
     NotAssignedAgent = 7,
     InvalidStatusTransition = 8,
     Expired = 9,
-    /// Caller is not the contract admin.
-    Unauthorized = 10,
-    /// Contract has already been initialized.
-    AlreadyInitialized = 11,
-    /// An OracleManager is configured but returned no usable price.
-    OraclePriceUnavailable = 12,
-    /// No price pair was supplied when an OracleManager is configured.
-    MissingPricePair = 13,
-    /// Contract has not been initialized.
-    NotInitialized = 14,
+    AlreadyInitialized = 10,
+    NotInitialized = 11,
+    Unauthorized = 12,
+    UpgradeFailed = 13,
 }

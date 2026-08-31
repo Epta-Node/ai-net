@@ -32,11 +32,10 @@ pub use types::{
     MAX_TTL_DAYS, TASK_LIFECYCLE_EVENT_VERSION,
 };
 
-use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, IntoVal, Symbol, Val, Vec,
-};
+use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
 
 const SECONDS_PER_DAY: u64 = 86_400;
+const CONTRACT_VERSION: &str = "1.0.0";
 
 fn ttl_ledgers(ttl_days: u32) -> u32 {
     ttl_days.saturating_mul(LEDGERS_PER_DAY)
@@ -136,64 +135,46 @@ pub struct TaskStoreContract;
 
 #[contractimpl]
 impl TaskStoreContract {
-    // ── Lifecycle ──────────────────────────────────────────────────────────────
-
-    /// Initialise the contract with an admin address.
-    ///
-    /// Must be called exactly once before `set_oracle_manager` can be used.
-    /// Calling `store_task_metadata` without initialising is valid; it simply
-    /// means no admin-managed oracle will be configured.
     pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
         Ok(())
     }
 
-    // ── Admin operations ───────────────────────────────────────────────────────
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
 
-    /// Set (or clear) the OracleManager contract used to quote task prices.
-    ///
-    /// Pass `None` to disable oracle pricing.  Only the admin may call this.
-    pub fn set_oracle_manager(env: Env, oracle_manager: Option<Address>) -> Result<(), Error> {
-        require_admin(&env)?;
-        match &oracle_manager {
-            Some(addr) => env.storage().instance().set(&DataKey::OracleManager, addr),
-            None => env.storage().instance().remove(&DataKey::OracleManager),
-        }
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
 
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
         env.events().publish(
-            (symbol_short!("task_str"), symbol_short!("ora_set")),
-            OracleManagerSetEvent {
-                oracle_manager: oracle_manager.clone(),
-            },
+            (symbol_short!("task_str"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
         );
-
         Ok(())
     }
 
-    /// Return the configured OracleManager address, if any.
-    pub fn get_oracle_manager(env: Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::OracleManager)
-    }
-
-    // ── Core operations ────────────────────────────────────────────────────────
-
-    /// Store task metadata and stamp an oracle-quoted price when configured.
-    ///
-    /// # Oracle pricing behaviour
-    ///
-    /// * If no OracleManager is configured, `price_pair` is ignored and
-    ///   `TaskMetadata::quoted_price_stroops` is `None`.
-    /// * If an OracleManager is configured but `price_pair` is `None`, the
-    ///   call returns `Error::MissingPricePair`.
-    /// * If an OracleManager is configured and `price_pair` is supplied but
-    ///   the oracle returns no usable price (stale + no fallback), the call
-    ///   returns `Error::OraclePriceUnavailable`.
-    /// * Otherwise the resolved price is stamped immutably onto the task.
-    #[allow(clippy::too_many_arguments)]
     pub fn store_task_metadata(
         env: Env,
         submitter: Address,
