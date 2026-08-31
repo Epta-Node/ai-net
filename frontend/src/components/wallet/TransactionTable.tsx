@@ -8,7 +8,7 @@ import styles from './TransactionTable.module.css'
 import { formatDate } from '../../utils/format'
 import { ExportButton } from './ExportButton'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
-import { EmptyState } from '../common/EmptyState'
+import { useSelectTypeahead } from '../../hooks/useSelectTypeahead'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
@@ -51,6 +51,18 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   const [dateTo, setDateTo] = useState('')
   const [pageSize, setPageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
+  const pageSizeOptions = useMemo(
+    () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
+    []
+  )
+  const selectPageSize = (size: number) => {
+    setPageSize(size)
+    setPage(1)
+  }
+  const handlePageSizeTypeahead = useSelectTypeahead({
+    options: pageSizeOptions,
+    onMatch: selectPageSize,
+  })
 
   const filtered = useMemo(
     () => filterTransactions(transactions, { search, from: dateFrom || null, to: dateTo || null }),
@@ -248,9 +260,9 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
               <select
                 className={styles.pageSizeSelect}
                 value={pageSize}
+                onKeyDown={handlePageSizeTypeahead}
                 onChange={(e) => {
-                  setPageSize(Number(e.target.value))
-                  resetToFirstPage()
+                  selectPageSize(Number(e.target.value))
                 }}
               >
                 {PAGE_SIZE_OPTIONS.map((size) => (

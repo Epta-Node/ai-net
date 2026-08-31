@@ -24,12 +24,13 @@ function truncateId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
+
 export function AgentTable({
   agents,
   loading,
   sortKey: _sortKey,
   sortDir: _sortDir,
-  onSort,
+  onSort: _onSort,
   onRowClick,
 }: AgentTableProps) {
   const { t } = useTranslation()

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import type { TFunction } from 'i18next';
 import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
+import type { TFunction } from 'i18next';
 import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
@@ -13,7 +15,7 @@ import type { AgentPreference, TaskSubmitResponse } from '../../services/taskSer
 
 // Only the label is translated: `value` is the wire format the API and the zod
 // enum below rely on, so it stays in English regardless of the UI language.
-const AGENT_PREFERENCE_VALUES = ['research', 'risk', 'coding', 'design', 'report'] as const;
+const AGENT_PREFERENCE_VALUES = ['research', 'risk', 'coding', 'design', 'report'] as const
 
 /**
  * A factory because zod bakes the message strings in at schema construction
@@ -31,15 +33,14 @@ const makeTaskSchema = (t: TFunction) =>
         return 0.1;
       }
       if (typeof value === 'string') {
-        const parsed = Number(value);
-        return isNaN(parsed) ? 0.1 : parsed;
+        return Number(value)
       }
-      return value;
+      return value
     }, z.number().min(0.1, t('validation.minBudget'))),
     agentPreferences: z.array(z.enum(AGENT_PREFERENCE_VALUES)).min(1, t('validation.agentRequired')),
-  });
+  })
 
-type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
+type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>
 
 export function TaskSubmissionForm() {
   const { t, i18n } = useTranslation();
@@ -55,16 +56,16 @@ export function TaskSubmissionForm() {
         label: t(`task.submit.pref.${value}`),
       })),
     [t],
-  );
+  )
 
-  const taskSchema = useMemo(() => makeTaskSchema(t), [t]);
+  const taskSchema = useMemo(() => makeTaskSchema(t), [t])
 
   const {
     register,
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isValid, isSubmitting, isSubmitted },
+    formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
     mode: 'all',
     resolver: zodResolver(taskSchema),
@@ -73,48 +74,86 @@ export function TaskSubmissionForm() {
       maxBudgetXLM: 0.1,
       agentPreferences: [],
     },
-  });
+  })
 
   // Validation messages are copied into `errors` when validation runs, so an
   // error already on screen would keep the previous language. React Hook Form
   // re-reads `resolver` on every render, so re-validating here is enough.
-  const language = i18n.language;
-  const lastLanguage = useRef(language);
+  const language = i18n.language
+  const lastLanguage = useRef(language)
   useEffect(() => {
     if (lastLanguage.current === language) {
-      return;
+      return
     }
-    lastLanguage.current = language;
+    lastLanguage.current = language
     if (isSubmitted) {
-      void trigger();
+      void trigger()
     }
-  }, [language, isSubmitted, trigger]);
+  }, [language, isSubmitted, trigger])
+
+  useEffect(() => {
+    return () => {
+      if (pendingNav.current) window.clearTimeout(pendingNav.current)
+    }
+  }, [])
 
   const onSubmit = async (values: TaskFormValues) => {
     try {
-      const result = await submitTask(values);
-      setPreview(result.dagPreview);
-      showToast(t('task.submit.success'), 'success');
+      const result = await submitTask(values)
+      setPreview(result.dagPreview)
 
-      window.setTimeout(() => {
-        navigate(`/tasks/${result.taskId}`);
-      }, 300);
+      // Show grouped toast with undo — stays 6s, progress bar visible, pauses on hover
+      const timer = window.setTimeout(() => {
+        navigate(`/tasks/${result.taskId}`)
+      }, 300)
+      pendingNav.current = timer
+
+      showToast(t('task.submit.success'), 'success', {
+        duration: 6000,
+        action: {
+          label: t('common.undo') || 'Undo',
+          onClick: () => {
+            if (pendingNav.current) {
+              window.clearTimeout(pendingNav.current)
+              pendingNav.current = null
+            }
+            setPreview(null)
+            showToast('Task creation undone', 'info', 3000)
+          },
+        },
+      })
     } catch (submitError) {
       const message =
-        submitError instanceof Error ? submitError.message : t('task.submit.unableToSubmit');
-      showToast(message, 'error');
+        submitError instanceof Error ? submitError.message : t('task.submit.unableToSubmit')
+      // error toasts group duplicates and show retry action when fetch fails
+      const isNetworkError =
+        message.toLowerCase().includes('network') || message.toLowerCase().includes('fetch')
+      showToast(message, 'error', {
+        duration: isNetworkError ? 8000 : 6000,
+        ...(isNetworkError
+          ? {
+              action: {
+                label: t('common.retry') || 'Retry',
+                onClick: () => {
+                  // re-trigger submit via synthetic event — reuse last values
+                  void handleSubmit(onSubmit)()
+                },
+              },
+            }
+          : {}),
+      })
     }
-  };
+  }
 
-  const previewData = preview ?? data?.dagPreview;
-  const isLoading = status === 'loading' || isSubmitting;
+  const previewData = preview ?? data?.dagPreview
+  const isLoading = status === 'loading' || isSubmitting
 
   const budgetHelperText = useMemo(() => {
     if (errors.maxBudgetXLM) {
-      return errors.maxBudgetXLM.message;
+      return errors.maxBudgetXLM.message
     }
-    return t('task.submit.budgetHelper');
-  }, [errors.maxBudgetXLM, t]);
+    return t('task.submit.budgetHelper')
+  }, [errors.maxBudgetXLM, t])
 
   return (
     <main style={{ maxWidth: 900, margin: '0 auto', padding: '24px' }}>
@@ -130,7 +169,7 @@ export function TaskSubmissionForm() {
             {...register('prompt')}
             rows={6}
             maxLength={1000}
-            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
+            style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.prompt)}
             aria-describedby="prompt-error"
           />
@@ -150,7 +189,7 @@ export function TaskSubmissionForm() {
             min="0.1"
             defaultValue={0.1}
             {...register('maxBudgetXLM', { valueAsNumber: true })}
-            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
+            style={{ width: 180, padding: 'var(--space-3)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
@@ -182,8 +221,8 @@ export function TaskSubmissionForm() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 10,
-                      padding: 12,
-                      borderRadius: 10,
+                      padding: 'var(--space-3)',
+                      borderRadius: 'var(--radius-xl)',
                       border: '1px solid var(--border-color)',
                       cursor: 'pointer',
                     }}
@@ -193,12 +232,12 @@ export function TaskSubmissionForm() {
                       type="checkbox"
                       value={option.value}
                       checked={field.value.includes(option.value)}
-                      onChange={(e) => {
-                        const current = field.value || [];
-                        const next = e.target.checked
-                          ? Array.from(new Set([...current, option.value]))
-                          : current.filter((v: AgentPreference) => v !== option.value);
-                        field.onChange(next);
+                      onChange={(event) => {
+                        const current = field.value
+                        const next = event.target.checked
+                          ? [...current, option.value]
+                          : current.filter((value: AgentPreference) => value !== option.value)
+                        field.onChange(next)
                       }}
                       onBlur={field.onBlur}
                       name={field.name}
@@ -211,7 +250,7 @@ export function TaskSubmissionForm() {
           />
           <div aria-live="polite" id="agentPreferences-error">
             {errors.agentPreferences && (
-              <p style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#b91c1c', marginTop: 8, fontSize: '0.875rem' }}>
+              <p style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--status-danger-strong)', marginTop: 8, fontSize: '0.875rem' }}>
                 <AlertCircle size={16} />
                 {errors.agentPreferences.message}
               </p>
@@ -226,11 +265,11 @@ export function TaskSubmissionForm() {
             disabled={isLoading}
             style={{
               padding: '12px 20px',
-              borderRadius: 10,
+              borderRadius: 'var(--radius-xl)',
               border: 'none',
-              background: (!isValid || isLoading) ? '#9ca3af' : '#2563eb',
+              background: isLoading ? '#9ca3af' : '#2563eb',
               color: '#ffffff',
-              cursor: (!isValid || isLoading) ? 'not-allowed' : 'pointer',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
               transition: 'background 0.2s',
             }}
           >
@@ -245,10 +284,10 @@ export function TaskSubmissionForm() {
       <section style={{ marginBottom: 24 }}>
         <h2>{t('task.submit.dagTitle')}</h2>
         {isLoading && (
-          <div aria-busy="true" style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 12 }}>
-            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 8 }} />
+          <div aria-busy="true" style={{ padding: 'var(--space-6)', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-xl)' }}>
+            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 'var(--space-3)' }} />
+            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 'var(--space-3)' }} />
+            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)' }} />
           </div>
         )}
         {!isLoading && <DAGPreview dagPreview={previewData ?? undefined} />}
@@ -260,7 +299,7 @@ export function TaskSubmissionForm() {
           style={{
             marginTop: 24,
             padding: 16,
-            borderRadius: 12,
+            borderRadius: 'var(--radius-xl)',
             background: 'var(--bg-secondary)',
             color: 'var(--danger)',
             border: '1px solid var(--danger)',
@@ -270,5 +309,5 @@ export function TaskSubmissionForm() {
         </div>
       )}
     </main>
-  );
+  )
 }

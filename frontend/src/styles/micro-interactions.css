@@ -6,7 +6,7 @@
 
 .hover-lift:hover {
   transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
 }
 
 .hover-glow {
@@ -50,7 +50,112 @@
   transition-duration: 500ms;
 }
 
+/* Button press/tap ripple animation */
+.btn-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-ripple::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.btn-ripple:active::before {
+  animation: ripple 0.6s ease-out;
+}
+
+@keyframes ripple {
+  to {
+    width: 300px;
+    height: 300px;
+    opacity: 0;
+  }
+}
+
+/* Card hover lift with refined shadow */
+.card-interactive {
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 300ms ease;
+  cursor: pointer;
+}
+
+.card-interactive:hover,
+.card-interactive:focus-within {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Navigation link underline grow effect */
+.nav-link {
+  position: relative;
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: color 300ms ease;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: var(--accent-cyan);
+  transition: width 300ms ease;
+}
+
+.nav-link:hover::after,
+.nav-link:focus-visible::after {
+  width: 100%;
+}
+
+.nav-link:hover,
+.nav-link:focus-visible {
+  color: var(--accent-cyan);
+}
+
+/* Press scale for primary CTAs */
+.btn-primary {
+  transition: transform 100ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .btn-ripple::before {
+    display: none;
+  }
+
+  .btn-ripple:active::before {
+    animation: none;
+  }
+
+  .card-interactive,
+  .nav-link::after,
+  .btn-primary {
+    transition: none !important;
+  }
+
+  .card-interactive:hover,
+  .card-interactive:focus-within {
+    transform: none;
+  }
+
+  .btn-primary:active {
+    transform: none;
+  }
+
   .hover-lift,
   .hover-glow,
   .hover-scale,
