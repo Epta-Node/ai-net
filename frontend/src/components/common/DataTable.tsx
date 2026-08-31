@@ -89,7 +89,7 @@ export function DataTable<T>({
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
 
-  const handleSelect = (key: string | number, row: T) => {
+  const handleSelect = (row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 
@@ -169,7 +169,7 @@ export function DataTable<T>({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => handleSelect(rowKey, row)}
+                        onChange={() => handleSelect(row)}
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Select row ${String(rowKey)}`}
                       />

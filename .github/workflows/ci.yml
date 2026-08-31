@@ -76,9 +76,11 @@ jobs:
 
   frontend-visual:
     name: frontend-visual-regression
-    # Runs after `frontend` so a broken build fails fast without spending
-    # time on the container pull + Playwright run.
-    needs: [frontend]
+    # Deliberately does NOT `needs: [frontend]`. This suite renders four
+    # specific routes through `vite dev` (an on-demand, per-module dev
+    # server), not the full production bundle `frontend`'s `npm run build`
+    # type-checks — so it doesn't need that job to pass, and shouldn't be
+    # blocked by an unrelated tsc error in a page these tests don't visit.
     # Screenshot comparisons are inherently more environment-sensitive than
     # unit/type checks; don't block merges on this suite yet. Failures are
     # still visible on the PR checks list and via the uploaded report.

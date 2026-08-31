@@ -35,6 +35,19 @@ export async function mockWalletConnection(page: Page): Promise<void> {
 }
 
 /**
+ * `WalletPage` gates its connect form behind a first-run `WalletWizard`
+ * welcome step until `wallet_wizard_completed` is set, even for a wallet
+ * that isn't connected yet. The visual suite wants the actual connect form,
+ * not the one-time marketing step, so this must run before the wizard's
+ * first render (`addInitScript`).
+ */
+export async function skipWalletWizard(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('wallet_wizard_completed', 'true');
+  });
+}
+
+/**
  * Common stabilization for every visual test. Sets `prefers-reduced-motion:
  * reduce`, which the app already checks in a few places (e.g. the landing
  * page's particle canvas in `useParticles`, and the CSS in `global.css` /

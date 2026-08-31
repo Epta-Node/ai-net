@@ -19,6 +19,22 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
   const reconnectAttemptRef = useRef<number>(0);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // `onMessage`/`onConnect`/`onDisconnect` are typically inline/useCallback
+  // results from the caller that change identity on every render (they close
+  // over other per-render state). Reading them via refs instead of depending
+  // on them directly keeps `connectWebSocket` stable across renders, so the
+  // effect below doesn't tear down and reopen the socket every time the
+  // component re-renders — which otherwise makes `status` flicker between
+  // "connecting"/"disconnected" indefinitely and the connection never settles.
+  const onMessageRef = useRef(onMessage);
+  const onConnectRef = useRef(onConnect);
+  const onDisconnectRef = useRef(onDisconnect);
+  useEffect(() => {
+    onMessageRef.current = onMessage;
+    onConnectRef.current = onConnect;
+    onDisconnectRef.current = onDisconnect;
+  }, [onMessage, onConnect, onDisconnect]);
+
   const disconnect = useCallback(() => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -48,13 +64,13 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
       setStatus('connected');
       setIsConnected(true);
       reconnectAttemptRef.current = 0; // reset reconnect attempts
-      onConnect?.();
+      onConnectRef.current?.();
     };
 
     ws.onmessage = (event) => {
       try {
         const data: DAGEvent = JSON.parse(event.data);
-        onMessage(data);
+        onMessageRef.current(data);
       } catch (err) {
         console.error('Failed to parse WebSocket event:', err);
       }
@@ -68,8 +84,8 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
     ws.onclose = () => {
       setStatus('disconnected');
       setIsConnected(false);
-      onDisconnect?.();
-      
+      onDisconnectRef.current?.();
+
       // Reconnect with exponential backoff (max 5 attempts)
       if (reconnectAttemptRef.current < 5) {
         const delay = 1000 * Math.pow(2, reconnectAttemptRef.current);
@@ -79,7 +95,7 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
         }, delay);
       }
     };
-  }, [taskId, onMessage, onConnect, onDisconnect]);
+  }, [taskId]);
 
   const reconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;

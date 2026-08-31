@@ -17,7 +17,6 @@ import RendererDemoPage from './pages/RendererDemoPage'
 import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
-import { ProtectedRoute } from './components/common/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
@@ -30,18 +29,6 @@ import './components/common/Toast.css'
  */
 const AppContent: React.FC = () => {
   return (
-    <Router>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
-        </Routes>
-      </AppShell>
     <NotificationProvider>
       <RoutedContent />
     </NotificationProvider>
@@ -64,9 +51,7 @@ const RoutedContent: React.FC = () => {
               <Route path="/dashboard" element={
                 <ProtectedRoute><DashboardPage /></ProtectedRoute>
               } />
-              <Route path="/wallet" element={
-                <ProtectedRoute><WalletPage /></ProtectedRoute>
-              } />
+              <Route path="/wallet" element={<WalletPage />} />
               <Route path="/agents" element={
                 <ProtectedRoute><AgentsPage /></ProtectedRoute>
               } />
