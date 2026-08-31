@@ -94,7 +94,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
 
       <div className="flex items-start justify-between mb-3 relative">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-[0_0_12px_rgba(56,189,248,0.15)] transition-all duration-300">
+          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-info-glow transition-all duration-300">
             {agent.icon}
           </div>
           <div className="flex flex-col">

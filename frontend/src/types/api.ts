@@ -114,6 +114,8 @@ export interface DAGEvent {
   taskId: string;
   nodeId?: string;
   timestamp: string;
+  /** Per-task monotonic sequence cursor used to resume a stream after a drop. */
+  seq?: number;
   payload?: DAGEventPayload | string;
 }
 

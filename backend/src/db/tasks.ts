@@ -8,7 +8,7 @@ import { migrateToLatest } from "./migrator";
 const logger = createLogger({ component: "task-db" });
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "tasks");
 
-let _taskDb: Database.Database | null = null;
+let _taskPool: SqlitePool | null = null;
 
 export function getTaskDb(dbPath?: string): Database.Database {
   if (!_taskDb) {
@@ -25,12 +25,27 @@ export function getTaskDb(dbPath?: string): Database.Database {
     }
     migrateToLatest(_taskDb, MIGRATIONS_DIR);
   }
-  return _taskDb;
+  return _taskPool;
+}
+
+/**
+ * The writer connection, for the synchronous `createTaskDb` API.
+ *
+ * Kept so existing callers work unchanged; new code should prefer
+ * `getTaskPool().read(...)` so reads are spread across the pool.
+ */
+export function getTaskDb(dbPath?: string): Database.Database {
+  return getTaskPool(dbPath).writer;
+}
+
+/** The task pool if one is open, else null. Used by the metrics endpoint. */
+export function currentTaskPool(): SqlitePool | null {
+  return _taskPool && !_taskPool.closed ? _taskPool : null;
 }
 
 export function closeTaskDb(): void {
-  _taskDb?.close();
-  _taskDb = null;
+  void _taskPool?.close();
+  _taskPool = null;
 }
 
 export interface TaskEvent {

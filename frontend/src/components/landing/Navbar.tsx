@@ -172,7 +172,7 @@ const Navbar: React.FC = () => {
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-background-surface/30 border border-border-subtle/50">
             <span className="relative flex w-1.5 h-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
-              <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+              <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-success-glow" />
             </span>
             <span className="text-[11px] font-medium text-text-secondary/70 tracking-wide">
               {t('landing.navbar.network')}
@@ -193,7 +193,7 @@ const Navbar: React.FC = () => {
             <div className="flex items-center gap-0.5 bg-background-surface/40 border border-border-subtle/60 rounded-md pl-2 pr-1 py-0.5">
               <span className="relative flex w-1.5 h-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
-                <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+                <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-success-glow" />
               </span>
               <span className="text-[11px] font-medium text-text-primary font-mono tracking-wide mx-1">
                 {truncateKey(publicKey)}
@@ -225,7 +225,7 @@ const Navbar: React.FC = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               onClick={() => navigate('/wallet')}
-              className="group flex items-center gap-1.5 bg-background-surface/40 border border-border-subtle/60 rounded-md px-2.5 py-1 cursor-pointer hover:border-accent-cyan/30 hover:bg-background-surface/70 hover:shadow-[0_0_12px_rgba(56,189,248,0.04)] transition-all"
+              className="group flex items-center gap-1.5 bg-background-surface/40 border border-border-subtle/60 rounded-md px-2.5 py-1 cursor-pointer hover:border-accent-cyan/30 hover:bg-background-surface/70 hover:shadow-info-glow-subtle transition-all"
             >
               <Wallet size={12} className="text-accent-cyan/80 group-hover:text-accent-cyan group-hover:scale-110 transition-all" />
               <span className="text-[11px] font-medium text-text-secondary/60 group-hover:text-text-primary/90 transition-colors hidden sm:inline">
@@ -246,7 +246,7 @@ const Navbar: React.FC = () => {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="flex items-center h-9 rounded-lg bg-background-surface border border-border-subtle/60 focus-within:border-accent-cyan/30 focus-within:shadow-[0_0_10px_rgba(56,189,248,0.05)] transition-all">
+            <div className="flex items-center h-9 rounded-lg bg-background-surface border border-border-subtle/60 focus-within:border-accent-cyan/30 focus-within:shadow-info-glow-subtle transition-all">
               <Search size={14} className="ml-2.5 text-text-secondary/30" />
               <input
                 ref={mobileSearchRef}
@@ -292,7 +292,7 @@ const Navbar: React.FC = () => {
               transition={{ type: 'spring', damping: 30, stiffness: 320 }}
             >
               <div className="flex items-center gap-2.5 px-3 pb-4 mb-3 border-b border-border-subtle/60">
-                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
+                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-info-glow">
                   a
                 </div>
                 <div className="flex flex-col">

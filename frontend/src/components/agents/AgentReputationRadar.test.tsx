@@ -17,6 +17,9 @@ vi.mock('recharts', async () => {
         {React.cloneElement(React.Children.only(children), { width: 400, height: 250 })}
       </div>
     ),
+    RadarChart: ({ children }: any) => (
+      <div className="recharts-wrapper">{children}</div>
+    ),
   };
 });
 

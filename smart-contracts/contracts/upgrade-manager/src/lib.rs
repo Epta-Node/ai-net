@@ -29,14 +29,16 @@
 //! - Rollback window provides safety net for problematic upgrades
 //! - Version tracking prevents downgrades without explicit rollback
 
-mod events;
+pub mod events;
 mod migration;
+pub mod strutil;
 pub mod upgradeable;
 
 use events::*;
 use migration::*;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
+    String, Vec,
 };
 pub use upgradeable::*;
 
@@ -123,7 +125,7 @@ pub enum DataKey {
 }
 
 /// Upgrade operation errors
-#[contracttype]
+#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum UpgradeError {
@@ -151,12 +153,6 @@ pub enum UpgradeError {
     InsufficientGasBudget = 11,
     /// Version downgrade not allowed without explicit rollback
     DowngradeNotAllowed = 12,
-}
-
-impl From<UpgradeError> for soroban_sdk::Error {
-    fn from(err: UpgradeError) -> Self {
-        soroban_sdk::Error::from_contract_error(err as u32)
-    }
 }
 
 /// Main upgrade manager contract
@@ -187,13 +183,19 @@ fn get_current_version(env: &Env) -> Option<ContractVersion> {
     env.storage().persistent().get(&DataKey::CurrentVersion)
 }
 
-fn is_version_newer(current: &str, proposed: &str) -> bool {
-    // Simple semantic version comparison (for demo - in production use proper semver)
+/// Returns `true` when `proposed` sorts strictly after `current`.
+///
+/// [`String`] implements `Ord` via the host's lexicographic byte comparison,
+/// which works identically natively and under `wasm32v1-none`. Version tags are
+/// therefore compared as byte strings, matching the ordering the registry has
+/// always used.
+fn is_version_newer(current: &String, proposed: &String) -> bool {
     proposed > current
 }
 
 // ─── Contract Implementation ─────────────────────────────────────────────────
 
+#[cfg(feature = "contract")]
 #[contractimpl]
 impl UpgradeManager {
     /// Initialize the upgrade manager with an admin and initial version
@@ -283,7 +285,7 @@ impl UpgradeManager {
 
         // Check if version is valid and newer
         if let Some(current) = get_current_version(&env) {
-            if !is_version_newer(&current.version.to_string(), &new_version.to_string()) {
+            if !is_version_newer(&current.version, &new_version) {
                 return Err(UpgradeError::DowngradeNotAllowed);
             }
         }
@@ -291,7 +293,7 @@ impl UpgradeManager {
         // Create proposal
         let proposal = UpgradeProposal {
             new_version: new_version.clone(),
-            new_wasm_hash,
+            new_wasm_hash: new_wasm_hash.clone(),
             description: description.clone(),
             proposed_ledger: env.ledger().sequence(),
             proposer: admin,
@@ -379,7 +381,7 @@ impl UpgradeManager {
         // Create new version record
         let new_version = ContractVersion {
             version: proposal.new_version.clone(),
-            wasm_hash: proposal.new_wasm_hash,
+            wasm_hash: proposal.new_wasm_hash.clone(),
             upgrade_ledger: env.ledger().sequence(),
             description: proposal.description.clone(),
             admin,
@@ -396,9 +398,9 @@ impl UpgradeManager {
         );
 
         // Store rollback info if we had a previous version
-        if let Some(prev_version) = current_version {
+        if let Some(ref prev_version) = current_version {
             let rollback_record = RollbackRecord {
-                previous_version: prev_version,
+                previous_version: prev_version.clone(),
                 rollback_deadline,
                 can_rollback: true,
             };
@@ -424,7 +426,7 @@ impl UpgradeManager {
                     .map(|v| v.version)
                     .unwrap_or(String::from_str(&env, "none")),
                 new_version: proposal.new_version,
-                wasm_hash: proposal.new_wasm_hash,
+                wasm_hash: proposal.new_wasm_hash.clone(),
                 admin: new_version.admin,
             },
         );
@@ -454,7 +456,7 @@ impl UpgradeManager {
 
         // Perform the rollback
         env.deployer()
-            .update_current_contract_wasm(rollback_record.previous_version.wasm_hash);
+            .update_current_contract_wasm(rollback_record.previous_version.wasm_hash.clone());
 
         // Restore previous version as current
         env.storage()
@@ -516,7 +518,7 @@ impl UpgradeManager {
 
 // ─── Gas Estimation Functions ───────────────────────────────────────────────
 
-fn estimate_migration_gas(env: &Env, migration_plan: &MigrationPlan) -> u64 {
+fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
     let base_cost = GAS_UPGRADE_BASE;
     let item_cost = GAS_MIGRATION_PER_ITEM * migration_plan.estimated_items as u64;
 
@@ -580,7 +582,7 @@ mod tests {
         };
 
         // Propose upgrade
-        let result = client.propose_upgrade(
+        let result = client.try_propose_upgrade(
             &String::from_str(&env, "2.0.0"),
             &new_hash,
             &String::from_str(&env, "Major upgrade"),
@@ -594,7 +596,7 @@ mod tests {
         assert!(gas_estimate.unwrap() > 0);
 
         // Execute upgrade
-        let result = client.execute_upgrade();
+        let result = client.try_execute_upgrade();
         assert!(result.is_ok());
 
         let new_version = client.get_current_version().unwrap();
@@ -631,7 +633,7 @@ mod tests {
         assert!(client.can_rollback());
 
         // Perform rollback
-        let result = client.rollback_upgrade();
+        let result = client.try_rollback_upgrade();
         assert!(result.is_ok());
 
         // Verify we're back to original version

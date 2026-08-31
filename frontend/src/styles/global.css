@@ -1,5 +1,7 @@
+@import './tokens.css';
 @import './animations.css';
 @import './micro-interactions.css';
+@import './report.css';
 
 @tailwind base;
 @tailwind components;
@@ -75,17 +77,17 @@ html, body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md);
   padding: 24px;
 }
 
 .chip {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  background: color-mix(in srgb, var(--accent-secondary) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-secondary) 30%, transparent);
+  color: var(--accent-info);
   padding: 6px 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -109,7 +111,7 @@ th {
 }
 
 tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-hover-subtle);
 }
 
 .form-group {
@@ -127,10 +129,10 @@ label {
 
 input[type="text"], input[type="number"], textarea {
   font-family: var(--font-sans);
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--surface-glass);
   border: 1px solid var(--panel-border);
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 12px;
   font-size: 1rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -139,7 +141,7 @@ input[type="text"], input[type="number"], textarea {
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: var(--focus-ring-info);
 }
 
 .error-msg {
@@ -154,16 +156,16 @@ input:focus, textarea:focus {
   justify-content: center;
   align-items: center;
   padding: 40px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.4);
+  border-radius: var(--radius-xl);
+  background: var(--surface-glass-subtle);
   border: 1px dashed var(--panel-border);
   margin-top: 24px;
 }
 
 .dag-node {
-  background: #334155;
-  border: 2px solid #475569;
-  border-radius: 12px;
+  background: var(--surface-muted);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-xl);
   padding: 16px 24px;
   min-width: 140px;
   text-align: center;
@@ -173,10 +175,10 @@ input:focus, textarea:focus {
 }
 
 .dag-node.completed {
-  background: #064e3b;
+  background: var(--status-success-surface);
   border-color: var(--success);
-  color: #a7f3d0;
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+  color: var(--status-success-text);
+  box-shadow: var(--glow-success);
 }
 
 .dag-arrow {
@@ -191,7 +193,7 @@ input:focus, textarea:focus {
 
   .glass-panel {
     padding: 16px;
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
   }
 
   .dag-container {
@@ -213,9 +215,9 @@ input:focus, textarea:focus {
   z-index: 10000;
   padding: 8px 16px;
   background: var(--primary);
-  color: #ffffff;
+  color: var(--text-inverse);
   font-weight: 600;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   text-decoration: none;
   transition: top 0.2s ease;
 }
@@ -239,7 +241,16 @@ select:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: var(--focus-ring-info);
+}
+
+.risk-point:focus-visible {
+  outline: none;
+}
+
+.risk-point:focus-visible .risk-dot {
+  stroke: var(--accent);
+  stroke-width: 4px;
 }
 
 /* ─── Screen reader only utility ──────────────────────────────────────────── */
@@ -266,24 +277,3 @@ td,
 .chip {
   transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
 }
-
-/* Light theme overrides */
-.theme-light {
-  --bg-primary: #FFFFFF;
-  --bg-surface: #F8FAFC;
-  --bg-surface-alt: #F1F5F9;
-  --bg-secondary: #F3F4F6;
-  --border-color: #E6E9EE;
-  --border-subtle: #E9EEF4;
-  --text-primary: #0A0E14;
-  --text-secondary: #475569;
-  --accent-cyan: #0EA5E9;
-  --accent-purple: #7C3AED;
-  --accent-green: #059669;
-  --panel-bg: var(--bg-surface);
-  --panel-border: var(--border-color);
-  --primary: var(--accent-purple);
-  --primary-hover: #6d28d9;
-  --accent: var(--accent-cyan);
-}
-

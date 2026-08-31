@@ -8,6 +8,7 @@ export interface SerializedError {
   code: string;
   message: string;
   details?: AppErrorDetails;
+  path?: string;
   correlationId: string;
   timestamp: string;
 }
@@ -60,10 +61,11 @@ export class AppError extends Error {
    * In production `details` is omitted so internal information is never
    * leaked. Pass `includeDetails: true` only in development/test.
    */
-  public serialize(includeDetails = false): SerializedError {
+  public serialize(path?: string, includeDetails = false): SerializedError {
     const payload: SerializedError = {
       code: this.code,
       message: this.message,
+      path: path,
       correlationId: this.correlationId,
       timestamp: this.timestamp,
     };

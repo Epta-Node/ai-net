@@ -28,6 +28,9 @@
   "common.cancel": "取消",
   "common.retry": "重试",
   "common.dismiss": "关闭",
+  "common.undo": "撤销",
+  "common.undone": "已撤销",
+  "common.view": "查看",
   "common.or": "或",
   "common.recommended": "推荐",
   "common.connecting": "连接中……",
@@ -114,6 +117,8 @@
   "wallet.chart.byAgentHeading": "按代理成本拆分",
   "wallet.chart.noData": "暂无支出数据",
   "wallet.chart.spent": "支出",
+
+  "wallet.tokens.heading": "代币",
 
   "validation.invalidSecretKey": "无效的 Stellar 私钥。必须以 S 开头且为 56 个字符。",
   "validation.destinationRequired": "目标地址为必填项",
@@ -282,6 +287,7 @@
   "a11y.search": "搜索",
   "a11y.closeSearch": "关闭搜索",
   "a11y.copyPublicKey": "复制公钥",
+  "a11y.balanceChip": "{{code}} 余额标签",
   "a11y.disconnectWallet": "断开钱包连接",
   "a11y.copyOutput": "复制输出",
   "a11y.loadingTaskDetails": "正在加载任务详情",

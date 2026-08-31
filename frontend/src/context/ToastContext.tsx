@@ -2,7 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react';
 import { ToastContainer } from '../components/common/Toast';
 
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
+
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
 
 export interface Toast {
   id: string;
@@ -12,9 +17,9 @@ export interface Toast {
 }
 
 interface ToastContextValue {
-  toasts: Toast[];
-  showToast: (message: string, type?: ToastType, duration?: number) => void;
-  dismissToast: (id: string) => void;
+  toasts: Toast[]
+  showToast: (message: string, type?: ToastType, duration?: number) => void
+  dismissToast: (id: string) => void
 }
 
 const defaultDurations: Record<ToastType, number> = {
@@ -22,16 +27,16 @@ const defaultDurations: Record<ToastType, number> = {
   info: 5000,
   warning: 10000,
   error: 10000,
-};
+}
 
 export const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([])
 
   const dismissToast = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  }, []);
+    setToasts((prev) => prev.filter((toast) => toast.id !== id))
+  }, [])
 
   const showToast = useCallback(
     (message: string, type: ToastType = 'info', duration = defaultDurations[type]) => {
@@ -40,15 +45,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           ? crypto.randomUUID()
           : Math.random().toString(36).slice(2);
 
-      setToasts((prev) => [...prev, { id, message, type, duration }]);
+      setToasts((prev) => [...prev, { id, message, type, duration }])
 
       if (duration > 0) {
-        window.setTimeout(() => dismissToast(id), duration);
+        window.setTimeout(() => dismissToast(id), duration)
       }
+
+      return id
     },
     [dismissToast],
-  );
+  )
 
+  // External dispatch support (used by services/api.ts notifyToast)
   useEffect(() => {
     const handleExternalToast = (event: Event) => {
       const customEvent = event as CustomEvent<{
@@ -63,9 +71,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       showToast(message, type, customEvent.detail?.duration ?? defaultDurations[type]);
     };
 
-    window.addEventListener('app-toast', handleExternalToast as EventListener);
-    return () => window.removeEventListener('app-toast', handleExternalToast as EventListener);
-  }, [showToast]);
+    window.addEventListener('app-toast', handleExternalToast as EventListener)
+    return () => window.removeEventListener('app-toast', handleExternalToast as EventListener)
+  }, [showToast])
 
   const value = useMemo<ToastContextValue>(
     () => ({ toasts, showToast, dismissToast }),
@@ -75,9 +83,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ToastContainer toasts={activeToasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
-  );
+  )
 }
 
 export function useToast() {

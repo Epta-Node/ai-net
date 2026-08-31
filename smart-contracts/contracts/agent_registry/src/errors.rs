@@ -89,6 +89,11 @@ impl Error {
             24 => Some(Error::SlaNotFound),
             25 => Some(Error::SlaViolation),
             26 => Some(Error::InvalidSla),
+            27 => Some(Error::BridgeProofExpired),
+            28 => Some(Error::BridgeProofNotFound),
+            29 => Some(Error::BridgeProofMismatch),
+            30 => Some(Error::InvalidBridgeExpiry),
+            31 => Some(Error::InvalidAuditRange),
             _ => None,
         }
     }

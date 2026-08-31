@@ -21,24 +21,24 @@
 }
 
 .breadcrumb a {
-  color: var(--primary, #3b82f6);
+  color: var(--primary, var(--accent-info));
   text-decoration: none;
   transition: color 0.2s;
 }
 
 .breadcrumb a:hover {
-  color: var(--primary-dark, #2563eb);
+  color: var(--primary-dark, var(--accent-info));
   text-decoration: underline;
 }
 
 .breadcrumb [aria-current="page"] {
-  color: var(--text-primary, #1a202c);
+  color: var(--text-primary, var(--text-primary));
   font-weight: 500;
 }
 
 .separator {
   margin: 0 8px;
-  color: var(--text-tertiary, #94a3b8);
+  color: var(--text-tertiary, var(--text-muted));
 }
 
 @media (max-width: 767px) {

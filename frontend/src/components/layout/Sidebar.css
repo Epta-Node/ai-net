@@ -74,11 +74,11 @@
   padding: 10px 12px;
   background: none;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   text-align: left;
   cursor: pointer;
   transition: all 0.2s;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 14px;
   font-weight: 500;
@@ -86,8 +86,8 @@
 }
 
 .nav-item:hover {
-  background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-primary, #1a202c);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 .nav-item.active {

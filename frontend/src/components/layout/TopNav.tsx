@@ -198,7 +198,7 @@ const TopNav: React.FC<TopNavProps> = ({
               <span className="wallet-chip connected" id="wallet-pubkey-display" style={{ opacity: 0.6 }}>
                 {truncateKey(publicKey)}
               </span>
-              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: '#fef3c7', color: '#92400e' }}>
+              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--status-warning-surface-strong)', color: 'var(--status-warning-text)' }}>
                 {t('wallet.reconnectRequired')}
               </span>
             </>
