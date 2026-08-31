@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { useScrollRestoration } from '../../hooks/useScrollRestoration'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import MobileDrawer from './MobileDrawer'
@@ -21,6 +22,8 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const location = useLocation()
   const navigate = useNavigate()
   const drawerRef = useRef<HTMLDivElement>(null)
+
+  useScrollRestoration()
 
   useEffect(() => {
     if (isMobile === false) {

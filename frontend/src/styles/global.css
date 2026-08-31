@@ -4,6 +4,7 @@
 
 @import './animations.css';
 @import './micro-interactions.css';
+@import './report.css';
 
 :root {
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
