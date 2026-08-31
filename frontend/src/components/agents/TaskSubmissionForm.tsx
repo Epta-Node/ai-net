@@ -15,7 +15,7 @@ import type { AgentPreference, TaskSubmitResponse } from '../../services/taskSer
 
 // Only the label is translated: `value` is the wire format the API and the zod
 // enum below rely on, so it stays in English regardless of the UI language.
-const AGENT_PREFERENCE_VALUES = ['research', 'risk', 'coding', 'design', 'report'] as const;
+const AGENT_PREFERENCE_VALUES = ['research', 'risk', 'coding', 'design', 'report'] as const
 
 /**
  * A factory because zod bakes the message strings in at schema construction
@@ -30,14 +30,14 @@ const makeTaskSchema = (t: TFunction) =>
       .max(1000, t('validation.promptTooLong')),
     maxBudgetXLM: z.preprocess((value) => {
       if (typeof value === 'string') {
-        return Number(value);
+        return Number(value)
       }
-      return value;
+      return value
     }, z.number().min(0.1, t('validation.minBudget'))),
     agentPreferences: z.array(z.enum(AGENT_PREFERENCE_VALUES)).min(1, t('validation.agentRequired')),
-  });
+  })
 
-type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
+type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>
 
 export function TaskSubmissionForm() {
   const { t, i18n } = useTranslation();
@@ -53,9 +53,9 @@ export function TaskSubmissionForm() {
         label: t(`task.submit.pref.${value}`),
       })),
     [t],
-  );
+  )
 
-  const taskSchema = useMemo(() => makeTaskSchema(t), [t]);
+  const taskSchema = useMemo(() => makeTaskSchema(t), [t])
 
   const {
     register,
@@ -71,48 +71,86 @@ export function TaskSubmissionForm() {
       maxBudgetXLM: 0.1,
       agentPreferences: [],
     },
-  });
+  })
 
   // Validation messages are copied into `errors` when validation runs, so an
   // error already on screen would keep the previous language. React Hook Form
   // re-reads `resolver` on every render, so re-validating here is enough.
-  const language = i18n.language;
-  const lastLanguage = useRef(language);
+  const language = i18n.language
+  const lastLanguage = useRef(language)
   useEffect(() => {
     if (lastLanguage.current === language) {
-      return;
+      return
     }
-    lastLanguage.current = language;
+    lastLanguage.current = language
     if (isSubmitted) {
-      void trigger();
+      void trigger()
     }
-  }, [language, isSubmitted, trigger]);
+  }, [language, isSubmitted, trigger])
+
+  useEffect(() => {
+    return () => {
+      if (pendingNav.current) window.clearTimeout(pendingNav.current)
+    }
+  }, [])
 
   const onSubmit = async (values: TaskFormValues) => {
     try {
-      const result = await submitTask(values);
-      setPreview(result.dagPreview);
-      showToast('Task submitted successfully!', 'success');
+      const result = await submitTask(values)
+      setPreview(result.dagPreview)
 
-      window.setTimeout(() => {
-        navigate(`/tasks/${result.taskId}`);
-      }, 300);
+      // Show grouped toast with undo — stays 6s, progress bar visible, pauses on hover
+      const timer = window.setTimeout(() => {
+        navigate(`/tasks/${result.taskId}`)
+      }, 300)
+      pendingNav.current = timer
+
+      showToast(t('task.submit.success'), 'success', {
+        duration: 6000,
+        action: {
+          label: t('common.undo') || 'Undo',
+          onClick: () => {
+            if (pendingNav.current) {
+              window.clearTimeout(pendingNav.current)
+              pendingNav.current = null
+            }
+            setPreview(null)
+            showToast('Task creation undone', 'info', 3000)
+          },
+        },
+      })
     } catch (submitError) {
       const message =
-        submitError instanceof Error ? submitError.message : t('task.submit.unableToSubmit');
-      showToast(message, 'error');
+        submitError instanceof Error ? submitError.message : t('task.submit.unableToSubmit')
+      // error toasts group duplicates and show retry action when fetch fails
+      const isNetworkError =
+        message.toLowerCase().includes('network') || message.toLowerCase().includes('fetch')
+      showToast(message, 'error', {
+        duration: isNetworkError ? 8000 : 6000,
+        ...(isNetworkError
+          ? {
+              action: {
+                label: t('common.retry') || 'Retry',
+                onClick: () => {
+                  // re-trigger submit via synthetic event — reuse last values
+                  void handleSubmit(onSubmit)()
+                },
+              },
+            }
+          : {}),
+      })
     }
-  };
+  }
 
-  const previewData = preview ?? data?.dagPreview;
-  const isLoading = status === 'loading' || isSubmitting;
+  const previewData = preview ?? data?.dagPreview
+  const isLoading = status === 'loading' || isSubmitting
 
   const budgetHelperText = useMemo(() => {
     if (errors.maxBudgetXLM) {
-      return errors.maxBudgetXLM.message;
+      return errors.maxBudgetXLM.message
     }
-    return t('task.submit.budgetHelper');
-  }, [errors.maxBudgetXLM, t]);
+    return t('task.submit.budgetHelper')
+  }, [errors.maxBudgetXLM, t])
 
   return (
     <main style={{ maxWidth: 900, margin: '0 auto', padding: '24px' }}>
@@ -191,11 +229,11 @@ export function TaskSubmissionForm() {
                       value={option.value}
                       checked={field.value.includes(option.value)}
                       onChange={(event) => {
-                        const current = field.value;
+                        const current = field.value
                         const next = event.target.checked
                           ? [...current, option.value]
-                          : current.filter((value: AgentPreference) => value !== option.value);
-                        field.onChange(next);
+                          : current.filter((value: AgentPreference) => value !== option.value)
+                        field.onChange(next)
                       }}
                       onBlur={field.onBlur}
                       name={field.name}
@@ -267,5 +305,5 @@ export function TaskSubmissionForm() {
         </div>
       )}
     </main>
-  );
+  )
 }

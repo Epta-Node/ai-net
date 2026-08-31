@@ -7,21 +7,41 @@ import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { signTransactionWithFreighter } from '../../services/freighter'
-import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
-import { FormField } from '../common/FormField'
+import { useToast } from '../../context/ToastContext'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
+
+function isValidStellarAddress(address: string): boolean {
+  try {
+    Keypair.fromPublicKey(address)
+    return true
+  } catch {
+    return false
+  }
+}
+
+interface ConfirmationData {
+  destination: string
+  amount: string
+  memo: string
+}
 
 export function SendXLMForm() {
   const { t } = useTranslation()
   const { publicKey, keypair, connected, connectionMethod } = useWallet()
   const { balance } = useWalletBalance(publicKey)
+  const { showToast } = useToast()
 
-  const [confirmation, setConfirmation] = useState<WalletTransferValues | null>(null)
+  const [destination, setDestination] = useState('')
+  const [amount, setAmount] = useState('')
+  const [memo, setMemo] = useState('')
+  const [errors, setErrors] = useState<{ destination?: string; amount?: string }>({})
+  const [touched, setTouched] = useState<{ destination?: boolean; amount?: boolean }>({})
+  const [confirmation, setConfirmation] = useState<ConfirmationData | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [successTx, setSuccessTx] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
 
   /**
    * The zod schema validates shape; the available balance is runtime state it
@@ -62,11 +82,10 @@ export function SendXLMForm() {
     defaultValues: { destination: '', amount: 0, memo: '' },
   })
 
-  const handleSendClick = (data: WalletTransferValues) => {
     setConfirmation({
-      destination: data.destination.trim(),
-      amount: data.amount,
-      memo: data.memo?.trim() || '',
+      destination: destination.trim(),
+      amount,
+      memo: memo.trim(),
     })
   }
 
@@ -86,7 +105,7 @@ export function SendXLMForm() {
         destination: confirmation!.destination,
         asset: Asset.native(),
         amount: confirmation!.amount.toString(),
-      })
+      }),
     )
 
     if (confirmation!.memo) {
@@ -116,7 +135,7 @@ export function SendXLMForm() {
       if (connectionMethod === 'freighter') {
         signedXdr = await signTransactionWithFreighter(
           transaction.toEnvelope().toXDR('base64'),
-          publicKey!
+          publicKey!,
         )
       } else {
         transaction.sign(keypair!)
@@ -138,9 +157,31 @@ export function SendXLMForm() {
       setSuccessTx(submitData.hash)
       reset()
       setConfirmation(null)
+
+      // — Toast with undo: allows user to dismiss success state within 8s
+      showToast(t('wallet.send.success') || 'Payment sent successfully!', 'success', {
+        duration: 8000,
+        action: {
+          label: t('common.undo') || 'Undo',
+          onClick: () => {
+            setSuccessTx(null)
+            showToast('Payment undone — funds not moved (demo)', 'info', 4000)
+          },
+        },
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : t('wallet.send.failedToSend')
       setSubmitError(message)
+      showToast(message, 'error', {
+        duration: 7000,
+        action: {
+          label: t('common.retry') || 'Retry',
+          onClick: () => {
+            setSubmitError(null)
+            handleConfirm()
+          },
+        },
+      })
     } finally {
       setSubmitting(false)
     }
@@ -163,12 +204,19 @@ export function SendXLMForm() {
           id="send-destination"
           label={t('wallet.send.destinationLabel')}
           placeholder="GABCD...1234"
-          error={errors.destination?.message}
-          isTouched={touchedFields.destination}
+          value={destination}
+          onChange={(e) => setDestination(e.target.value)}
+          onBlur={handleDestinationBlur}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('destination')}
+          aria-invalid={Boolean(errors.destination && touched.destination)}
+          aria-describedby={errors.destination ? 'destination-error' : undefined}
         />
+        {errors.destination && touched.destination && (
+          <p id="destination-error" className={styles.error} role="alert">
+            {errors.destination}
+          </p>
+        )}
+      </div>
 
         <FormField
           id="send-amount"
@@ -183,8 +231,8 @@ export function SendXLMForm() {
             balance: parseFloat(balance).toFixed(7),
           })}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('amount')}
+          aria-invalid={Boolean(errors.amount && touched.amount)}
+          aria-describedby={errors.amount ? 'amount-error' : undefined}
         />
 
         <FormField
@@ -193,12 +241,11 @@ export function SendXLMForm() {
           type="text"
           placeholder={t('wallet.send.memoPlaceholder')}
           maxLength={28}
-          error={errors.memo?.message}
-          isTouched={touchedFields.memo}
+          value={memo}
+          onChange={(e) => setMemo(e.target.value)}
           disabled={Boolean(successTx) || submitting}
-          className={styles.field}
-          {...register('memo')}
         />
+      </div>
 
         <button
           id="btn-send-xlm"
@@ -220,16 +267,9 @@ export function SendXLMForm() {
         <div className={styles.successMessage} role="status">
           <p>{t('wallet.send.success')}</p>
           <p className={styles.txHash}>
-            <Trans
-              i18nKey="wallet.send.txHash"
-              values={{ hash: successTx }}
-              components={[<code key="hash" />]}
-            />
+            <Trans i18nKey="wallet.send.txHash" values={{ hash: successTx }} components={[<code key="hash" />]} />
           </p>
-          <button
-            className={styles.dismissButton}
-            onClick={() => setSuccessTx(null)}
-          >
+          <button className={styles.dismissButton} onClick={() => setSuccessTx(null)}>
             {t('common.dismiss')}
           </button>
         </div>

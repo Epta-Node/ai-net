@@ -50,10 +50,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (duration > 0) {
         window.setTimeout(() => dismissToast(id), duration)
       }
+
+      return id
     },
     [dismissToast],
   )
 
+  // External dispatch support (used by services/api.ts notifyToast)
   useEffect(() => {
     const handleExternalToast = (event: Event) => {
       const customEvent = event as CustomEvent<{
@@ -82,7 +85,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <ToastContainer toasts={activeToasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
-  );
+  )
 }
 
 export function useToast() {

@@ -69,7 +69,7 @@ export const DashboardPage: React.FC = () => {
     if (error) {
       // i18n.t so the toast uses the current language without re-running the
       // effect on every language change.
-      showToast(i18n.t('page.dashboard.statsError', { error }), 'error');
+      showToast(i18n.t('page.dashboard.statsError', { error: error.message || String(error) }), 'error');
     }
   }, [error, showToast, i18n]);
 
