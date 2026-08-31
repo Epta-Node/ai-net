@@ -9,50 +9,54 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * A slide-over from the left edge — the same side the sidebar occupies on
+ * desktop, so navigation lives in one place at every width. It was a bottom
+ * sheet, which put the nav somewhere it appears nowhere else in the app.
+ */
 .mobile-drawer {
   position: fixed;
+  top: 0;
   bottom: 0;
   left: 0;
-  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 86vw);
+  padding-left: env(safe-area-inset-left);
   background: var(--bg-primary, #ffffff);
-  border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+  border-bottom-right-radius: 20px;
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.2);
   z-index: 1200;
-  max-height: 85vh;
   overflow: hidden;
-  touch-action: none;
+  touch-action: pan-y;
   will-change: transform;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Short screens: 70vh */
-@media (max-height: 600px) {
-  .mobile-drawer {
-    max-height: 70vh;
-  }
-}
-
-/* Tall screens: 85vh (default above) */
-@media (min-height: 900px) {
-  .mobile-drawer {
-    max-height: 85vh;
-  }
-}
-
+/*
+ * Vertical grab affordance on the trailing edge, matching the horizontal drag
+ * that dismisses the drawer.
+ */
 .drawer-drag-handle {
-  width: 36px;
-  height: 4px;
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 4px;
+  height: 36px;
+  transform: translateY(-50%);
   background: var(--border-color, #cbd5e1);
   border-radius: 2px;
-  margin: 8px auto 0;
 }
 
 .drawer-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px 16px;
+  /* After the shorthand, or it would be overwritten. */
+  padding-top: calc(12px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
 
@@ -84,10 +88,29 @@
 }
 
 .drawer-nav {
+  flex: 1;
   padding: 8px 12px 24px;
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+/* Group headings mirror the desktop sidebar's grouping. */
+.drawer-nav .nav-group + .nav-group {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.drawer-nav .nav-group-label {
+  margin: 0;
+  padding: 4px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+  opacity: 0.6;
 }
 
 .drawer-nav ul {
@@ -150,6 +173,12 @@
 
 .drawer-nav .nav-label {
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-nav .nav-item {
+    transition: none;
+  }
 }
 
 /* Focus trap: prevent focus from escaping the drawer */

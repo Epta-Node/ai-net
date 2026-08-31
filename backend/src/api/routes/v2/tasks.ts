@@ -38,6 +38,14 @@ const TaskListSchema = z.object({
   q: z.string().optional(),
 });
 
+const TaskCursorListSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
+  sort: z.enum(["createdAt:desc", "createdAt:asc"]).default("createdAt:desc"),
+  q: z.string().optional(),
+});
+
 /**
  * Creates a v2 tasks router with enhanced response format.
  * V2 includes additional metadata fields and improved response structure.
@@ -119,17 +127,65 @@ export function createV2TasksRouter(
     });
   });
 
-  // GET /api/tasks — v2 format with enhanced response
+  // GET /api/tasks — v2 format: cursor pagination when ?cursor or ?limit present, offset otherwise
   tasksRouter.get("/", (req: Request, res: Response): void => {
     const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
+    const now = new Date().toISOString();
+
+    // Use cursor mode when an explicit cursor or limit (without page) is provided
+    const useCursor = "cursor" in req.query || ("limit" in req.query && !("page" in req.query));
+
+    if (useCursor) {
+      const parse = TaskCursorListSchema.safeParse(req.query);
+      if (!parse.success) {
+        res.status(400).json({
+          error: parse.error.flatten(),
+          _meta: { version: "2.0", timestamp: now },
+        });
+        return;
+      }
+
+      const { cursor, limit, status, sort, q } = parse.data;
+      const db = createTaskDb(getTaskDb());
+      const page = db.listCursor(walletPublicKey, {
+        cursor,
+        limit,
+        status,
+        sort,
+        q: q && q.length > 0 ? q : undefined,
+      });
+
+      res.json({
+        data: {
+          items: page.items,
+          pagination: {
+            limit,
+            nextCursor: page.nextCursor ?? null,
+            hasNextPage: !!page.nextCursor,
+          },
+        },
+        _meta: {
+          version: "2.0",
+          timestamp: now,
+          requestId: res.locals.requestId || null,
+          apiVersion: res.locals.apiVersion || "2.0",
+        },
+        _links: {
+          self: `/api/tasks`,
+          ...(page.nextCursor
+            ? { next: `/api/tasks?cursor=${encodeURIComponent(page.nextCursor)}&limit=${limit}` }
+            : {}),
+        },
+      });
+      return;
+    }
+
+    // Offset fallback (backward-compatible)
     const parse = TaskListSchema.safeParse(req.query);
     if (!parse.success) {
       res.status(400).json({
         error: parse.error.flatten(),
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
+        _meta: { version: "2.0", timestamp: now },
       });
       return;
     }
@@ -142,9 +198,6 @@ export function createV2TasksRouter(
       q: q && q.length > 0 ? q : undefined,
     });
 
-    const now = new Date().toISOString();
-
-    // v2 enhanced response format
     res.json({
       data: {
         tasks,

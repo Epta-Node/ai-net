@@ -117,3 +117,21 @@ export interface DAGEvent {
   payload?: DAGEventPayload | string;
 }
 
+/** Generic cursor-paginated page returned by v2 list endpoints. */
+export interface CursorPage<T> {
+  items: T[];
+  pagination: {
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
+
+export interface CursorPageEnvelope<T> {
+  data: CursorPage<T>;
+  _links?: {
+    self: string;
+    next?: string;
+  };
+}
+

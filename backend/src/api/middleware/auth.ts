@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { UnauthorizedError } from '../../errors';
 
 function loadKeys(): Set<string> | null {
   const raw = process.env.API_KEYS;
@@ -10,7 +11,6 @@ function loadKeys(): Set<string> | null {
 export function authMiddleware(req: Request, res: Response, next: NextFunction): void {
   const keys = loadKeys();
   if (!keys) {
-    // API_KEYS unset — no-op, backward compatible
     next();
     return;
   }
@@ -18,7 +18,7 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   const auth = req.headers['authorization'] ?? '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token || !keys.has(token)) {
-    res.status(401).json({ error: 'Unauthorized' });
+    next(new UnauthorizedError());
     return;
   }
 

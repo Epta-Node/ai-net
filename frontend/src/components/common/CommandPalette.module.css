@@ -273,6 +273,38 @@
   color: rgba(148, 163, 184, 0.3);
 }
 
+/* Fuzzy-match highlight: the characters the query actually matched. */
+.highlight {
+  background: transparent;
+  color: #a5b4fc;
+  font-weight: 700;
+}
+
+/* Keyboard legend pinned under the results. */
+.footer {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.45);
+}
+
+.footer kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 5px;
+  margin-right: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
+}
+
 @media (max-width: 640px) {
   .overlay {
     padding-top: 4vh;
@@ -296,5 +328,12 @@
 
   .resultsWrapper {
     max-height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* The legend is the first thing to go when height is scarce. */
+  .footer {
+    display: none;
   }
 }
