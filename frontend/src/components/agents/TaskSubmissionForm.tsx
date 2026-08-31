@@ -43,7 +43,7 @@ const makeTaskSchema = (t: TFunction) =>
 type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>
 
 export function TaskSubmissionForm() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
@@ -59,6 +59,8 @@ export function TaskSubmissionForm() {
   )
 
   const taskSchema = useMemo(() => makeTaskSchema(t), [t])
+
+  type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
 
   const {
     register,
@@ -231,7 +233,7 @@ export function TaskSubmissionForm() {
                       id={`pref-${option.value}`}
                       type="checkbox"
                       value={option.value}
-                      checked={field.value.includes(option.value)}
+                      checked={field.value.includes(option.value as AgentPreference)}
                       onChange={(event) => {
                         const current = field.value
                         const next = event.target.checked

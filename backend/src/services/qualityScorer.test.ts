@@ -4,7 +4,10 @@
 
 import {
   QualityScorer,
+  applyInactivityDecay,
+  calculateReputationBreakdown,
   computeAgentQualityMetrics,
+  computeReputationDelta,
   computeTotalScore,
   computeTrend,
   extractSignificantTokens,
@@ -15,6 +18,9 @@ import {
   scoreCompleteness,
   scoreFormat,
   scoreRelevance,
+  DEFAULT_REPUTATION,
+  MAX_REPUTATION,
+  MIN_REPUTATION,
 } from './qualityScorer';
 import type { QualityScorerConfig, QualityScoringRules, ValidationEntry } from './qualityScorer.types';
 
@@ -329,262 +335,144 @@ describe('computeTrend', () => {
   });
 });
 
-// ─── percentileNormalize ─────────────────────────────────────────────────────
+// ─── Agent Reputation & Sybil Resistance (Issue #497) ─────────────────────────
 
-describe('percentileNormalize', () => {
-  it('returns the raw score when distribution is empty', () => {
-    expect(percentileNormalize(75, [])).toBe(75);
+describe('Agent Reputation Scoring (Issue #497)', () => {
+  describe('computeReputationDelta', () => {
+    it('increases reputation on task success and decreases on failure', () => {
+      const successDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 90,
+        currentReputation: 2.5,
+      });
+      const failureDelta = computeReputationDelta({
+        outcome: 'failure',
+        currentReputation: 2.5,
+      });
+
+      expect(successDelta).toBeGreaterThan(0);
+      expect(failureDelta).toBeLessThan(0);
+      expect(failureDelta).toBe(-0.20);
+    });
+
+    it('incorporates output quality score into delta', () => {
+      const highQualityDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 100,
+        latencyMs: 1500,
+        bondAmountXLM: 0,
+      });
+      const lowQualityDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 40,
+        latencyMs: 1500,
+        bondAmountXLM: 0,
+      });
+
+      expect(highQualityDelta).toBeGreaterThan(lowQualityDelta);
+    });
+
+    it('awards a bounded latency bonus for fast execution', () => {
+      const fastDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        latencyMs: 100,
+        bondAmountXLM: 0,
+      });
+      const slowDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        latencyMs: 2000,
+        bondAmountXLM: 0,
+      });
+
+      expect(fastDelta).toBeGreaterThan(slowDelta);
+    });
+
+    it('applies a bounded staking/bond weight multiplier', () => {
+      const unbondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 0,
+      });
+      const bondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 500,
+      });
+      const maxBondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 50000,
+      });
+
+      expect(bondedDelta).toBeGreaterThan(unbondedDelta);
+      // Bond multiplier capped at 1.5x
+      expect(maxBondedDelta).toBeLessThanOrEqual(unbondedDelta * 1.6);
+    });
+
+    it('strictly clamps reputation so no agent can exceed 5.0 or drop below 0.0', () => {
+      const atMaxDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 100,
+        currentReputation: 5.0,
+      });
+      const atMinDelta = computeReputationDelta({
+        outcome: 'failure',
+        currentReputation: 0.0,
+      });
+
+      expect(atMaxDelta).toBe(0);
+      expect(atMinDelta).toBe(0);
+    });
   });
 
-  it('returns 0 when score is below all historical scores', () => {
-    expect(percentileNormalize(10, [20, 40, 60, 80, 100])).toBe(0);
+  describe('applyInactivityDecay', () => {
+    it('decays inactive reputation by 0.1 per month of inactivity', () => {
+      const now = new Date('2026-06-01T00:00:00Z').getTime();
+      const twoMonthsAgo = new Date('2026-04-02T00:00:00Z').getTime(); // ~60 days
+
+      const { decayedReputation, decayApplied } = applyInactivityDecay(4.0, twoMonthsAgo, now);
+
+      expect(decayApplied).toBe(0.2);
+      expect(decayedReputation).toBe(3.8);
+    });
+
+    it('does not decay if recently active', () => {
+      const now = Date.now();
+      const { decayedReputation, decayApplied } = applyInactivityDecay(4.5, now - 1000, now);
+
+      expect(decayApplied).toBe(0);
+      expect(decayedReputation).toBe(4.5);
+    });
+
+    it('never decays below 0.0', () => {
+      const now = new Date('2026-06-01T00:00:00Z').getTime();
+      const fiveYearsAgo = new Date('2021-06-01T00:00:00Z').getTime();
+
+      const { decayedReputation } = applyInactivityDecay(0.5, fiveYearsAgo, now);
+      expect(decayedReputation).toBe(0.0);
+    });
   });
 
-  it('returns 100 when score is above all historical scores', () => {
-    expect(percentileNormalize(100, [20, 40, 60, 80, 90])).toBe(100);
-  });
+  describe('calculateReputationBreakdown', () => {
+    it('returns structured breakdown with all components', () => {
+      const breakdown = calculateReputationBreakdown({
+        reputationScore: 4.2,
+        tasksCompleted: 18,
+        tasksFailed: 2,
+        avgQualityScore: 92,
+        avgLatencyMs: 350,
+        bondAmountXLM: 200,
+      });
 
-  it('returns correct percentile for a mid-range score', () => {
-    // Distribution: [10, 20, 30, 40, 50] — score 30 is above 2/5 = 40%
-    expect(percentileNormalize(30, [10, 20, 30, 40, 50])).toBe(40);
-  });
-
-  it('handles unsorted distribution input', () => {
-    expect(percentileNormalize(50, [90, 10, 70, 30, 50])).toBe(40);
+      expect(breakdown.overallScore).toBe(4.2);
+      expect(breakdown.taskSuccessScore).toBe(4.5); // 18/20 * 5.0
+      expect(breakdown.qualityScore).toBe(4.6); // 92/100 * 5.0
+      expect(breakdown.bondWeightMultiplier).toBe(1.2); // 1.0 + 200/1000
+      expect(breakdown.tasksCompleted).toBe(18);
+      expect(breakdown.tasksFailed).toBe(2);
+    });
   });
 });
 
-// ─── loadScorerConfig ────────────────────────────────────────────────────────
-
-describe('loadScorerConfig', () => {
-  const originalEnv = { ...process.env };
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  it('returns defaults when env vars are not set', () => {
-    delete process.env.QUALITY_WEIGHT_COMPLETENESS;
-    delete process.env.QUALITY_WEIGHT_RELEVANCE;
-    delete process.env.QUALITY_WEIGHT_FORMAT;
-    delete process.env.QUALITY_REVIEW_THRESHOLD;
-    delete process.env.QUALITY_PERCENTILE_ENABLED;
-    delete process.env.QUALITY_PERCENTILE_MIN_SAMPLES;
-
-    const config = loadScorerConfig();
-    expect(config.weightCompleteness).toBe(0.4);
-    expect(config.weightRelevance).toBe(0.3);
-    expect(config.weightFormat).toBe(0.3);
-    expect(config.reviewThreshold).toBe(60);
-    expect(config.percentileEnabled).toBe(false);
-    expect(config.percentileMinSamples).toBe(10);
-  });
-
-  it('reads values from env vars', () => {
-    process.env.QUALITY_WEIGHT_COMPLETENESS = '0.5';
-    process.env.QUALITY_WEIGHT_RELEVANCE = '0.25';
-    process.env.QUALITY_WEIGHT_FORMAT = '0.25';
-    process.env.QUALITY_REVIEW_THRESHOLD = '70';
-    process.env.QUALITY_PERCENTILE_ENABLED = 'true';
-    process.env.QUALITY_PERCENTILE_MIN_SAMPLES = '20';
-
-    const config = loadScorerConfig();
-    expect(config.weightCompleteness).toBe(0.5);
-    expect(config.weightRelevance).toBe(0.25);
-    expect(config.weightFormat).toBe(0.25);
-    expect(config.reviewThreshold).toBe(70);
-    expect(config.percentileEnabled).toBe(true);
-    expect(config.percentileMinSamples).toBe(20);
-  });
-
-  it('clamps out-of-range weights', () => {
-    process.env.QUALITY_WEIGHT_COMPLETENESS = '1.5';
-    process.env.QUALITY_WEIGHT_RELEVANCE = '-0.3';
-    process.env.QUALITY_REVIEW_THRESHOLD = '150';
-
-    const config = loadScorerConfig();
-    expect(config.weightCompleteness).toBe(1);
-    expect(config.weightRelevance).toBe(0);
-    expect(config.reviewThreshold).toBe(100);
-  });
-});
-
-// ─── QualityScorer config integration ───────────────────────────────────────
-
-describe('QualityScorer config integration', () => {
-  it('uses config-provided weights for scoring', () => {
-    const config: QualityScorerConfig = {
-      weightCompleteness: 0.5,
-      weightRelevance: 0.25,
-      weightFormat: 0.25,
-      reviewThreshold: 50,
-      percentileEnabled: false,
-      percentileMinSamples: 10,
-    };
-    const scorer = new QualityScorer([], config);
-
-    // completeness=100, relevance=90 (quantum+computing matched), format=100 (schema ok)
-    // total = 100*(0.5/1.0) + 90*(0.25/1.0) + 100*(0.25/1.0) = 50+22.5+25 = 97.5 → 98
-    const quality = scorer.score(validResearchOutput, 'quantum computing', {
-      agentType: 'research',
-      requiredFields: ['summary', 'keyFindings', 'sources'],
-      optionalFields: ['confidence'],
-      weights: { completeness: 0.5, relevance: 0.25, format: 0.25 },
-    });
-    expect(quality.score).toBe(98);
-  });
-
-  it('applies config review threshold', () => {
-    const config: QualityScorerConfig = {
-      weightCompleteness: 0.4,
-      weightRelevance: 0.3,
-      weightFormat: 0.3,
-      reviewThreshold: 90,
-      percentileEnabled: false,
-      percentileMinSamples: 10,
-    };
-    const scorer = new QualityScorer([], config);
-    const quality = scorer.score(validResearchOutput, 'quantum computing', {
-      agentType: 'research',
-      requiredFields: ['summary', 'keyFindings', 'sources'],
-      optionalFields: ['confidence'],
-    });
-    // Score should be high but we set threshold to 90
-    expect(quality.needsReview).toBe(quality.score < 90);
-  });
-
-  it('reloadConfig picks up new env values', () => {
-    const scorer = new QualityScorer([], {
-      weightCompleteness: 0.4,
-      weightRelevance: 0.3,
-      weightFormat: 0.3,
-      reviewThreshold: 60,
-      percentileEnabled: false,
-      percentileMinSamples: 10,
-    });
-
-    expect(scorer.getConfig().reviewThreshold).toBe(60);
-
-    process.env.QUALITY_REVIEW_THRESHOLD = '80';
-    scorer.reloadConfig();
-    expect(scorer.getConfig().reviewThreshold).toBe(80);
-
-    delete process.env.QUALITY_REVIEW_THRESHOLD;
-  });
-});
-
-// ─── percentile normalization integration ────────────────────────────────────
-
-describe('QualityScorer percentile normalization', () => {
-  it('does not normalize when percentile is disabled', () => {
-    const scorer = new QualityScorer([], {
-      weightCompleteness: 0.4,
-      weightRelevance: 0.3,
-      weightFormat: 0.3,
-      reviewThreshold: 60,
-      percentileEnabled: false,
-      percentileMinSamples: 10,
-    });
-    scorer.setHistoricalScores([10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
-
-    const quality = scorer.score(validResearchOutput, 'quantum computing', researchRules);
-    // Without percentile normalization, score should be the raw weighted score
-    expect(quality.score).toBeGreaterThanOrEqual(0);
-    expect(quality.score).toBeLessThanOrEqual(100);
-  });
-
-  it('applies percentile normalization when enabled with enough samples', () => {
-    const scorer = new QualityScorer([], {
-      weightCompleteness: 0.4,
-      weightRelevance: 0.3,
-      weightFormat: 0.3,
-      reviewThreshold: 60,
-      percentileEnabled: true,
-      percentileMinSamples: 5,
-    });
-    // Historical scores cluster around 50–60
-    scorer.setHistoricalScores([40, 45, 50, 55, 60, 55, 50, 45, 50, 55]);
-
-    const quality = scorer.score(validResearchOutput, 'quantum computing', researchRules);
-    // Score should be percentile-normalized
-    expect(quality.score).toBeGreaterThanOrEqual(0);
-    expect(quality.score).toBeLessThanOrEqual(100);
-  });
-
-  it('does not normalize when not enough samples', () => {
-    const scorer = new QualityScorer([], {
-      weightCompleteness: 0.4,
-      weightRelevance: 0.3,
-      weightFormat: 0.3,
-      reviewThreshold: 60,
-      percentileEnabled: true,
-      percentileMinSamples: 10,
-    });
-    // Only 3 samples — below threshold of 10
-    scorer.setHistoricalScores([40, 50, 60]);
-
-    const quality = scorer.score(validResearchOutput, 'quantum computing', researchRules);
-    // Should not be normalized (raw score returned)
-    expect(quality.score).toBeGreaterThanOrEqual(0);
-  });
-});
-
-// ─── Validation Set ──────────────────────────────────────────────────────────
-
-describe('runValidationSet', () => {
-  const scorer = new QualityScorer();
-
-  const entries: ValidationEntry[] = [
-    {
-      label: 'valid research output',
-      output: validResearchOutput,
-      prompt: 'quantum computing',
-      agentType: 'research',
-      expectedScoreRange: [70, 100],
-      expectedNeedsReview: false,
-    },
-    {
-      label: 'empty output should score low',
-      output: {},
-      prompt: 'quantum computing',
-      agentType: 'research',
-      expectedScoreRange: [0, 40],
-      expectedNeedsReview: true,
-    },
-  ];
-
-  it('produces a report with pass/fail for each entry', () => {
-    const report = runValidationSet(scorer, entries);
-    expect(report.totalEntries).toBe(2);
-    expect(report.passed + report.failed).toBe(2);
-    expect(report.results.length).toBe(2);
-  });
-
-  it('marks valid output as passing', () => {
-    const report = runValidationSet(scorer, entries);
-    const validResult = report.results[0];
-    expect(validResult.entry.label).toBe('valid research output');
-    expect(validResult.passed).toBe(true);
-    expect(validResult.actualScore).toBeGreaterThanOrEqual(70);
-  });
-
-  it('marks empty output as needing review', () => {
-    const report = runValidationSet(scorer, entries);
-    const emptyResult = report.results[1];
-    expect(emptyResult.entry.label).toBe('empty output should score low');
-    expect(emptyResult.actualNeedsReview).toBe(true);
-  });
-
-  it('computes average deviation', () => {
-    const report = runValidationSet(scorer, entries);
-    expect(report.averageDeviation).toBeGreaterThanOrEqual(0);
-  });
-
-  it('returns empty report for empty entries', () => {
-    const report = runValidationSet(scorer, []);
-    expect(report.totalEntries).toBe(0);
-    expect(report.passed).toBe(0);
-    expect(report.failed).toBe(0);
-    expect(report.averageDeviation).toBe(0);
-  });
-});

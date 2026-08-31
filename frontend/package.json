@@ -41,6 +41,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.45.0",
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.1.0",

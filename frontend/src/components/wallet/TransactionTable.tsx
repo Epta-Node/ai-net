@@ -19,8 +19,6 @@ interface TransactionTableProps {
   publicKey: string | null
 }
 
-// Takes `t` and the locale as arguments rather than becoming a hook, so it
-// stays a plain pure function that is easy to reason about and test.
 function formatTimestamp(ts: string, t: TFunction, locale: string): string {
   const date = new Date(ts)
   const now = new Date()
@@ -77,8 +75,6 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   )
   const runningTotal = useMemo(() => computeRunningTotal(filtered), [filtered])
 
-  // Any change that narrows/widens the result set can strand the user on a page
-  // past the new end, so every filter/page-size change snaps back to page 1.
   const resetToFirstPage = () => setPage(1)
 
   if (!publicKey) {
@@ -297,8 +293,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
           <div className={styles.runningTotal}>
             {t('wallet.tx.runningTotal')}:{' '}
             <span className={runningTotal >= 0 ? styles.amountIn : styles.amountOut}>
-              {runningTotal >= 0 ? '+' : ''}
-              {runningTotal.toFixed(7)} XLM
+              {runningTotal >= 0 ? '+' : ''}{runningTotal.toFixed(7)} XLM
             </span>
           </div>
         </div>
