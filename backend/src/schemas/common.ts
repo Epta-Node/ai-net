@@ -30,6 +30,9 @@ export const paginationSchema = z.object({
 
 export type Pagination = z.infer<typeof paginationSchema>;
 
+/** The `field:direction` pairs `sortSchema` accepts for a given field list. */
+export type SortValue<F extends readonly string[]> = `${F[number]}:asc` | `${F[number]}:desc`;
+
 /**
  * Build a `sort` parameter constrained to `field:direction` pairs over the
  * given fields, so an unknown column can never reach a query.
@@ -39,9 +42,15 @@ export type Pagination = z.infer<typeof paginationSchema>;
  */
 export function sortSchema<const F extends readonly [string, ...string[]]>(
   fields: F,
-  defaultValue: `${F[number]}:asc` | `${F[number]}:desc`,
+  defaultValue: SortValue<F>,
 ) {
-  const values = fields.flatMap((f) => [`${f}:asc`, `${f}:desc`]) as [string, ...string[]];
+  // The cast keeps the literal union: widening to `string[]` here would make
+  // the parsed `sort` a bare `string`, which no longer satisfies the narrower
+  // union the db layer accepts.
+  const values = fields.flatMap((f) => [`${f}:asc`, `${f}:desc`]) as unknown as [
+    SortValue<F>,
+    ...SortValue<F>[],
+  ];
   return z.object({
     sort: z.enum(values).default(defaultValue),
   });

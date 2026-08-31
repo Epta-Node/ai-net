@@ -338,10 +338,14 @@ describe("SqlitePool", () => {
         await new Promise((r) => setTimeout(r, 50));
       });
       const queued = pool.read((db) => db.prepare("SELECT 1").get());
+      // Attach the rejection handler before closing: `close` rejects the queued
+      // waiter synchronously, and an unhandled rejection in that window fails
+      // the run regardless of the assertion that follows.
+      const rejected = expect(queued).rejects.toBeInstanceOf(PoolClosedError);
 
       await pool.close();
 
-      await expect(queued).rejects.toBeInstanceOf(PoolClosedError);
+      await rejected;
       await held;
     });
 

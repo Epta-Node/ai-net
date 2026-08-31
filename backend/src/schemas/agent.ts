@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod";
-import { idParamSchema, sortSchema, stellarPublicKeySchema, withPagination } from "./common";
+import { idParamSchema, sortSchema, withPagination } from "./common";
 
 /** Whether an agent is currently reachable. */
 export const agentStatusSchema = z.enum(["online", "offline"]);
@@ -20,16 +20,16 @@ export const reputationSchema = z.coerce.number().min(0).max(100);
 /** Prices are quoted in XLM and cannot be negative. */
 export const priceXlmSchema = z.coerce.number().nonnegative();
 
-/** `POST /api/agents/register` body. */
-export const registerAgentSchema = z.object({
-  id: z.string().trim().min(1, "Agent id is required"),
-  capabilities: z.array(z.string().trim().min(1)).min(1, "At least one capability is required"),
-  pricingXLM: priceXlmSchema,
-  endpoint: z.string().url("Endpoint must be a valid URL"),
-  stellarPublicKey: stellarPublicKeySchema,
-});
-
-export type RegisterAgentInput = z.infer<typeof registerAgentSchema>;
+/**
+ * `POST /api/agents/register` body.
+ *
+ * Re-exported from `api/schemas/agent.schema` rather than redefined here: that
+ * module is what `api/docs.ts` generates the OpenAPI component from, so a
+ * second definition would let the documented contract and the enforced one
+ * drift apart.
+ */
+export { RegisterAgentSchema as registerAgentSchema } from "../api/schemas/agent.schema";
+export type { RegisterAgentInput } from "../api/schemas/agent.schema";
 
 /**
  * `GET /api/agents` query.

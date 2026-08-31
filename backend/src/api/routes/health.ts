@@ -311,3 +311,4 @@ async function checkHorizon(url: string): Promise<"ok" | "unreachable"> {
 }
 
 export { router as healthRouter };
+export default router;

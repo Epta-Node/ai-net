@@ -539,7 +539,10 @@ fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, BytesN, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        BytesN, Env,
+    };
 
     fn create_test_env() -> (Env, UpgradeManagerClient<'static>, Address) {
         let env = Env::default();
@@ -561,7 +564,7 @@ mod tests {
         let (env, client, admin) = create_test_env();
         let initial_hash = test_wasm_hash(&env, 1);
 
-        let result = client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+        let result = client.try_initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
 
         assert!(result.is_ok());
         assert_eq!(client.get_admin(), Some(admin));
@@ -587,7 +590,7 @@ mod tests {
         };
 
         // Propose upgrade
-        let result = client.propose_upgrade(
+        let result = client.try_propose_upgrade(
             &String::from_str(&env, "2.0.0"),
             &new_hash,
             &String::from_str(&env, "Major upgrade"),
@@ -597,11 +600,10 @@ mod tests {
 
         // Validate proposal
         let gas_estimate = client.validate_proposal();
-        assert!(gas_estimate.is_ok());
-        assert!(gas_estimate.unwrap() > 0);
+        assert!(gas_estimate > 0);
 
         // Execute upgrade
-        let result = client.execute_upgrade();
+        let result = client.try_execute_upgrade();
         assert!(result.is_ok());
 
         let new_version = client.get_current_version().unwrap();
@@ -638,7 +640,7 @@ mod tests {
         assert!(client.can_rollback());
 
         // Perform rollback
-        let result = client.rollback_upgrade();
+        let result = client.try_rollback_upgrade();
         assert!(result.is_ok());
 
         // Verify we're back to original version

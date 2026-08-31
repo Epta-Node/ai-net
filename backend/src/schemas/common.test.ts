@@ -230,7 +230,7 @@ describe("agent schemas", () => {
 
   it("accepts a well-formed registration", () => {
     const result = registerAgentSchema.safeParse({
-      id: "agent-1",
+      agentId: "agent-1",
       capabilities: ["research"],
       pricingXLM: 1.5,
       endpoint: "https://agent.example/run",
@@ -241,7 +241,7 @@ describe("agent schemas", () => {
 
   it("requires at least one capability", () => {
     const result = registerAgentSchema.safeParse({
-      id: "agent-1",
+      agentId: "agent-1",
       capabilities: [],
       pricingXLM: 1,
       endpoint: "https://agent.example/run",
@@ -252,7 +252,7 @@ describe("agent schemas", () => {
 
   it("rejects a non-URL endpoint", () => {
     const result = registerAgentSchema.safeParse({
-      id: "agent-1",
+      agentId: "agent-1",
       capabilities: ["research"],
       pricingXLM: 1,
       endpoint: "not-a-url",
@@ -263,7 +263,7 @@ describe("agent schemas", () => {
 
   it("rejects a negative price", () => {
     const result = registerAgentSchema.safeParse({
-      id: "agent-1",
+      agentId: "agent-1",
       capabilities: ["research"],
       pricingXLM: -1,
       endpoint: "https://agent.example/run",

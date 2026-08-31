@@ -497,3 +497,4 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
 }
 
 export const agentsRouter = createAgentsRouter();
+export default agentsRouter;
