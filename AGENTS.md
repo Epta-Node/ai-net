@@ -17,6 +17,7 @@ This document specifies repository instructions and conventions for developers a
 3. **Frontend Invariants**:
    - Responsive, token-driven modern design.
    - Proper skeleton loading states and graceful error boundaries.
+   - Follow [Frontend Architecture & Conventions](docs/FRONTEND_ARCHITECTURE.md) for folder structure, naming, and component patterns.
 
 ---
 
@@ -31,15 +32,19 @@ This document specifies repository instructions and conventions for developers a
 
 ## 3. Verification Commands
 
-Before proposing code changes:
+Before proposing code changes, run the single-command quality gate:
 
 ```bash
+# Unified Full-Stack Quality Gate (Format + Lint + Typecheck + Coverage Thresholds)
+npm run gate
+
+# Or component-specific verifications:
 # 1. Smart Contracts
 cd smart-contracts && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 
 # 2. Backend
-cd backend && npm run lint && npm test
+cd backend && npm run lint && npm run typecheck && npm run test:coverage
 
 # 3. Frontend
-cd frontend && npm run lint && npm run build
+cd frontend && npm run lint && npm run typecheck && npm run test:coverage && npm run build
 ```

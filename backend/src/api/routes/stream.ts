@@ -72,6 +72,15 @@ interface ClientConnectionTracker {
 }
 
 const clientConnections = new Map<string, ClientConnectionTracker>();
+const activeStreamServers = new Set<WebSocketServer>();
+
+export function getStreamConnectionCount(): number {
+  let total = 0;
+  for (const server of activeStreamServers) {
+    total += server.clients.size;
+  }
+  return total;
+}
 
 function getClientIp(req: IncomingMessage): string {
   const forwarded = req.headers['x-forwarded-for'];

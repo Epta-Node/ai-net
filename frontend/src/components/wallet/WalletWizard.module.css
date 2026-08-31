@@ -30,6 +30,74 @@
   margin-bottom: 2rem;
 }
 
+/* Step dot indicators (#421) */
+.stepDots {
+  display: flex;
+  align-items: center;
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  gap: 0;
+}
+
+.stepDot {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.stepDotLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 2px solid currentColor;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.stepConnector {
+  display: block;
+  flex: 1;
+  height: 2px;
+  min-width: 20px;
+  background: var(--bg-muted, #e5e7eb);
+  margin: 0 4px;
+  transition: background 0.3s;
+}
+
+/* Pending: grey outline */
+.stepDot--pending .stepDotLabel {
+  color: var(--text-muted, #9ca3af);
+  border-color: var(--bg-muted, #d1d5db);
+  background: transparent;
+}
+
+/* Current: primary filled */
+.stepDot--current .stepDotLabel {
+  color: #fff;
+  border-color: var(--primary, #3b82f6);
+  background: var(--primary, #3b82f6);
+}
+
+/* Done: green check icon */
+.stepDot--done {
+  color: var(--success, #22c55e);
+}
+.stepDot--done .stepConnector {
+  background: var(--success, #22c55e);
+}
+
+/* Error: red outline */
+.stepDot--error .stepDotLabel {
+  color: var(--error, #ef4444);
+  border-color: var(--error, #ef4444);
+  background: transparent;
+}
+
 .progressText {
   font-size: 0.875rem;
   color: var(--text-muted, #6b7280);

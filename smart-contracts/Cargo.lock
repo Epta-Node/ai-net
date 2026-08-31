@@ -10,13 +10,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-governance"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "agent-registry"
 version = "0.1.0"
 dependencies = [

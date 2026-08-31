@@ -71,6 +71,9 @@ export interface NetworkStats {
   uptimePercent: number;
   tasksLast24h?: TimePoint[];
   xlmLast24h?: TimePoint[];
+  /** 7-day daily series for sparklines */
+  tasksLast7d?: TimePoint[];
+  xlmLast7d?: TimePoint[];
 }
 
 export interface PaymentEvent {
@@ -112,5 +115,23 @@ export interface DAGEvent {
   nodeId?: string;
   timestamp: string;
   payload?: DAGEventPayload | string;
+}
+
+/** Generic cursor-paginated page returned by v2 list endpoints. */
+export interface CursorPage<T> {
+  items: T[];
+  pagination: {
+    limit: number;
+    nextCursor: string | null;
+    hasNextPage: boolean;
+  };
+}
+
+export interface CursorPageEnvelope<T> {
+  data: CursorPage<T>;
+  _links?: {
+    self: string;
+    next?: string;
+  };
 }
 
