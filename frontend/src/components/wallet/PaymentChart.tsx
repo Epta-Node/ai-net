@@ -10,7 +10,7 @@ import { formatDate } from '../../utils/format'
 import styles from './PaymentChart.module.css'
 import { AccessibleChart } from '../common/AccessibleChart'
 
-const SLICE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4', '#a855f7', '#ef4444', '#64748b']
+const SLICE_COLORS = ['var(--accent-secondary)', 'var(--status-success)', 'var(--status-warning)', 'var(--accent-text-strong)', 'var(--accent-info)', 'var(--accent)', 'var(--status-danger)', 'var(--text-muted)']
 
 interface PaymentChartProps {
   transactions: TransactionEvent[]
@@ -39,32 +39,23 @@ export function PaymentChart({ transactions }: PaymentChartProps) {
       <div className={styles.chartCard}>
         <h3 className={styles.heading}>{t('wallet.chart.dailySpendHeading')}</h3>
         {hasDailySpend ? (
-          <AccessibleChart
-            label={t('wallet.chart.dailySpendHeading')}
-            points={dailySpend.map((point) => ({
-              label: formatDate(point.date, i18n.language),
-              value: `${point.total.toFixed(7)} XLM`,
-              detail: t('wallet.chart.spent'),
-            }))}
-          >
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={dailySpend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
-                <XAxis
-                  dataKey="date"
-                  tickFormatter={(value: string) => formatDate(value, i18n.language).slice(0, 5)}
-                  tick={{ fontSize: 11 }}
-                  interval={4}
-                />
-                <YAxis tick={{ fontSize: 11 }} width={40} />
-                <Tooltip
-                  formatter={(value: number) => [`${value.toFixed(7)} XLM`, t('wallet.chart.spent')]}
-                  labelFormatter={(value: string) => formatDate(value, i18n.language)}
-                />
-                <Bar dataKey="total" fill="var(--primary)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </AccessibleChart>
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={dailySpend} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-color)" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={(value: string) => formatDate(value, i18n.language).slice(0, 5)}
+                tick={{ fontSize: 11 }}
+                interval={4}
+              />
+              <YAxis tick={{ fontSize: 11 }} width={40} />
+              <Tooltip
+                formatter={(value: number) => [`${value.toFixed(7)} XLM`, t('wallet.chart.spent')]}
+                labelFormatter={(value: string) => formatDate(value, i18n.language)}
+              />
+              <Bar dataKey="total" fill="var(--accent-secondary)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         ) : (
           <p className={styles.empty}>{t('wallet.chart.noData')}</p>
         )}

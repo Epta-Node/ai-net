@@ -16,17 +16,17 @@ export function getCellSeverity(likelihood: number, impact: number): 'low' | 'me
 }
 
 const severityColors = {
-  low: '#10b981',      // Emerald Green
-  medium: '#eab308',   // Amber Yellow
-  high: '#f97316',     // Orange
-  critical: '#ef4444', // Red
+  low: 'var(--status-success)',      // Emerald Green
+  medium: 'var(--status-warning-strong)',   // Amber Yellow
+  high: 'var(--status-warning)',     // Orange
+  critical: 'var(--status-danger)', // Red
 };
 
 const heatmapColors = {
-  low: 'rgba(16, 185, 129, 0.12)',
-  medium: 'rgba(234, 179, 8, 0.12)',
-  high: 'rgba(249, 115, 22, 0.15)',
-  critical: 'rgba(239, 68, 68, 0.2)',
+  low: 'var(--status-success-surface-muted)',
+  medium: 'var(--status-warning-surface-muted)',
+  high: 'var(--status-warning-surface)',
+  critical: 'var(--status-danger-surface-strong)',
 };
 
 const RiskMatrix: React.FC<Props> = ({ result }) => {
@@ -43,9 +43,9 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
-          borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          background: 'var(--white-alpha-02)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
         {t('agent.risk.empty')}
@@ -84,9 +84,9 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
         style={{
           width: '100%',
           height: 'auto',
-          backgroundColor: 'rgba(0, 0, 0, 0.2)',
-          borderRadius: '12px',
-          border: '1px solid rgba(255, 255, 255, 0.05)',
+          backgroundColor: 'var(--surface-black-subtle)',
+          borderRadius: 'var(--radius-xl)',
+          border: '1px solid var(--white-alpha-05)',
         }}
         id="risk-matrix-svg"
       >
@@ -109,7 +109,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
                 width={cellSize}
                 height={cellSize}
                 fill={fillColor}
-                stroke="rgba(255, 255, 255, 0.05)"
+                stroke="var(--white-alpha-05)"
                 strokeWidth="1"
                 className="risk-cell"
                 data-testid={`risk-cell-${likelihood}-${impact}`}
@@ -125,7 +125,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           width={gridWidth}
           height={gridHeight}
           fill="none"
-          stroke="rgba(255, 255, 255, 0.15)"
+          stroke="var(--white-alpha-15)"
           strokeWidth="1.5"
         />
 
@@ -172,7 +172,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
         <text
           x={gridPaddingLeft + gridWidth / 2}
           y={svgHeight - 15}
-          fill="#f8fafc"
+          fill="var(--text-primary)"
           fontSize="14"
           textAnchor="middle"
           style={{ fontWeight: 600, letterSpacing: '0.05em' }}
@@ -184,7 +184,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
           transform={`rotate(-90, 18, ${gridPaddingTop + gridHeight / 2})`}
           x={18}
           y={gridPaddingTop + gridHeight / 2}
-          fill="#f8fafc"
+          fill="var(--text-primary)"
           fontSize="14"
           textAnchor="middle"
           style={{ fontWeight: 600, letterSpacing: '0.05em' }}
@@ -275,14 +275,14 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
             top: `${(hoveredRisk.cy / svgHeight) * 100}%`,
             left: `${(hoveredRisk.cx / svgWidth) * 100}%`,
             transform: 'translate(-50%, -100%) translateY(-12px)',
-            backgroundColor: '#0f172a',
-            color: '#f8fafc',
+            backgroundColor: 'var(--surface-canvas)',
+            color: 'var(--text-primary)',
             border: `1px solid ${severityColors[hoveredRisk.risk.severity || getCellSeverity(hoveredRisk.risk.likelihood, hoveredRisk.risk.impact)]}`,
-            borderRadius: '6px',
+            borderRadius: 'var(--radius-md)',
             padding: '10px 14px',
             fontSize: '0.8rem',
             width: '200px',
-            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.4)',
+            boxShadow: 'var(--shadow-sm)',
             zIndex: 100,
             pointerEvents: 'none',
             lineHeight: '1.4',
@@ -293,8 +293,8 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
             {hoveredRisk.risk.description}
           </div>
           {hoveredRisk.risk.mitigations && hoveredRisk.risk.mitigations.length > 0 && (
-            <div style={{ color: '#94a3b8', fontSize: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '4px', marginTop: '4px' }}>
-              <span style={{ fontWeight: 600, color: '#e2e8f0' }}>{t('agent.risk.mitigation')}</span>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.75rem', borderTop: '1px solid var(--white-alpha-10)', paddingTop: '4px', marginTop: '4px' }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{t('agent.risk.mitigation')}</span>
               {hoveredRisk.risk.mitigations[0]}
             </div>
           )}
@@ -307,7 +307,7 @@ const RiskMatrix: React.FC<Props> = ({ result }) => {
               transform: 'translateX(-50%) rotate(45deg)',
               width: '10px',
               height: '10px',
-              backgroundColor: '#0f172a',
+              backgroundColor: 'var(--surface-canvas)',
               borderBottom: `1px solid ${severityColors[hoveredRisk.risk.severity || getCellSeverity(hoveredRisk.risk.likelihood, hoveredRisk.risk.impact)]}`,
               borderRight: `1px solid ${severityColors[hoveredRisk.risk.severity || getCellSeverity(hoveredRisk.risk.likelihood, hoveredRisk.risk.impact)]}`,
             }}

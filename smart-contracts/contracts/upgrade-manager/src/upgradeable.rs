@@ -1,39 +1,48 @@
-#![no_std]
-
 //! # Upgradeable Trait
 //!
 //! Provides a standard interface for contracts that support safe upgrades.
 //! Contracts implementing this trait can integrate with the upgrade manager
 //! to provide version tracking, data migration, and rollback capabilities.
 
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, String, Vec};
 
 /// Standard interface for upgradeable contracts
 pub trait Upgradeable {
     /// Get the current contract version
     fn get_version(env: Env) -> String;
-    
+
     /// Get the current WASM hash
     fn get_wasm_hash(env: Env) -> BytesN<32>;
-    
+
     /// Check if the contract supports upgrades
     fn is_upgradeable(env: Env) -> bool;
-    
+
     /// Get the upgrade manager contract address (if configured)
     fn get_upgrade_manager(env: Env) -> Option<Address>;
-    
+
     /// Set the upgrade manager contract address (admin only)
     fn set_upgrade_manager(env: Env, upgrade_manager: Address) -> Result<(), UpgradeableError>;
-    
+
     /// Execute pre-upgrade validation
-    fn pre_upgrade_hook(env: Env, new_version: String, new_wasm_hash: BytesN<32>) -> Result<Vec<String>, UpgradeableError>;
-    
+    fn pre_upgrade_hook(
+        env: Env,
+        new_version: String,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<Vec<String>, UpgradeableError>;
+
     /// Execute post-upgrade migration
-    fn post_upgrade_hook(env: Env, old_version: String, new_version: String) -> Result<(), UpgradeableError>;
-    
+    fn post_upgrade_hook(
+        env: Env,
+        old_version: String,
+        new_version: String,
+    ) -> Result<(), UpgradeableError>;
+
     /// Get migration plan for upgrading to a new version
-    fn get_migration_plan(env: Env, target_version: String) -> Result<MigrationMetadata, UpgradeableError>;
-    
+    fn get_migration_plan(
+        env: Env,
+        target_version: String,
+    ) -> Result<MigrationMetadata, UpgradeableError>;
+
     /// Initiate upgrade through upgrade manager
     fn initiate_upgrade(
         env: Env,
@@ -80,7 +89,7 @@ pub struct UpgradeStatus {
 }
 
 /// Errors specific to upgradeable contracts
-#[contracttype]
+#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum UpgradeableError {
@@ -102,20 +111,18 @@ pub enum UpgradeableError {
     MigrationPlanFailed = 8,
 }
 
-impl From<UpgradeableError> for soroban_sdk::Error {
-    fn from(err: UpgradeableError) -> Self {
-        soroban_sdk::Error::from_contract_error(err as u32)
-    }
-}
-
 /// Utility functions for version comparison and compatibility checking
 pub mod version_utils {
+    use crate::{UpgradeableError, VersionCompatibility};
     use soroban_sdk::{Env, String, Vec};
-    use crate::{VersionCompatibility, UpgradeableError};
 
-    /// Simple version comparison for strings (semantic versioning approximation)
-    /// In production, you would use proper semver parsing
-    pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+    /// Lexicographic comparison of two version tags.
+    ///
+    /// [`String`] implements `Ord` through the host's byte comparison, so this
+    /// behaves identically natively and under `wasm32v1-none`. It is a
+    /// byte-wise ordering, not a semver-aware one: `"1.10.0"` sorts before
+    /// `"1.9.0"`. Callers that need semver precedence must zero-pad components.
+    pub fn compare_versions(v1: &String, v2: &String) -> Ordering {
         v1.cmp(v2)
     }
 
@@ -127,28 +134,28 @@ pub mod version_utils {
     ) -> Result<VersionCompatibility, UpgradeableError> {
         let current_str = current.to_string();
         let target_str = target.to_string();
-        
+
         let mut issues = Vec::new(env);
         let mut is_compatible = true;
         let mut migration_required = false;
-        
+
         // Simple version comparison - in practice would use proper semver
         match current_str.cmp(&target_str) {
             std::cmp::Ordering::Less => {
                 // Upgrading to newer version - generally compatible
                 migration_required = true;
             }
-            std::cmp::Ordering::Equal => {
+            Ordering::Equal => {
                 // Same version - no migration needed
                 migration_required = false;
             }
-            std::cmp::Ordering::Greater => {
+            Ordering::Greater => {
                 // Downgrading - not allowed without explicit rollback
                 is_compatible = false;
                 issues.push_back(String::from_str(env, "Downgrade not allowed"));
             }
         }
-        
+
         Ok(VersionCompatibility {
             current_version: current,
             target_version: target,
@@ -161,16 +168,16 @@ pub mod version_utils {
     /// Generate migration steps based on version difference
     pub fn generate_migration_steps(
         env: &Env,
-        from_version: &str,
-        to_version: &str,
+        from_version: &String,
+        to_version: &String,
     ) -> Result<Vec<String>, UpgradeableError> {
         let mut steps = Vec::new(env);
-        
+
         // Simple version-based migration planning
         match from_version.cmp(to_version) {
-            std::cmp::Ordering::Less => {
+            Ordering::Less => {
                 // Upgrading
-                if from_version.starts_with("1.") && to_version.starts_with("2.") {
+                if starts_with(from_version, "1.") && starts_with(to_version, "2.") {
                     // Major version upgrade
                     steps.push_back(String::from_str(env, "backup_existing_data"));
                     steps.push_back(String::from_str(env, "validate_data_integrity"));
@@ -185,16 +192,16 @@ pub mod version_utils {
                     steps.push_back(String::from_str(env, "refresh_indexes"));
                 }
             }
-            std::cmp::Ordering::Equal => {
+            Ordering::Equal => {
                 // Same version - minimal validation
                 steps.push_back(String::from_str(env, "validate_compatibility"));
             }
-            std::cmp::Ordering::Greater => {
+            Ordering::Greater => {
                 // Downgrade - return error
                 return Err(UpgradeableError::IncompatibleVersion);
             }
         }
-        
+
         Ok(steps)
     }
 }
@@ -249,15 +256,15 @@ macro_rules! impl_upgradeable_basics {
             fn get_version(env: Env) -> String {
                 String::from_str(&env, $version)
             }
-            
+
             fn is_upgradeable(_env: Env) -> bool {
                 true
             }
-            
+
             fn get_wasm_hash(env: Env) -> BytesN<32> {
                 env.current_contract_address().into() // Placeholder
             }
-            
+
             // Other methods need custom implementation
         }
     };

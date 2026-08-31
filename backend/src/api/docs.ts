@@ -110,6 +110,12 @@ List endpoints support standardized query parameters:
           name: "x-challenge",
           description: "Challenge string that was signed by the agent's keypair",
         },
+        BearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+          description: "JSON Web Token for authenticated user sessions",
+        },
       },
       headers: {
         "X-RateLimit-Limit": {
@@ -533,6 +539,37 @@ List endpoints support standardized query parameters:
           required: ["error"],
           properties: {
             error: { type: "string", example: "Service dependencies are unavailable" },
+          },
+        },
+        AuthTokensResponse: {
+          type: "object",
+          required: ["accessToken", "refreshToken", "expiresIn", "tokenType", "session"],
+          properties: {
+            accessToken: { type: "string", example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+            refreshToken: { type: "string", example: "rt_8a12d3...39af" },
+            expiresIn: { type: "integer", example: 900 },
+            tokenType: { type: "string", example: "Bearer" },
+            session: {
+              type: "object",
+              required: ["id", "familyId", "deviceId", "expiresAt"],
+              properties: {
+                id: { type: "string", example: "sess_uuid" },
+                familyId: { type: "string", example: "fam_uuid" },
+                deviceId: { type: "string", example: "device_macbook_pro" },
+                deviceName: { type: "string", nullable: true, example: "Chrome on macOS" },
+                expiresAt: { type: "string", example: "2026-09-05T12:00:00.000Z" },
+              },
+            },
+          },
+        },
+        TokenRefreshResponse: {
+          type: "object",
+          required: ["accessToken", "refreshToken", "expiresIn", "tokenType"],
+          properties: {
+            accessToken: { type: "string", example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." },
+            refreshToken: { type: "string", example: "rt_9b34e4...40be" },
+            expiresIn: { type: "integer", example: 900 },
+            tokenType: { type: "string", example: "Bearer" },
           },
         },
       },
