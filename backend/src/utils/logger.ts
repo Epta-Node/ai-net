@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { currentTraceContext } from '../services/traceContext';
 
 const level = process.env.LOG_LEVEL || 'info';
 
@@ -11,6 +12,17 @@ const baseLogger = pino({
     },
   },
   timestamp: pino.stdTimeFunctions.isoTime,
+  // Auto-inject traceId / spanId from the active AsyncLocalStorage context
+  // so every log line in a traced flow carries the correlation IDs without
+  // the caller having to pass them explicitly.
+  mixin() {
+    const ctx = currentTraceContext();
+    if (!ctx) return {};
+    const bindings: Record<string, unknown> = { traceId: ctx.traceId, spanId: ctx.spanId };
+    if (ctx.taskId) bindings.taskId = ctx.taskId;
+    if (ctx.requestId) bindings.requestId = ctx.requestId;
+    return bindings;
+  },
 });
 
 /**

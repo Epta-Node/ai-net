@@ -16,6 +16,7 @@ import {
   stroopsToXlm,
 } from "./utils";
 import { tracingService } from "../services/tracing";
+import { currentTraceId } from "../services/traceContext";
 
 const STELLAR_HORIZON =
   process.env.STELLAR_HORIZON ?? "https://horizon-testnet.stellar.org";
@@ -89,8 +90,9 @@ export class PaymentService {
     amountXLM: number,
     correlationId?: string
   ): Promise<string> {
-    const span = correlationId
-      ? tracingService.startSpan(correlationId, 'payment', 'lock', { taskId, nodeId, amountXLM })
+    const traceId = correlationId ?? currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'payment', 'lock', { taskId, nodeId, amountXLM })
       : null;
 
     try {
@@ -156,8 +158,9 @@ export class PaymentService {
       return record.txHash;
     }
 
-    const span = correlationId
-      ? tracingService.startSpan(correlationId, 'payment', 'release', { taskId, nodeId })
+    const traceId = correlationId ?? currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'payment', 'release', { taskId, nodeId })
       : null;
 
     try {

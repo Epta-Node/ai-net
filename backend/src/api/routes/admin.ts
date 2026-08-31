@@ -1,9 +1,66 @@
 import { Router, Request, Response } from "express";
 import { getGlobalJobQueue, type JobQueue, type JobStatus } from "../../queue";
+import { tracingService } from "../../services/tracing";
+import { adminAuthMiddleware } from "../middleware/auth";
 
 export function createAdminQueueRouter(queue?: JobQueue): Router {
   const router = Router();
   const jobQueue = queue ?? getGlobalJobQueue();
+
+  /**
+   * @openapi
+   * /api/admin/traces/{id}:
+   *   get:
+   *     summary: Retrieve a distributed trace by traceId or requestId
+   *     operationId: getAdminTrace
+   *     description: >
+   *       Returns the correlated spans for a given traceId (correlationId) or
+   *       requestId. Accepts either identifier and resolves it to the trace.
+   *       Requires admin authentication via `X-Admin-API-Key` or
+   *       `Authorization: Bearer`.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *         description: traceId (correlationId) or requestId to look up
+   *     responses:
+   *       200:
+   *         description: Trace found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 correlationId: { type: string }
+   *                 spans: { type: array }
+   *                 startedAt: { type: string }
+   *                 endedAt: { type: string }
+   *                 totalDurationMs: { type: number }
+   *       404:
+   *         description: No trace found for the given id
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.get("/traces/:id", adminAuthMiddleware, (req: Request, res: Response) => {
+    const id = req.params.id;
+
+    // Resolve requestId → correlationId when the id is not already a trace.
+    const correlationId = tracingService.resolveRequestId(id) ?? id;
+
+    const trace = tracingService.getTrace(correlationId);
+    if (!trace) {
+      res.status(404).json({ error: "Trace not found", id });
+      return;
+    }
+
+    res.json({ ...trace, requestedId: id });
+  });
 
   /**
    * @openapi

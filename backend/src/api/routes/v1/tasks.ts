@@ -9,6 +9,8 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { currentTraceId } from "../../../services/traceContext";
+import { tracingService } from "../../../services/tracing";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
@@ -76,6 +78,7 @@ export function createV1TasksRouter(
     const taskId = `task_${nanoid(12)}`;
     const dag = decompose(taskId, prompt);
     const now = new Date().toISOString();
+    const traceId = currentTraceId();
     const task: Task = {
       id: taskId,
       prompt,
@@ -84,6 +87,8 @@ export function createV1TasksRouter(
       dag,
       createdAt: now,
       updatedAt: now,
+      requestId: res.locals.requestId,
+      traceId,
     };
 
     createTask(task);
