@@ -9,30 +9,15 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
-import { NotFoundError, ValidationError, RateLimitError, AppError } from "../../errors";
-import { getConfig } from "../../config";
+import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 
 // ── Validation config ────────────────────────────────────────────────────────
-function promptSchema() {
-  return z
-    .string()
-    .min(1, "Prompt is required")
-    .superRefine((prompt, ctx) => {
-      const maxPromptLength = getConfig().MAX_PROMPT_LENGTH;
-      if (prompt.length > maxPromptLength) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.too_big,
-          type: "string",
-          maximum: maxPromptLength,
-          inclusive: true,
-          message: `Prompt too long (max ${maxPromptLength} characters)`,
-        });
-      }
-    })
-    .transform((s) => s.replace(/[\x00-\x08\x0E-\x1F]/g, "").trim());
-}
+// Read at module load time so the value is stable for the lifetime of the
+// process. Tests that need a different value should set process.env before
+// importing (or use jest.resetModules() + re-require).
+const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -50,21 +35,11 @@ function promptSchema() {
 // maxBudgetXLM when it was present and below the minimum, and accepted
 // walletPublicKey from the body; requiring them here silently broke every
 // caller that omitted them, including the e2e suite.
-export const createTaskSchema = z.object({
-  prompt: promptSchema(),
-  walletPublicKey: z.string().optional(),
-  maxBudgetXLM: z.number().min(0.1).optional().default(1),
-  agentPreferences: z.array(z.string()).optional(),
-  priority: z.enum(["low", "normal", "high", "critical"]).optional().default("normal"),
-});
-
-const TaskListSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).default(10),
-  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
-  sort: z.enum(["createdAt:desc", "createdAt:asc"]).default("createdAt:desc"),
-  q: z.string().optional(),
-});
+// Both schemas now live in src/schemas/task.ts so the three task routers, and
+// the frontend, share one definition. Re-exported to keep existing importers
+// of `createTaskSchema` working.
+export { createTaskSchema } from "../../schemas/task";
+import { createTaskSchema, listTasksQuerySchema } from "../../schemas/task";
 
 /**
  * @deprecated Use version-specific routers instead: createV1TasksRouter or createV2TasksRouter
@@ -290,7 +265,7 @@ export function createTasksRouter(
   tasksRouter.get("/", (req: Request, res: Response, next: NextFunction): void => {
     try {
       const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
-      const parse = TaskListSchema.safeParse(req.query);
+      const parse = listTasksQuerySchema.safeParse(req.query);
       if (!parse.success) {
         const correlationId = res.locals.correlationId as string | undefined;
         throw new ValidationError(

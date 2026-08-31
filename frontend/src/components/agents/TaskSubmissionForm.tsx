@@ -4,11 +4,13 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
 import type { TFunction } from 'i18next';
 import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
-import { useToast } from '../../hooks/useToast';
+import { useToast } from '../../context/ToastContext';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 // Only the label is translated: `value` is the wire format the API and the zod
@@ -218,14 +220,14 @@ export function TaskSubmissionForm() {
           <button
             type="submit"
             id="btn-submit-task"
-            disabled={isLoading || !isValid}
+            disabled={isLoading}
             style={{
               padding: '12px 20px',
               borderRadius: 10,
               border: 'none',
-              background: (!isValid || isLoading) ? '#9ca3af' : '#2563eb',
+              background: isLoading ? '#9ca3af' : '#2563eb',
               color: '#ffffff',
-              cursor: (!isValid || isLoading) ? 'not-allowed' : 'pointer',
+              cursor: isLoading ? 'not-allowed' : 'pointer',
               transition: 'background 0.2s',
             }}
           >

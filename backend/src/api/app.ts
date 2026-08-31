@@ -1,3 +1,12 @@
+/**
+ * Express application factory.
+ *
+ * Wires up middleware, routes, the WebSocket task stream, background
+ * services (job queue/worker, heartbeat cleanup, metrics), and the global
+ * error handler. Called by tests (`opts.disableCompression`, custom
+ * dispatch/queue, etc.) and by the server entry-point (`src/index.ts`).
+ */
+
 import express, { Request, Response, NextFunction } from "express";
 import { createServer, Server as HttpServer } from "http";
 import swaggerUi from "swagger-ui-express";
@@ -26,7 +35,8 @@ import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { registerRateLimitMiddleware } from "./middleware/rateLimit";
+import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
+import { authMiddleware } from "./middleware/auth";
 import { createCorsMiddleware } from "./middleware/cors";
 import { compressionMiddleware } from "./middleware/compression";
 import { requestId } from "./middleware/requestId";
@@ -35,7 +45,11 @@ import { errorHandler } from "./middleware/errorHandler";
 import { versioningMiddleware } from "./middleware/versioning";
 import { createV1TasksRouter } from "./routes/v1/tasks";
 import { createV2TasksRouter } from "./routes/v2/tasks";
-import { getTaskDb } from "../db/tasks";
+import { createAuthRouter } from "./routes/auth";
+import { type AuthService } from "../services/auth";
+import { createLogger } from "../utils/logger";
+import { createTaskDb, getTaskDb } from "../db/tasks";
+import { ValidationError, UnauthorizedError, NotFoundError, AppError } from "../errors";
 import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
 import { createTaskJobHandler } from "../coordinator/coordinator";
 import {
@@ -50,9 +64,7 @@ import {
   type JobQueue,
 } from "../queue";
 import { createAdminQueueRouter } from "./routes/admin";
-import { metricsMiddleware, metricsService } from "../services/metrics";
-import { createLogger } from "../utils/logger";
-import { getConfig } from "../config";
+import { metricsService, metricsMiddleware } from "../services/metrics";
 
 export interface AppOptions {
   dispatch?: DispatchFn;
@@ -66,6 +78,9 @@ export interface AppOptions {
   disableCompression?: boolean;
   queue?: JobQueue;
   jobWorker?: JobWorker;
+  /** Custom auth service instance */
+  authService?: AuthService;
+  /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
 }
 
@@ -129,10 +144,19 @@ export function createApp(opts: AppOptions = {}): {
     heartbeatService.start();
   }
 
-  app.use("/health", healthRouter);
-  app.use("/api/health", healthRouter);
-  app.use("/api/stats", createStatsRouter(getTaskDb()));
+  // ── Health routes ───────────────────────────────────────────────────────────
+  app.use("/health", publicLimiter.middleware, healthRouter);
 
+  // ── Stats routes ───────────────────────────────────────────────────────────
+  app.use("/api/stats", publicLimiter.middleware, createStatsRouter(getTaskDb()));
+
+  // ── Auth routes ────────────────────────────────────────────────────────────
+  app.use("/api/auth", createAuthRouter(opts.authService));
+
+  // ── Agent routes ───────────────────────────────────────────────────────────
+  // Public reads use the public limiter; registration uses the stricter
+  // per-legacy register limiter (kept for backward compatibility).
+  app.use("/api/agents", publicLimiter.middleware);
   app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
@@ -152,17 +176,31 @@ export function createApp(opts: AppOptions = {}): {
   });
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, swaggerUiOptions));
 
+  // ── Task routes ────────────────────────────────────────────────────────────
+  // Authenticated task creation uses the tighter authed limiter.
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
-  app.use("/api/tasks", (req, res, next) => {
-    const apiVersion = res.locals.apiVersion || config.API_DEFAULT_VERSION;
-    return apiVersion.startsWith("1.")
-      ? v1TasksRouter(req, res, next)
-      : v2TasksRouter(req, res, next);
+
+  app.use("/api/tasks", authedLimiter.middleware, (req, res, next) => {
+    const apiVersion = res.locals.apiVersion || "1.0";
+    if (apiVersion.startsWith("1.")) {
+      return v1TasksRouter(req, res, next);
+    } else {
+      return v2TasksRouter(req, res, next);
+    }
   });
 
-  app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
-  app.use("/api/admin", createAdminQueueRouter(jobQueue));
+  // ── Admin Queue routes ─────────────────────────────────────────────────────
+  app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
+  app.use("/api/admin", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
+
+  // ── Feature-flag admin routes (#425) ───────────────────────────────────────
+  app.use("/api/admin/flags", createFlagsRouter());
+
+  // ── Versioning lifecycle endpoint (#426) ───────────────────────────────────
+  app.use("/api/versions", createVersionsRouter());
+
+  // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
 
   app.use((_req: Request, res: Response) => {
@@ -175,8 +213,6 @@ export function createApp(opts: AppOptions = {}): {
 
   app.use(errorHandler);
 
-  const httpServer = createServer(app);
-  const eventStore = opts.eventStore ?? eventBus.store;
   const detachStream = attachTaskStream({
     httpServer,
     eventStore,
@@ -211,6 +247,14 @@ export function createApp(opts: AppOptions = {}): {
   return { httpServer, close };
 }
 
+/**
+ * Build a DispatchFn that looks up the cheapest agent for a node's type in the
+ * provided registry and forwards the call to that agent via HTTP.
+ *
+ * If no registry is provided (e.g. during tests that supply their own dispatch)
+ * the returned function throws a clear error so misconfiguration is obvious at
+ * runtime rather than producing a silent no-op.
+ */
 function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
   return async (_taskId: string, node: DAGNode, context: string): Promise<unknown> => {
     if (!registry) {
@@ -221,7 +265,7 @@ function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
 
     const agents = await registry.getAgents(node.type);
     if (!agents || agents.length === 0) {
-      throw new Error(`No agent registered for type: ${node.type}`);
+      throw new AppError(`No agent registered for type: ${node.type}`, 500, "AGENT_NOT_FOUND");
     }
 
     const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];

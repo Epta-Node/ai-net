@@ -1,14 +1,21 @@
+import React from 'react';
 import { render } from '@testing-library/react';
 import { AgentReputationRadar } from './AgentReputationRadar';
 import { vi, describe, it, expect } from 'vitest';
 
-// Mock recharts because ResponsiveContainer doesn't work well in JSDOM
+// ResponsiveContainer measures its parent, and jsdom reports 0x0 for
+// everything — so the real one renders a chart of zero size, which recharts
+// skips entirely. The stand-in hands the chart concrete pixel dimensions;
+// passing them down is the part that actually makes the chart render, since a
+// RadarChart with no width/height draws nothing.
 vi.mock('recharts', async () => {
   const OriginalRecharts = await vi.importActual<any>('recharts');
   return {
     ...OriginalRecharts,
     ResponsiveContainer: ({ children }: any) => (
-      <div style={{ width: '100%', height: 250 }}>{children}</div>
+      <div style={{ width: 400, height: 250 }}>
+        {React.cloneElement(React.Children.only(children), { width: 400, height: 250 })}
+      </div>
     ),
   };
 });

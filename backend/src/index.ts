@@ -12,6 +12,7 @@ import { AgentCleanupService } from "./services/agentCleanup";
 import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
+import { closeAuthDb } from "./db/auth";
 import { closeJobDb } from "./queue";
 import { createDefaultReconciliationService } from "./services/reconciliation";
 import { createLogger } from "./utils/logger";
@@ -131,6 +132,7 @@ export function setupGracefulShutdown(
       closeAgentDb();
       closeTaskDb();
       closeJobDb();
+      closeAuthDb();
 
       logger.info({ signal }, "graceful shutdown complete");
       clearTimeout(forcedTimeout);

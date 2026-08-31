@@ -1,11 +1,18 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { Horizon, Keypair } from "@stellar/stellar-sdk";
-import { RegisterAgentSchema } from "../schemas/agent.schema";
 import { getAgentDb, createAgentDb, AgentDb } from "../../db/agents";
 import { heartbeatRateLimitMiddleware } from "../middleware/rateLimit";
-import { AgentListQuerySchema, RegisterAgentSchema } from "../schemas/agent.schema";
-import { getConfig } from "../../config";
+import { NotFoundError, ValidationError, UnauthorizedError, AppError } from "../../errors";
+
+const AgentCursorListSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  capability: z.string().optional(),
+  minReputation: z.coerce.number().optional(),
+  maxPriceXLM: z.coerce.number().optional(),
+  status: z.enum(["online", "offline"]).optional(),
+});
 
 export interface AgentsRouterOptions {
   healthTimeoutMs?: number;
@@ -21,11 +28,108 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   const healthTimeoutMs = options.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT_MS;
   const getDb = () => options.db ?? createAgentDb(getAgentDb());
 
-  router.get("/", (req: Request, res: Response): void => {
-    const parsed = AgentListQuerySchema.safeParse(req.query);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.flatten() });
+  /**
+   * @openapi
+   * /api/agents:
+   *   get:
+   *     summary: List registered AI agents
+   *     description: Retrieves registered agents matching optional capability, minimum reputation, and maximum price filters.
+   *     operationId: listAgents
+   *     tags: [Agents]
+   *     security: []
+   *     parameters:
+   *       - in: query
+   *         name: capability
+   *         schema: { type: string }
+   *         description: Filter agents that support this capability
+   *         example: "research"
+   *       - in: query
+   *         name: minReputation
+   *         schema: { type: number }
+   *         description: Minimum reputation score threshold
+   *         example: 80.0
+   *       - in: query
+   *         name: maxPriceXLM
+   *         schema: { type: number }
+   *         description: Maximum price per task execution in XLM
+   *         example: 1.5
+   *     responses:
+   *       200:
+   *         description: Array of matching registered agents
+   *         headers:
+   *           X-RateLimit-Limit:
+   *             $ref: '#/components/headers/X-RateLimit-Limit'
+   *           X-RateLimit-Remaining:
+   *             $ref: '#/components/headers/X-RateLimit-Remaining'
+   *           X-RateLimit-Reset:
+   *             $ref: '#/components/headers/X-RateLimit-Reset'
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: array
+   *               items:
+   *                 $ref: '#/components/schemas/Agent'
+   *             example:
+   *               - id: "agent_crypto_analyst_01"
+   *                 capabilities: ["research", "report"]
+   *                 pricingXLM: 0.25
+   *                 endpoint: "https://agent-crypto.example.com/api"
+   *                 stellarPublicKey: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ"
+   *                 reputationScore: 98.5
+   *                 lastSeenAt: "2026-08-25T17:20:00.000Z"
+   *       500:
+   *         description: Internal server error
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/InternalServerError'
+   */
+  // GET /api/agents — supports cursor pagination when ?cursor or ?limit present
+  router.get("/", (req: Request, res: Response, next: NextFunction): void => {
+    const db = getDb();
+    const useCursor = "cursor" in req.query || "limit" in req.query;
+
+    if (useCursor) {
+      const parse = AgentCursorListSchema.safeParse(req.query);
+      if (!parse.success) {
+        res.status(400).json({ error: parse.error.flatten() });
+        return;
+      }
+      const { cursor, limit, capability, minReputation, maxPriceXLM, status } = parse.data;
+      try {
+        const page = db.listCursor({ cursor, limit, capability, minReputation, maxPriceXLM, status });
+        res.json({
+          data: {
+            items: page.items,
+            pagination: {
+              limit,
+              nextCursor: page.nextCursor ?? null,
+              hasNextPage: !!page.nextCursor,
+            },
+          },
+          _links: {
+            self: `/api/agents`,
+            ...(page.nextCursor
+              ? { next: `/api/agents?cursor=${encodeURIComponent(page.nextCursor)}&limit=${limit}` }
+              : {}),
+          },
+        });
+      } catch (err) {
+        res.status(500).json({ error: "Internal Server Error" });
+      }
       return;
+    }
+
+    // Legacy flat-array response for backward compatibility
+    const capability = req.query.capability as string | undefined;
+    const minReputation = req.query.minReputation ? parseFloat(req.query.minReputation as string) : undefined;
+    const maxPriceXLM = req.query.maxPriceXLM ? parseFloat(req.query.maxPriceXLM as string) : undefined;
+
+    try {
+      const agents = db.list({ capability, minReputation, maxPriceXLM });
+      res.json(agents);
+    } catch (err) {
+      next(new AppError("Internal Server Error", 500, "INTERNAL_ERROR"));
     }
 
     try {
@@ -85,13 +189,14 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
 
   router.post("/register", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const parsed = RegisterAgentSchema.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({
-          error: "Invalid agent registration data",
-          details: parsed.error.flatten(),
-        });
-        return;
+      const correlationId = res.locals.correlationId as string | undefined;
+      const parse = registerAgentSchema.safeParse(req.body);
+      if (!parse.success) {
+        throw new ValidationError(
+          "Invalid agent registration data",
+          { issues: parse.error.flatten() },
+          correlationId,
+        );
       }
 
       const data = parsed.data;
@@ -166,20 +271,18 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       const signature = req.headers["x-signature"] as string | undefined;
       const challenge = req.headers["x-challenge"] as string | undefined;
       if (!signature || !challenge) {
-        res.status(401).json({ error: "Missing challenge or signature" });
-        return;
+        throw new UnauthorizedError("Missing challenge or signature", undefined, correlationId);
       }
 
       try {
         const keypair = Keypair.fromPublicKey(agent.stellarPublicKey);
         const isValid = keypair.verify(Buffer.from(challenge), Buffer.from(signature, "base64"));
         if (!isValid) {
-          res.status(401).json({ error: "Invalid signature" });
-          return;
+          throw new UnauthorizedError("Invalid signature", undefined, correlationId);
         }
-      } catch {
-        res.status(401).json({ error: "Invalid signature format" });
-        return;
+      } catch (innerErr) {
+        if (innerErr instanceof UnauthorizedError) throw innerErr;
+        throw new UnauthorizedError("Invalid signature format", undefined, correlationId);
       }
 
       db.delete(req.params.id);

@@ -456,8 +456,8 @@ fn set_gas_config_requires_admin_auth() {
         resolve_error_marginal: 15_000,
         slash_bond: 30_000,
         deregister_with_bond: 40_000,
-        cleanup_error: 12_000,
-        cleanup_error_marginal: 6_000,
+        cleanup_error: 10_000,
+        cleanup_error_marginal: 5_000,
     };
 
     env.mock_auths(&[]);
@@ -896,7 +896,8 @@ fn set_admin_emits_admin_changed_event() {
     let (env, client, _) = setup_with_admin();
     let new_admin = Address::generate(&env);
     client.set_admin(&new_admin);
-    assert_eq!(env.events().all().len(), 1);
+    // Admin operations also write the audit trail added for issue #261, so the
+    // handover event is no longer the only one emitted. It is still first.
     assert_event_topics(
         &env,
         0,
@@ -1757,9 +1758,15 @@ fn get_leaderboard_by_total_tasks() {
     let leaderboard = client.get_leaderboard(&metric, &3);
 
     assert_eq!(leaderboard.len(), 3);
-    assert_eq!(leaderboard.get(0).unwrap().agent_id, Symbol::new(&env, "a3"));
+    assert_eq!(
+        leaderboard.get(0).unwrap().agent_id,
+        Symbol::new(&env, "a3")
+    );
     assert_eq!(leaderboard.get(0).unwrap().metric_value, 3);
-    assert_eq!(leaderboard.get(1).unwrap().agent_id, Symbol::new(&env, "a1"));
+    assert_eq!(
+        leaderboard.get(1).unwrap().agent_id,
+        Symbol::new(&env, "a1")
+    );
     assert_eq!(leaderboard.get(1).unwrap().metric_value, 2);
 }
 
@@ -1787,12 +1794,7 @@ fn set_sla_success() {
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "sla_agent", "research", owner));
 
-    client.set_sla(
-        &Symbol::new(&env, "sla_agent"),
-        &200,
-        &95,
-        &80,
-    );
+    client.set_sla(&Symbol::new(&env, "sla_agent"), &200, &95, &80);
 
     let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent"));
     assert!(sla.is_some());
@@ -1867,7 +1869,9 @@ fn check_sla_compliance_pass() {
     );
     assert!(compliant);
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.total_checks, 1);
     assert_eq!(sla.0.violations, 0);
     assert_eq!(sla.1, 100);
@@ -1889,7 +1893,9 @@ fn check_sla_compliance_violation() {
     );
     assert!(!compliant);
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.violations, 1);
     assert_eq!(sla.1, 0); // 0% compliance with 1 check and 1 violation
 }
@@ -1904,8 +1910,8 @@ fn check_sla_compliance_uptime_violation() {
 
     let compliant = client.check_sla_compliance(
         &Symbol::new(&env, "sla_agent"),
-        &100,  // ok
-        &80,   // uptime < 95 - violation!
+        &100, // ok
+        &80,  // uptime < 95 - violation!
         &90,
     );
     assert!(!compliant);
@@ -1958,15 +1964,12 @@ fn sla_bonus_awarded_after_consistent_compliance() {
 
     // Record 10 compliant checks
     for _ in 0..10 {
-        client.check_sla_compliance(
-            &Symbol::new(&env, "sla_agent"),
-            &100,
-            &99,
-            &95,
-        );
+        client.check_sla_compliance(&Symbol::new(&env, "sla_agent"), &100, &99, &95);
     }
 
-    let sla = client.get_sla_status(&Symbol::new(&env, "sla_agent")).unwrap();
+    let sla = client
+        .get_sla_status(&Symbol::new(&env, "sla_agent"))
+        .unwrap();
     assert_eq!(sla.0.total_checks, 10);
     assert_eq!(sla.0.violations, 0);
     assert_eq!(sla.1, 100); // 100% compliance
@@ -2007,7 +2010,7 @@ fn sla_violation_penalty_slashes_bond() {
 
 #[test]
 fn test_get_agents_empty_registry() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
     let page = client.get_agents(&None, &None);
     assert_eq!(page.agents.len(), 0);
     assert_eq!(page.next_cursor, None);
@@ -2053,25 +2056,46 @@ fn test_get_agents_cursor_pagination() {
     assert_eq!(page1.agents.len(), 3);
     assert_eq!(page1.total_count, 7);
     assert_eq!(page1.next_cursor, Some(3));
-    assert_eq!(page1.agents.get(0).unwrap().id, Symbol::new(&env, "agent_1"));
-    assert_eq!(page1.agents.get(1).unwrap().id, Symbol::new(&env, "agent_2"));
-    assert_eq!(page1.agents.get(2).unwrap().id, Symbol::new(&env, "agent_3"));
+    assert_eq!(
+        page1.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_1")
+    );
+    assert_eq!(
+        page1.agents.get(1).unwrap().id,
+        Symbol::new(&env, "agent_2")
+    );
+    assert_eq!(
+        page1.agents.get(2).unwrap().id,
+        Symbol::new(&env, "agent_3")
+    );
 
     // Page 2: cursor 3, limit 3
     let page2 = client.get_agents(&page1.next_cursor, &Some(3));
     assert_eq!(page2.agents.len(), 3);
     assert_eq!(page2.total_count, 7);
     assert_eq!(page2.next_cursor, Some(6));
-    assert_eq!(page2.agents.get(0).unwrap().id, Symbol::new(&env, "agent_4"));
-    assert_eq!(page2.agents.get(1).unwrap().id, Symbol::new(&env, "agent_5"));
-    assert_eq!(page2.agents.get(2).unwrap().id, Symbol::new(&env, "agent_6"));
+    assert_eq!(
+        page2.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_4")
+    );
+    assert_eq!(
+        page2.agents.get(1).unwrap().id,
+        Symbol::new(&env, "agent_5")
+    );
+    assert_eq!(
+        page2.agents.get(2).unwrap().id,
+        Symbol::new(&env, "agent_6")
+    );
 
     // Page 3: cursor 6, limit 3 -> last remaining agent
     let page3 = client.get_agents(&page2.next_cursor, &Some(3));
     assert_eq!(page3.agents.len(), 1);
     assert_eq!(page3.total_count, 7);
     assert_eq!(page3.next_cursor, None);
-    assert_eq!(page3.agents.get(0).unwrap().id, Symbol::new(&env, "agent_7"));
+    assert_eq!(
+        page3.agents.get(0).unwrap().id,
+        Symbol::new(&env, "agent_7")
+    );
 }
 
 #[test]
@@ -2125,7 +2149,7 @@ fn test_get_agents_batch_registered_pagination() {
 
 #[test]
 fn error_mapper_returns_common_codes_for_reserved_range() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Common codes 1..=15 should map to their CommonExitCode variants
     for raw in 1..=15u32 {
@@ -2137,7 +2161,7 @@ fn error_mapper_returns_common_codes_for_reserved_range() {
 
 #[test]
 fn error_mapper_returns_none_for_contract_specific_codes() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Contract-specific codes outside 1..=15 should return None
     assert!(client.error_mapper(&0).is_none());
@@ -2148,7 +2172,7 @@ fn error_mapper_returns_none_for_contract_specific_codes() {
 
 #[test]
 fn error_mapper_propagation_consistency() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
 
     // Simulate cross-contract error propagation: a contract returns
     // Error::NotFound (code 1), which maps to CommonExitCode::NotFound (code 1)
@@ -2163,4 +2187,3 @@ fn error_mapper_propagation_consistency() {
     assert!(common.is_some());
     assert_eq!(common.unwrap(), CommonExitCode::AlreadyExists);
 }
-

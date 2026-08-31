@@ -7,6 +7,7 @@ import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
+import { RouteProgressProvider } from './context/RouteProgressContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
@@ -23,127 +24,94 @@ import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
 import './components/common/Toast.css'
 
-const HEAVY_ROUTE_PREFIXES = ['/renderer-demo']
-
-function isHeavyRoute(pathname: string): boolean {
-  return HEAVY_ROUTE_PREFIXES.some((prefix) => pathname.startsWith(prefix))
-}
-
-const PageTransition: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const location = useLocation()
-  const prefersReducedMotion = useReducedMotion()
-  const disabled = prefersReducedMotion || isHeavyRoute(location.pathname)
-
-  if (disabled) {
-    return (
-      <div key={location.pathname} style={{ width: '100%' }}>
-        {children}
-      </div>
-    )
-  }
-
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -6 }}
-        transition={{ duration: 0.18, ease: 'easeOut' }}
-        style={{ width: '100%' }}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
-  )
-}
-
-const ShellRoutes: React.FC = () => {
-  const location = useLocation()
-
-  return (
-    <AppShell>
-      <PageTransition>
-        <Routes location={location}>
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <DashboardPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/wallet"
-            element={
-              <ProtectedRoute>
-                <WalletPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/agents"
-            element={
-              <ProtectedRoute>
-                <AgentsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tasks/new"
-            element={
-              <ProtectedRoute>
-                <NewTaskPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tasks/history"
-            element={
-              <ProtectedRoute>
-                <TaskHistoryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/tasks/:id"
-            element={
-              <ProtectedRoute>
-                <TaskDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          {import.meta.env.DEV && (
-            <Route path="/renderer-demo" element={<RendererDemoPage />} />
-          )}
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </PageTransition>
-    </AppShell>
-  )
-}
-
+/**
+ * Everything below the router.
+ *
+ * `/` is the public landing page and renders bare. **Every other route** —
+ * including 404 — renders inside a single `<AppShell>`, so the top nav,
+ * sidebar, drawer, and breadcrumb are assembled once rather than per route.
+ *
+ * The command palette is mounted here, once, outside the route tree: it is
+ * reachable with Ctrl/Cmd+K from any page and must not remount on navigation.
+ * `useCommandPalette` calls `useNavigate`, so this component has to sit inside
+ * `<Router>` rather than beside it.
+ */
 const RoutedContent: React.FC = () => {
-  const location = useLocation()
-  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
+  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
 
   return (
     <>
-      {location.pathname === '/' ? (
-        <PageTransition>
-          <LandingPage />
-        </PageTransition>
-      ) : (
-        <ShellRoutes />
-      )}
+      <Routes>
+        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/*"
+          element={
+            <AppShell>
+              <Routes>
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/wallet"
+                  element={
+                    <ProtectedRoute>
+                      <WalletPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/agents"
+                  element={
+                    <ProtectedRoute>
+                      <AgentsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/new"
+                  element={
+                    <ProtectedRoute>
+                      <NewTaskPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/history"
+                  element={
+                    <ProtectedRoute>
+                      <TaskHistoryPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/:id"
+                  element={
+                    <ProtectedRoute>
+                      <TaskDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+                {import.meta.env.DEV && (
+                  <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                )}
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </AppShell>
+          }
+        />
+      </Routes>
+
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
         onSearch={search}
         recentSearches={recentSearches}
-        onRecentSearchClick={(query) => {
-          search(query)
-        }}
+        onRecentSearchClick={runRecentSearch}
       />
     </>
   )

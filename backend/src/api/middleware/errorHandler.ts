@@ -1,7 +1,10 @@
 import type { Request, Response, NextFunction } from "express";
 import { createLogger } from "../../utils/logger";
 import { AppError } from "../../errors";
-import { getConfig } from "../../config";
+
+const log = createLogger();
+const isProduction = process.env.NODE_ENV === "production";
+const isDevelopment = process.env.NODE_ENV === "development";
 
 /**
  * Central Express error-handling middleware.
@@ -47,24 +50,57 @@ export function errorHandler(
         : "INTERNAL_SERVER_ERROR";
 
   if (err instanceof AppError) {
-    log.error(
-      {
-        event: "http.error",
-        err,
+    if (!err.isOperational) {
+      log.error(
+        {
+          err,
+          error: err.message,
+          code: err.code,
+          statusCode: err.statusCode,
+          stack: err.stack,
+          method: req.method,
+          path: req.path,
+          requestId: res.locals.requestId,
+          correlationId,
+        },
+        "non-operational error",
+      );
+    } else {
+      log.warn(
+        {
+          err,
+          error: err.message,
+          code: err.code,
+          statusCode: err.statusCode,
+          method: req.method,
+          path: req.path,
+          requestId: res.locals.requestId,
+          correlationId,
+        },
+        "operational error",
+      );
+    }
+
+    const body: {
+      error: {
+        code: string;
+        message: string;
+        details?: unknown;
+        correlationId: string;
+      };
+    } = {
+      error: {
         code: err.code,
-        statusCode,
-        traceId,
-        requestId,
-        path: req.path,
-        method: req.method,
-        payload: req.body,
+        message: err.message,
+        correlationId,
       },
-      `AppError: ${err.code}`,
-    );
+    };
 
-    const serialized = err.serialize(isDevelopment);
+    if (err.details !== undefined) {
+      body.error.details = err.details;
+    }
 
-    res.status(err.statusCode).json({ error: { ...serialized, traceId } });
+    res.status(err.statusCode).json(body);
     return;
   }
 
@@ -88,12 +124,13 @@ export function errorHandler(
 
   const response: Record<string, unknown> = {
     error: {
-      code: errorCode,
-      message: isDevelopment
-        ? (err instanceof Error ? err.message : "An unexpected error occurred")
-        : "An unexpected error occurred. Please try again later.",
-      correlationId: traceId,
-      traceId,
+      message: isProduction
+        ? "Internal server error"
+        : err instanceof Error
+          ? err.message || "Internal server error"
+          : "An unexpected error occurred",
+      code: "INTERNAL_ERROR",
+      correlationId,
       timestamp: new Date().toISOString(),
       ...(isDevelopment && err instanceof Error
         ? { stack: err.stack }
