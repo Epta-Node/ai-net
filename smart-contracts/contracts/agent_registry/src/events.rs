@@ -59,6 +59,72 @@ pub struct ContractUpgradedEvent {
     pub upgrade_ledger: u32,
 }
 
+/// Emitted when the registry's upgrade-manager address is set.
+///
+/// topic: `("upgrade", "mgr_set")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeManagerSetEvent {
+    /// Address of the registry contract the manager was set on.
+    pub contract: Address,
+    /// Address of the upgrade manager now responsible for this contract.
+    pub upgrade_manager: Address,
+    /// Admin that performed the change.
+    pub admin: Address,
+}
+
+/// Emitted after the pre-upgrade hook finishes its validation pass.
+///
+/// topic: `("upgrade", "pre_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreUpgradeHookEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded to.
+    pub version: String,
+    /// Human-readable outcome of each validation performed.
+    pub validation_results: Vec<String>,
+    /// Whether every validation passed.
+    pub success: bool,
+}
+
+/// Emitted after the post-upgrade hook finishes migrating data.
+///
+/// topic: `("upgrade", "post_hook")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PostUpgradeHookEvent {
+    /// Address of the registry contract that was upgraded.
+    pub contract: Address,
+    /// Version the contract was upgraded from.
+    pub old_version: String,
+    /// Version the contract was upgraded to.
+    pub new_version: String,
+    /// Human-readable outcome of each migration step executed.
+    pub migration_results: Vec<String>,
+    /// Whether every migration step succeeded.
+    pub success: bool,
+}
+
+/// Emitted when an upgrade is initiated against the upgrade manager.
+///
+/// topic: `("upgrade", "initiated")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpgradeInitiatedEvent {
+    /// Address of the registry contract being upgraded.
+    pub contract: Address,
+    /// Version the contract is being upgraded from.
+    pub from_version: String,
+    /// Version the contract is being upgraded to.
+    pub to_version: String,
+    /// WASM hash of the new contract build.
+    pub wasm_hash: BytesN<32>,
+    /// Admin that initiated the upgrade.
+    pub initiator: Address,
+}
+
 /// Emitted when contract is rolled back to previous version
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
@@ -397,76 +463,88 @@ pub struct SlaBonusAwardedEvent {
     pub reputation_boost: u32,
 }
 
-// ─── Subscription Event Data Structs (issue #258) ────────────────────────────
+// ─── Cross-chain bridging events (issue #259) ────────────────────────────────
 
-/// Data payload for `(registry, sub_creat)`.
-/// Published when a client subscribes to an agent's service.
+/// Emitted when an agent identity is bridged to another chain.
+///
+/// topic: `("registry", "bridged")`
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct SubscriptionCreatedEvent {
-    /// Subscriber who funds the subscription.
-    pub client: Address,
-    /// Agent providing the service.
+pub struct IdentityBridgedEvent {
+    /// Agent whose identity was bridged.
     pub agent_id: Symbol,
-    /// Recurring payment per billing period, in stroops.
-    pub payment_amount: i128,
-    /// Length of one billing period, in seconds.
-    pub period_secs: u64,
-    /// Subscription start timestamp.
-    pub start_time: u64,
-    /// Timestamp the first paid term ends.
-    pub end_time: u64,
-    /// Whether auto-renewal was opted into at creation.
-    pub auto_renew: bool,
+    /// Chain the proof is scoped to.
+    pub target_chain: TargetChain,
+    /// Digest an off-chain verifier checks the signature against.
+    pub digest: BytesN<32>,
+    /// Timestamp after which the proof stops being valid.
+    pub expiry: u64,
 }
 
-/// Data payload for `(registry, sub_renew)`.
-/// Published when a subscription's term is extended by a new payment.
+/// Emitted on every bridge-proof verification attempt.
+///
+/// Emitted for failures too, so a target chain repeatedly presenting stale
+/// proofs is visible to an indexer.
+///
+/// topic: `("registry", "brdg_vrfy")`
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct SubscriptionRenewedEvent {
-    /// Subscriber.
-    pub client: Address,
-    /// Agent providing the service.
+pub struct BridgeProofVerifiedEvent {
+    /// Agent the proof refers to.
     pub agent_id: Symbol,
-    /// Payment applied for this renewal, in stroops.
-    pub payment_amount: i128,
-    /// The subscription's new end timestamp.
-    pub new_end_time: u64,
-    /// Total billing periods paid after this renewal.
-    pub periods_paid: u32,
-    /// `true` if triggered by auto-renewal rather than an explicit client call.
-    pub auto: bool,
+    /// Chain the proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Whether the proof was accepted.
+    pub valid: bool,
 }
 
-/// Data payload for `(registry, sub_canc)`.
-/// Published when a client cancels a subscription.
+/// Emitted when a bridge proof is revoked before its expiry.
+///
+/// topic: `("registry", "brdg_revk")`
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct SubscriptionCancelledEvent {
-    /// Subscriber.
-    pub client: Address,
-    /// Agent providing the service.
+pub struct BridgeProofRevokedEvent {
+    /// Agent whose proof was revoked.
     pub agent_id: Symbol,
-    /// Prorated refund owed for the unused remainder of the current period.
-    pub refund_stroops: i128,
-    /// Cancellation timestamp.
-    pub cancelled_at: u64,
+    /// Chain the revoked proof was scoped to.
+    pub target_chain: TargetChain,
+    /// Address that performed the revocation.
+    pub revoked_by: Address,
 }
 
-/// Data payload for `(registry, pay_proc)`.
-/// Published for every recurring payment (initial, renewal, or auto-renewal).
+// ─── Security audit trail events (issue #261) ────────────────────────────────
+
+/// Emitted for every privileged operation recorded in the audit log.
+///
+/// topic: `("registry", "audit")`
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct PaymentProcessedEvent {
-    /// Subscriber who paid.
-    pub client: Address,
-    /// Agent receiving the payment.
-    pub agent_id: Symbol,
-    /// Amount paid, in stroops.
-    pub amount: i128,
-    /// 1-based index of the billing period this payment covers.
-    pub period: u32,
-    /// Payment timestamp.
-    pub paid_at: u64,
+pub struct AuditLogEntryEvent {
+    /// Sequence number of the entry written.
+    pub seq: u64,
+    /// Address that authorised the operation.
+    pub caller: Address,
+    /// Short operation name.
+    pub operation: Symbol,
+    /// Value moved, in stroops.
+    pub amount_stroops: i128,
+    /// Whether the operation crossed the high-value threshold.
+    pub high_value: bool,
+}
+
+/// Emitted when an operation trips one of the anomaly checks.
+///
+/// topic: `("registry", "anomaly")`
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AnomalyDetectedEvent {
+    /// Audit entry the anomaly was detected on.
+    pub seq: u64,
+    /// Caller responsible for the operation.
+    pub caller: Address,
+    /// Which check fired.
+    pub kind: AnomalyKind,
+    /// Observed value: the operation count for a rate anomaly, the amount in
+    /// stroops for a high-value one, and zero for a first-seen caller.
+    pub observed: i128,
 }

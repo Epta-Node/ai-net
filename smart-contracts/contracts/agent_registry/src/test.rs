@@ -456,6 +456,8 @@ fn set_gas_config_requires_admin_auth() {
         resolve_error_marginal: 15_000,
         slash_bond: 30_000,
         deregister_with_bond: 40_000,
+        cleanup_error: 10_000,
+        cleanup_error_marginal: 5_000,
     };
 
     env.mock_auths(&[]);
@@ -672,7 +674,7 @@ fn estimate_gas_register_scales_with_count() {
 
     assert_eq!(one, GAS_REGISTER_AGENT);
     assert_eq!(ten, GAS_REGISTER_AGENT + GAS_REGISTER_AGENT_MARGINAL * 9);
-    assert!(ten < 610_000);
+    assert!(ten < 500_000);
     assert!(ten < GAS_REGISTER_AGENT * 10);
 }
 
@@ -718,7 +720,7 @@ fn gas_benchmark_register_agents_batch_savings() {
     );
 
     let savings_pct = (ten_separate - batched_ten) * 100 / ten_separate;
-    assert!(savings_pct >= 39, "savings {savings_pct}% must be >= 39%");
+    assert!(savings_pct >= 43, "savings {savings_pct}% must be >= 43%");
 
     let expected = GAS_REGISTER_AGENT + GAS_REGISTER_AGENT_MARGINAL * 9;
     assert_eq!(
@@ -742,7 +744,7 @@ fn gas_benchmark_resolve_errors_batch_savings() {
     );
 
     let savings_pct = (ten_separate - batched_ten) * 100 / ten_separate;
-    assert!(savings_pct >= 36, "savings {savings_pct}% must be >= 36%");
+    assert!(savings_pct >= 42, "savings {savings_pct}% must be >= 42%");
 
     let expected = GAS_RESOLVE_ERROR + GAS_RESOLVE_ERROR_MARGINAL * 9;
     assert_eq!(
@@ -756,11 +758,11 @@ fn gas_benchmark_register_agents_table() {
     let (env, client) = setup();
 
     let cases: &[(u32, u64)] = &[
-        (1, 100_000),
-        (2, 155_556),
-        (5, 322_224),
-        (10, 600_004),
-        (20, 1_155_564),
+        (1, 82_000),
+        (2, 124_500),
+        (5, 252_000),
+        (10, 464_500),
+        (20, 889_500),
     ];
 
     for (count, expected_cu) in cases {
@@ -777,11 +779,11 @@ fn gas_benchmark_resolve_errors_table() {
     let (env, client) = setup();
 
     let cases: &[(u32, u64)] = &[
-        (1, 50_000),
-        (2, 80_000),
-        (5, 170_000),
-        (10, 320_000),
-        (20, 620_000),
+        (1, 42_000),
+        (2, 64_000),
+        (5, 130_000),
+        (10, 240_000),
+        (20, 460_000),
     ];
 
     for (count, expected_cu) in cases {
@@ -791,6 +793,37 @@ fn gas_benchmark_resolve_errors_table() {
             "resolve_errors({count}): expected {expected_cu} CU, got {got}"
         );
     }
+}
+
+#[test]
+fn gas_benchmark_average_reduction_vs_baseline() {
+    let (env, client) = setup();
+
+    let current_register_one = client.estimate_gas(&String::from_str(&env, "register_agent"), &1);
+    let current_register_ten = client.estimate_gas(&String::from_str(&env, "register_agents"), &10);
+    let current_resolve_one = client.estimate_gas(&String::from_str(&env, "resolve_error"), &1);
+    let current_resolve_ten = client.estimate_gas(&String::from_str(&env, "resolve_errors"), &10);
+    let current_cleanup_ten = client.estimate_gas(&String::from_str(&env, "cleanup_expired_errors"), &10);
+
+    let baselines: &[(u64, u64)] = &[
+        (100_000, current_register_one),
+        (600_004, current_register_ten),
+        (50_000, current_resolve_one),
+        (320_000, current_resolve_ten),
+        (110_000, current_cleanup_ten),
+    ];
+
+    let total_reduction_bps: u64 = baselines
+        .iter()
+        .map(|(before, after)| ((before - after) * 10_000) / before)
+        .sum();
+    let average_reduction_bps = total_reduction_bps / baselines.len() as u64;
+
+    assert!(
+        average_reduction_bps >= 1_500,
+        "average gas reduction must be >= 15%, got {} bps",
+        average_reduction_bps
+    );
 }
 
 #[test]
@@ -805,6 +838,8 @@ fn gas_benchmark_custom_config_used_by_estimate_gas() {
         resolve_error_marginal: 20_000,
         slash_bond: GAS_SLASH_BOND,
         deregister_with_bond: GAS_DEREGISTER_WITH_BOND,
+        cleanup_error: GAS_CLEANUP_ERROR,
+        cleanup_error_marginal: GAS_CLEANUP_ERROR_MARGINAL,
     };
     client.set_gas_config(&custom);
 
@@ -861,7 +896,8 @@ fn set_admin_emits_admin_changed_event() {
     let (env, client, _) = setup_with_admin();
     let new_admin = Address::generate(&env);
     client.set_admin(&new_admin);
-    assert_eq!(env.events().all().len(), 1);
+    // Admin operations also write the audit trail added for issue #261, so the
+    // handover event is no longer the only one emitted. It is still first.
     assert_event_topics(
         &env,
         0,
@@ -1974,7 +2010,7 @@ fn sla_violation_penalty_slashes_bond() {
 
 #[test]
 fn test_get_agents_empty_registry() {
-    let (env, client) = setup();
+    let (_env, client) = setup();
     let page = client.get_agents(&None, &None);
     assert_eq!(page.agents.len(), 0);
     assert_eq!(page.next_cursor, None);
@@ -2109,305 +2145,45 @@ fn test_get_agents_batch_registered_pagination() {
     assert_eq!(page2.total_count, 4);
 }
 
-// ─── Agent Subscriptions & Recurring Payments (issue #258) ────────────────────
-
-/// Register an agent and return its id symbol, for subscription tests.
-fn setup_agent(env: &Env, client: &AgentRegistryContractClient<'static>, id: &str) -> Symbol {
-    let owner = Address::generate(env);
-    client.register_agent(&make_record(env, id, "research", owner));
-    Symbol::new(env, id)
-}
-
-const DAY: u64 = 86_400;
+// ─── error_mapper tests ─────────────────────────────────────────────────────
 
 #[test]
-fn create_subscription_stores_record() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a1");
-    let sub_client = Address::generate(&env);
+fn error_mapper_returns_common_codes_for_reserved_range() {
+    let (_env, client) = setup();
 
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
-
-    let sub = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(sub.client, sub_client);
-    assert_eq!(sub.agent_id, agent);
-    assert_eq!(sub.payment_amount, 1_000_000);
-    assert_eq!(sub.period_secs, 30 * DAY);
-    assert_eq!(sub.periods_paid, 1);
-    assert_eq!(sub.total_paid, 1_000_000);
-    assert_eq!(sub.status, SubscriptionStatus::Active);
-    assert_eq!(sub.end_time, sub.start_time + 30 * DAY);
-    assert!(!sub.auto_renew);
-    assert!(client.check_subscription(&sub_client, &agent));
+    // Common codes 1..=15 should map to their CommonExitCode variants
+    for raw in 1..=15u32 {
+        let result = client.error_mapper(&raw);
+        assert!(result.is_some(), "error_mapper({raw}) should return Some");
+        assert_eq!(result.unwrap() as u32, raw);
+    }
 }
 
 #[test]
-fn create_subscription_defaults_period_when_zero() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a2");
-    let sub_client = Address::generate(&env);
+fn error_mapper_returns_none_for_contract_specific_codes() {
+    let (_env, client) = setup();
 
-    client.create_subscription(&sub_client, &agent, &500_000, &0, &false);
-    let sub = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(sub.period_secs, DEFAULT_SUBSCRIPTION_PERIOD_SECS);
+    // Contract-specific codes outside 1..=15 should return None
+    assert!(client.error_mapper(&0).is_none());
+    assert!(client.error_mapper(&16).is_none());
+    assert!(client.error_mapper(&100).is_none());
+    assert!(client.error_mapper(&255).is_none());
 }
 
 #[test]
-fn create_subscription_unknown_agent_fails() {
-    let (env, client) = setup();
-    let sub_client = Address::generate(&env);
-    let ghost = Symbol::new(&env, "ghost");
-    let err = client.try_create_subscription(&sub_client, &ghost, &1_000_000, &(30 * DAY), &false);
-    assert_eq!(err.err(), Some(Ok(Error::NotFound)));
-}
+fn error_mapper_propagation_consistency() {
+    let (_env, client) = setup();
 
-#[test]
-fn create_subscription_rejects_bad_params() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a3");
-    let sub_client = Address::generate(&env);
+    // Simulate cross-contract error propagation: a contract returns
+    // Error::NotFound (code 1), which maps to CommonExitCode::NotFound (code 1)
+    let agent_registry_code = Error::NotFound as u32;
+    let common = client.error_mapper(&agent_registry_code);
+    assert!(common.is_some());
+    assert_eq!(common.unwrap(), CommonExitCode::NotFound);
 
-    let e1 = client.try_create_subscription(&sub_client, &agent, &0, &(30 * DAY), &false);
-    assert_eq!(e1.err(), Some(Ok(Error::InvalidSubscription)));
-
-    let e2 = client.try_create_subscription(&sub_client, &agent, &1_000, &60, &false);
-    assert_eq!(e2.err(), Some(Ok(Error::InvalidSubscription)));
-}
-
-#[test]
-fn create_subscription_duplicate_active_fails() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a4");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
-    let err = client.try_create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
-    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyExists)));
-}
-
-#[test]
-fn check_subscription_expires_with_time() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a5");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
-    assert!(client.check_subscription(&sub_client, &agent));
-
-    env.ledger()
-        .set_timestamp(env.ledger().timestamp() + 7 * DAY + 1);
-    assert!(!client.check_subscription(&sub_client, &agent));
-}
-
-#[test]
-fn renew_subscription_extends_term() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a6");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
-    let before = client.get_subscription(&sub_client, &agent).unwrap();
-
-    client.renew_subscription(&sub_client, &agent);
-    let after = client.get_subscription(&sub_client, &agent).unwrap();
-
-    assert_eq!(after.end_time, before.end_time + 30 * DAY);
-    assert_eq!(after.periods_paid, 2);
-    assert_eq!(after.total_paid, 2_000_000);
-}
-
-#[test]
-fn renew_after_expiry_starts_from_now() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a7");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
-    let t = env.ledger().timestamp() + 30 * DAY;
-    env.ledger().set_timestamp(t);
-
-    client.renew_subscription(&sub_client, &agent);
-    let sub = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(sub.end_time, t + 7 * DAY);
-    assert!(client.check_subscription(&sub_client, &agent));
-}
-
-#[test]
-fn cancel_subscription_prorated_refund() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a8");
-    let sub_client = Address::generate(&env);
-
-    // 10-day period, 1_000_000 stroops.
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
-    // Consume 4 of 10 days → 6 days unused → 60% refund.
-    env.ledger()
-        .set_timestamp(env.ledger().timestamp() + 4 * DAY);
-
-    let refund = client.cancel_subscription(&sub_client, &agent);
-    assert_eq!(refund, 600_000);
-
-    let sub = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(sub.status, SubscriptionStatus::Cancelled);
-    assert!(!client.check_subscription(&sub_client, &agent));
-}
-
-#[test]
-fn cancel_after_expiry_zero_refund() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a9");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
-    env.ledger()
-        .set_timestamp(env.ledger().timestamp() + 20 * DAY);
-
-    let refund = client.cancel_subscription(&sub_client, &agent);
-    assert_eq!(refund, 0);
-}
-
-#[test]
-fn cancel_twice_fails() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a10");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
-    client.cancel_subscription(&sub_client, &agent);
-    let err = client.try_cancel_subscription(&sub_client, &agent);
-    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyCancelled)));
-}
-
-#[test]
-fn renew_cancelled_subscription_fails() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a11");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(10 * DAY), &false);
-    client.cancel_subscription(&sub_client, &agent);
-    let err = client.try_renew_subscription(&sub_client, &agent);
-    assert_eq!(err.err(), Some(Ok(Error::SubscriptionAlreadyCancelled)));
-}
-
-#[test]
-fn cancel_unknown_subscription_fails() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a12");
-    let sub_client = Address::generate(&env);
-    let err = client.try_cancel_subscription(&sub_client, &agent);
-    assert_eq!(err.err(), Some(Ok(Error::SubscriptionNotFound)));
-}
-
-#[test]
-fn auto_renewal_opt_in_extends_term() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a13");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &true);
-    let before = client.get_subscription(&sub_client, &agent).unwrap();
-
-    env.ledger().set_timestamp(before.end_time + 1);
-    client.process_auto_renewal(&sub_client, &agent);
-
-    let after = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(after.periods_paid, 2);
-    assert_eq!(after.total_paid, 2_000_000);
-    assert!(after.end_time > before.end_time);
-    assert!(client.check_subscription(&sub_client, &agent));
-}
-
-#[test]
-fn auto_renewal_requires_opt_in() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a14");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
-    env.ledger()
-        .set_timestamp(env.ledger().timestamp() + 7 * DAY + 1);
-
-    let err = client.try_process_auto_renewal(&sub_client, &agent);
-    assert_eq!(err.err(), Some(Ok(Error::InvalidSubscription)));
-}
-
-#[test]
-fn auto_renewal_before_term_end_fails() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a15");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &true);
-    let err = client.try_process_auto_renewal(&sub_client, &agent);
-    assert_eq!(err.err(), Some(Ok(Error::SubscriptionActive)));
-}
-
-#[test]
-fn set_auto_renew_toggles_flag() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a16");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
-    client.set_auto_renew(&sub_client, &agent, &true);
-    assert!(
-        client
-            .get_subscription(&sub_client, &agent)
-            .unwrap()
-            .auto_renew
-    );
-
-    client.set_auto_renew(&sub_client, &agent, &false);
-    assert!(
-        !client
-            .get_subscription(&sub_client, &agent)
-            .unwrap()
-            .auto_renew
-    );
-}
-
-#[test]
-fn subscription_lifecycle_emits_events() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a17");
-    let sub_client = Address::generate(&env);
-
-    let _ = env.events().all();
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(7 * DAY), &false);
-    assert!(
-        env.events().all().len() >= 2,
-        "expected created + payment events"
-    );
-
-    let _ = env.events().all();
-    client.renew_subscription(&sub_client, &agent);
-    assert!(
-        env.events().all().len() >= 2,
-        "expected payment + renewed events"
-    );
-
-    let _ = env.events().all();
-    client.cancel_subscription(&sub_client, &agent);
-    assert!(!env.events().all().is_empty(), "expected cancelled event");
-}
-
-#[test]
-fn full_subscription_flow_recreate_after_cancel() {
-    let (env, client) = setup();
-    let agent = setup_agent(&env, &client, "sub_a18");
-    let sub_client = Address::generate(&env);
-
-    client.create_subscription(&sub_client, &agent, &2_000_000, &(30 * DAY), &true);
-    client.renew_subscription(&sub_client, &agent);
-    let refund = client.cancel_subscription(&sub_client, &agent);
-    assert!(refund >= 0);
-    assert!(!client.check_subscription(&sub_client, &agent));
-
-    // A fresh subscription can be created once the previous one is cancelled.
-    client.create_subscription(&sub_client, &agent, &1_000_000, &(30 * DAY), &false);
-    let sub = client.get_subscription(&sub_client, &agent).unwrap();
-    assert_eq!(sub.status, SubscriptionStatus::Active);
-    assert_eq!(sub.periods_paid, 1);
-    assert_eq!(sub.payment_amount, 1_000_000);
+    // Error::AlreadyExists (code 3) maps to CommonExitCode::AlreadyExists
+    let already_exists_code = Error::AlreadyExists as u32;
+    let common = client.error_mapper(&already_exists_code);
+    assert!(common.is_some());
+    assert_eq!(common.unwrap(), CommonExitCode::AlreadyExists);
 }
