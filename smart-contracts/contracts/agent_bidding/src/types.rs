@@ -88,6 +88,13 @@ pub const MAX_TERMS_LEN: u32 = 512;
 /// Each sub-score (price, reputation) is normalised to `[0, SCORE_SCALE]`.
 pub const SCORE_SCALE: i128 = 1_000;
 
+/// How long after the bidding deadline a bidder may call `claim_refund` for
+/// an auction that never reached `Awarded` (creator went silent, nobody
+/// revealed, etc). Opens at `deadline` (bidding has definitively closed) and
+/// closes at `deadline + CLAIM_WINDOW_SECS` — the "resolution deadline" the
+/// acceptance criteria refers to. Default: 7 days.
+pub const CLAIM_WINDOW_SECS: u64 = 604_800;
+
 /// Weightings for the composite score (must sum to 100).
 pub const PRICE_WEIGHT: i128 = 60;
 pub const REPUTATION_WEIGHT: i128 = 40;
@@ -329,4 +336,13 @@ pub struct AuctionAbortedEvent {
     pub caller: Address,
     /// Number of bidders whose bond was released by the abort.
     pub refunded_bidders: u32,
+}
+
+/// Emitted when `claim_refund` successfully refunds a bidder's bond.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RefundClaimedEvent {
+    pub task_id: Symbol,
+    pub bidder: Address,
+    pub bond: i128,
 }
