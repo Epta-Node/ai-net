@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { z } from 'zod';
 import { AlertCircle } from 'lucide-react';
 import type { TFunction } from 'i18next';
+import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
 import { useToast } from '../../context/ToastContext';
@@ -60,7 +62,7 @@ export function TaskSubmissionForm() {
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isSubmitting, isSubmitted },
+    formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
     mode: 'onBlur',
     resolver: zodResolver(taskSchema),

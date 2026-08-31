@@ -9,7 +9,6 @@
 
 import express, { Request, Response, NextFunction } from "express";
 import { createServer, Server as HttpServer } from "http";
-import { randomUUID } from "crypto";
 import swaggerUi from "swagger-ui-express";
 
 import {
@@ -35,7 +34,6 @@ import {
 import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
 import { createStatsRouter } from "./routes/stats";
-import { createTasksRouter } from "./routes/tasks";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
 import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
 import { authMiddleware } from "./middleware/auth";
@@ -62,9 +60,6 @@ import {
 } from "./docs";
 import {
   getGlobalJobQueue,
-  createJobStore,
-  getJobDb,
-  closeJobDb,
   JobWorker,
   type JobQueue,
 } from "../queue";
@@ -72,37 +67,16 @@ import { createAdminQueueRouter } from "./routes/admin";
 import { metricsService, metricsMiddleware } from "../services/metrics";
 
 export interface AppOptions {
-  /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
   dispatch?: DispatchFn;
-  /** Called after each node completes; defaults to no-op (returns 'mock-hash') */
   releasePayment?: PaymentReleaseFn;
-  /**
-   * Override the EventStore used for stream replay.  When omitted, the store
-   * owned by `eventBus` is used — which is the canonical single store that the
-   * EventBus persists to.  Only provide this in tests that need an isolated
-   * store; production code should leave it unset.
-   *
-   * @deprecated Pass a custom EventBus instance (with its own store) instead.
-   */
   eventStore?: EventStore;
-  /** Heartbeat / auth timing for the WebSocket stream */
   stream?: TaskStreamOptions;
-  /**
-   * Agent registry used to resolve endpoint URLs for HTTP dispatch.
-   * Required when `dispatch` is not provided; ignored when `dispatch` is set.
-   */
   agentRegistry?: AgentRegistry;
-  /** Enable background heartbeat cleanup service (defaults to true in non-test envs) */
   enableHeartbeatCleanup?: boolean;
-  /** Custom options for heartbeat cleanup service */
   heartbeatOptions?: HeartbeatServiceOptions;
-  /** Options for the payment reconciliation router */
   reconciliation?: ReconciliationRouterOptions;
-  /** Disable response compression (useful in tests). Default: false. */
   disableCompression?: boolean;
-  /** Custom job queue instance */
   queue?: JobQueue;
-  /** Custom job worker instance */
   jobWorker?: JobWorker;
   /** Custom auth service instance */
   authService?: AuthService;
@@ -124,11 +98,13 @@ export function createApp(opts: AppOptions = {}): {
   httpServer: HttpServer;
   close: (callback?: () => void) => void;
 } {
+  const config = getConfig();
+  const logger = createLogger({ module: "api-app" });
   const app = express();
+
   app.use(express.json());
-  // ── Global middleware ────────────────────────────────────────────────────────
   app.use((_req, res, next) => {
-    if (process.env.NODE_ENV === "production") {
+    if (config.NODE_ENV === "production") {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
     }
     next();
@@ -136,15 +112,10 @@ export function createApp(opts: AppOptions = {}): {
   app.use(createCorsMiddleware());
   app.use(requestId);
   app.use(requestLogger);
-  // Samples every response into the health dashboard's rolling window. Mounted
-  // before the routers so latency covers the full handler chain.
   app.use(metricsMiddleware);
   app.use(versioningMiddleware);
 
-  // ── Response compression ────────────────────────────────────────────────────
-  // Applied early so that all downstream route handlers benefit automatically.
-  // Disabled in tests (disableCompression: true) to keep assertions simple.
-  if (!opts.disableCompression && process.env.NODE_ENV !== "test") {
+  if (!opts.disableCompression && config.NODE_ENV !== "test") {
     app.use(...compressionMiddleware());
   }
 
@@ -152,7 +123,6 @@ export function createApp(opts: AppOptions = {}): {
   const releasePayment: PaymentReleaseFn =
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
 
-  // ── Background Job Queue & Worker ──────────────────────────────────────────
   const jobQueue = opts.queue ?? getGlobalJobQueue();
   const jobWorker =
     opts.jobWorker ??
@@ -166,9 +136,11 @@ export function createApp(opts: AppOptions = {}): {
     jobWorker.start();
   }
 
-  // ── Heartbeat Background Cleanup Service ────────────────────────────────────
   const heartbeatService = createHeartbeatService(opts.heartbeatOptions);
-  if (opts.enableHeartbeatCleanup || (opts.enableHeartbeatCleanup !== false && process.env.NODE_ENV !== "test")) {
+  if (
+    opts.enableHeartbeatCleanup ||
+    (opts.enableHeartbeatCleanup !== false && config.NODE_ENV !== "test")
+  ) {
     heartbeatService.start();
   }
 
@@ -188,7 +160,6 @@ export function createApp(opts: AppOptions = {}): {
   app.post("/api/agents/register", registerRateLimitMiddleware);
   app.use("/api/agents", agentsRouter);
 
-  // ── API docs ─────────────────────────────────────────────────────────────────
   app.get("/openapi.json", (_req: Request, res: Response) => {
     res.json(getOpenapiJson());
   });
@@ -232,37 +203,32 @@ export function createApp(opts: AppOptions = {}): {
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
 
-  // ── HTTP server ────────────────────────────────────────────────────
-  const httpServer = createServer(app);
+  app.use((_req: Request, res: Response) => {
+    res.status(404).json({
+      error: { message: "Not found", code: "NOT_FOUND" },
+      requestId: res.locals.requestId,
+      traceId: res.locals.traceId,
+    });
+  });
 
-  // ── Event persistence ──────────────────────────────────────────────────────
-  // The EventBus already persists every event to its own EventStore (wired in
-  // the EventBus constructor).  We use that same store as the single canonical
-  // source for stream replay so there is exactly one DB and one writer.
-  // opts.eventStore is kept for backward compatibility with tests that inject
-  // a custom store; in production it will always be undefined here.
-  const eventStore = opts.eventStore ?? eventBus.store;
+  app.use(errorHandler);
 
   const detachStream = attachTaskStream({
     httpServer,
     eventStore,
     eventBus,
     getTask,
+    heartbeatIntervalMs: config.WS_HEARTBEAT_INTERVAL_MS,
+    pongTimeoutMs: config.WS_PONG_TIMEOUT_MS,
+    inactivityTimeoutMs: config.WS_INACTIVITY_TIMEOUT_MS,
     ...opts.stream,
   });
 
-  // ── Metrics ────────────────────────────────────────────────────────────────
-  // GC is process-global, so the observer is started once and left running for
-  // the lifetime of the process (it is unref'd and never holds the event loop
-  // open). The WebSocket probe is per-app and is cleared on close().
   metricsService.startGcObserver();
   metricsService.setWebSocketProbe(() => ({
     listening: httpServer.listening,
     connections: getStreamConnectionCount(),
   }));
-
-  // ── Error handler (must be last) ───────────────────────────────────────────
-  app.use(errorHandler);
 
   function close(callback?: () => void): void {
     jobWorker.stop();
@@ -276,6 +242,8 @@ export function createApp(opts: AppOptions = {}): {
     }
   }
 
+  const routeCount = (app as unknown as { _router?: { stack?: unknown[] } })._router?.stack?.length;
+  logger.debug({ routeCount }, "api app initialized");
   return { httpServer, close };
 }
 
@@ -288,10 +256,10 @@ export function createApp(opts: AppOptions = {}): {
  * runtime rather than producing a silent no-op.
  */
 function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
-  return async (taskId: string, node: DAGNode, context: string): Promise<unknown> => {
+  return async (_taskId: string, node: DAGNode, context: string): Promise<unknown> => {
     if (!registry) {
       throw new Error(
-        `No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.`,
+        "No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.",
       );
     }
 
@@ -300,7 +268,6 @@ function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
       throw new AppError(`No agent registered for type: ${node.type}`, 500, "AGENT_NOT_FOUND");
     }
 
-    // Pick cheapest available agent.
     const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];
     return httpDispatch(agent, node.nodeId, node, context);
   };

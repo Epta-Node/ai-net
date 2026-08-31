@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import { UnauthorizedError } from '../../errors';
 
 function loadKeys(): Set<string> | null {
-  const raw = process.env.API_KEYS;
+  const raw = getConfig().API_KEYS;
   if (!raw) return null;
   const keys = raw.split(",").map((k) => k.trim()).filter(Boolean);
   return keys.length ? new Set(keys) : null;
@@ -77,9 +77,7 @@ export function optionalAuthMiddleware(req: Request, _res: Response, next: NextF
 /**
  * Resolve the configured admin API key.
  *
- * Reads the validated config when it has been loaded, falling back to the raw
- * environment so the middleware also works in contexts (tests, scripts) that
- * never call `loadConfig()`.
+ * Reads only the validated config so admin secrets have one source of truth.
  */
 export function resolveAdminApiKey(): string | undefined {
   let fromConfig: string | undefined;

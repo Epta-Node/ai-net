@@ -24,6 +24,7 @@
     "lru-cache": "^10.4.3",
     "nanoid": "^3.3.7",
     "pino": "^10.3.1",
+    "pino-http": "10.2.0",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "ws": "^8.21.0",

@@ -9,6 +9,7 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { getConfig } from "../../../config";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
@@ -43,14 +44,15 @@ export function createV1TasksRouter(
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
 
-    if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
+    const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+    if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
       const db = createTaskDb(getTaskDb());
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-      if (total >= DAILY_TASK_LIMIT) {
+      if (total >= dailyTaskLimit) {
         res.status(429).json({
           error: {
-            message: `Daily task limit reached (max ${DAILY_TASK_LIMIT} per 24 hours)`,
+            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
             code: "DAILY_LIMIT_EXCEEDED",
           },
         });

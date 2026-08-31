@@ -139,15 +139,16 @@ export function createTasksRouter(
         "anonymous";
 
       // ── Per-wallet daily quota ───────────────────────────────────────────────
-      if (DAILY_TASK_LIMIT > 0 && walletPublicKey !== "anonymous") {
+      const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+      if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
         const db = createTaskDb(getTaskDb());
         const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-        if (total >= DAILY_TASK_LIMIT) {
+        if (total >= dailyTaskLimit) {
           const correlationId = res.locals.correlationId as string | undefined;
           throw new RateLimitError(
-            `Daily task limit reached (max ${DAILY_TASK_LIMIT} per 24 hours)`,
-            { code: "DAILY_LIMIT_EXCEEDED", limit: DAILY_TASK_LIMIT, window: "24h" },
+            `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
+            { code: "DAILY_LIMIT_EXCEEDED", limit: dailyTaskLimit, window: "24h" },
             correlationId,
           );
         }

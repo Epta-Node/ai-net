@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { useWallet } from '../hooks/useWallet';
 import { useNetworkStats } from '../hooks/useNetworkStats';
-import { useToast } from '../context/ToastContext';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
