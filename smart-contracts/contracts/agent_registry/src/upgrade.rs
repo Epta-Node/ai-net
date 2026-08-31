@@ -1,20 +1,16 @@
-#![no_std]
-
 //! # Agent Registry Upgrade Extension
 //!
 //! Extends the agent_registry contract with upgrade functionality using the upgrade manager.
 //! This module provides the implementation of the Upgradeable trait for the agent registry.
 
-use soroban_sdk::{
-    contractimpl, symbol_short, Address, BytesN, Env, String, Vec,
-};
+use soroban_sdk::{contractimpl, symbol_short, Address, BytesN, Env, String, Vec};
 
 use upgrade_manager::{
-    Upgradeable, UpgradeableError, MigrationMetadata, VersionCompatibility, UpgradeStatus,
-    version_utils, upgradeable::events::*,
+    events::*, version_utils, MigrationMetadata, UpgradeStatus, Upgradeable, UpgradeableError,
+    VersionCompatibility,
 };
 
-use crate::{AgentRegistryContract, AgentRegistryContractClient, AgentRegistryContractArgs, DataKey, Error, require_admin};
+use crate::{events, require_admin, AgentRegistryContract, DataKey, Error};
 
 /// Current version of the agent registry contract
 const CURRENT_VERSION: &str = "1.0.0";
@@ -35,7 +31,10 @@ pub enum UpgradeDataKey {
 #[contractimpl]
 impl Upgradeable for AgentRegistryContract {
     fn get_version(env: Env) -> String {
-        String::from_str(&env, CURRENT_VERSION)
+        env.storage()
+            .instance()
+            .get(&DataKey::Agent(Symbol::new(&env, "version")))
+            .unwrap_or_else(|| String::from_str(&env, CURRENT_VERSION))
     }
 
     fn get_wasm_hash(env: Env) -> BytesN<32> {
@@ -53,23 +52,27 @@ impl Upgradeable for AgentRegistryContract {
     fn get_upgrade_manager(env: Env) -> Option<Address> {
         env.storage()
             .instance()
-            .get(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "upgrade_mgr")))
+            .get(&DataKey::Agent(soroban_sdk::Symbol::new(
+                &env,
+                "upgrade_mgr",
+            )))
     }
 
     fn set_upgrade_manager(env: Env, upgrade_manager: Address) -> Result<(), UpgradeableError> {
         // Only admin can set upgrade manager
         require_admin(&env).map_err(|_| UpgradeableError::Unauthorized)?;
-        
-        env.storage()
-            .instance()
-            .set(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "upgrade_mgr")), &upgrade_manager);
+
+        env.storage().instance().set(
+            &DataKey::Agent(soroban_sdk::Symbol::new(&env, "upgrade_mgr")),
+            &upgrade_manager,
+        );
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("mgr_set")),
             UpgradeManagerSetEvent {
                 contract: env.current_contract_address(),
                 upgrade_manager: upgrade_manager.clone(),
-                admin: require_admin(&env).unwrap(),
+                admin,
             },
         );
 
@@ -79,14 +82,14 @@ impl Upgradeable for AgentRegistryContract {
     fn pre_upgrade_hook(
         env: Env,
         new_version: String,
-        new_wasm_hash: BytesN<32>,
+        _new_wasm_hash: BytesN<32>,
     ) -> Result<Vec<String>, UpgradeableError> {
         let mut results = Vec::new(&env);
 
         // Check version compatibility
         let current = Self::get_version(env.clone());
         let compatibility = version_utils::check_compatibility(&env, current, new_version.clone())?;
-        
+
         if !compatibility.is_compatible {
             results.push_back(String::from_str(&env, "Version incompatible"));
             return Err(UpgradeableError::IncompatibleVersion);
@@ -106,7 +109,10 @@ impl Upgradeable for AgentRegistryContract {
 
         // Check contract not paused
         if crate::AgentRegistryContract::is_paused(env.clone()) {
-            results.push_back(String::from_str(&env, "Contract must be unpaused for upgrade"));
+            results.push_back(String::from_str(
+                &env,
+                "Contract must be unpaused for upgrade",
+            ));
             return Err(UpgradeableError::PreUpgradeHookFailed);
         }
 
@@ -133,11 +139,8 @@ impl Upgradeable for AgentRegistryContract {
         let mut migration_results = Vec::new(&env);
 
         // Execute data migrations based on version change
-        let migration_steps = version_utils::generate_migration_steps(
-            &env,
-            &old_version,
-            &new_version,
-        )?;
+        let migration_steps =
+            version_utils::generate_migration_steps(&env, &old_version, &new_version)?;
 
         for step in migration_steps.iter() {
             let result = execute_migration_step(&env, &step)?;
@@ -149,17 +152,16 @@ impl Upgradeable for AgentRegistryContract {
         migration_results.push_back(validation_result);
 
         // Update contract version
-        env.storage()
-            .instance()
-            .set(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "version")), &new_version);
+        env.storage().instance().set(
+            &DataKey::Agent(soroban_sdk::Symbol::new(&env, "version")),
+            &new_version,
+        );
 
         // Record upgrade timestamp
-        env.storage()
-            .instance()
-            .set(
-                &DataKey::Agent(soroban_sdk::Symbol::new(&env, "last_upgrade")),
-                &env.ledger().sequence(),
-            );
+        env.storage().instance().set(
+            &DataKey::Agent(soroban_sdk::Symbol::new(&env, "last_upgrade")),
+            &env.ledger().sequence(),
+        );
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("post_hook")),
@@ -180,7 +182,7 @@ impl Upgradeable for AgentRegistryContract {
         target_version: String,
     ) -> Result<MigrationMetadata, UpgradeableError> {
         let current_version = Self::get_version(env.clone());
-        
+
         // Check compatibility first
         let compatibility = version_utils::check_compatibility(
             &env,
@@ -193,11 +195,8 @@ impl Upgradeable for AgentRegistryContract {
         required_checks.push_back(String::from_str(&env, "check_storage_compatibility"));
         required_checks.push_back(String::from_str(&env, "verify_admin_access"));
 
-        let migration_steps = version_utils::generate_migration_steps(
-            &env,
-            &current_version,
-            &target_version,
-        )?;
+        let migration_steps =
+            version_utils::generate_migration_steps(&env, &current_version, &target_version)?;
 
         let mut validation_steps = Vec::new(&env);
         validation_steps.push_back(String::from_str(&env, "verify_agent_records"));
@@ -223,19 +222,19 @@ impl Upgradeable for AgentRegistryContract {
         env: Env,
         new_version: String,
         new_wasm_hash: BytesN<32>,
-        description: String,
+        _description: String,
     ) -> Result<(), UpgradeableError> {
         // Only admin can initiate upgrade
-        require_admin(&env).map_err(|_| UpgradeableError::Unauthorized)?;
+        let admin = require_admin(&env).map_err(|_| UpgradeableError::Unauthorized)?;
 
-        let upgrade_manager = Self::get_upgrade_manager(env.clone())
-            .ok_or(UpgradeableError::NoUpgradeManager)?;
+        let upgrade_manager =
+            Self::get_upgrade_manager(env.clone()).ok_or(UpgradeableError::NoUpgradeManager)?;
 
         // Get migration plan
         let migration_plan = Self::get_migration_plan(env.clone(), new_version.clone())?;
 
         // Convert to upgrade manager's MigrationPlan format
-        let upgrade_migration_plan = upgrade_manager::MigrationPlan {
+        let _upgrade_migration_plan = upgrade_manager::MigrationPlan {
             pre_migration_checks: migration_plan.required_checks,
             data_transformations: migration_plan.data_transformations,
             post_migration_validations: migration_plan.validation_steps,
@@ -252,7 +251,7 @@ impl Upgradeable for AgentRegistryContract {
                 from_version: migration_plan.from_version,
                 to_version: new_version,
                 wasm_hash: new_wasm_hash,
-                initiator: require_admin(&env).unwrap(),
+                initiator: admin,
             },
         );
 
@@ -267,11 +266,14 @@ impl AgentRegistryContract {
     /// Get current upgrade status
     pub fn get_upgrade_status(env: Env) -> UpgradeStatus {
         let current_version = <Self as Upgradeable>::get_version(env.clone());
-        
+
         let last_upgrade_ledger = env
             .storage()
             .instance()
-            .get(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "last_upgrade")))
+            .get(&DataKey::Agent(soroban_sdk::Symbol::new(
+                &env,
+                "last_upgrade",
+            )))
             .unwrap_or(0u32);
 
         // Check if rollback is available (within 48h window)
@@ -288,17 +290,56 @@ impl AgentRegistryContract {
         }
     }
 
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        <Self as Upgradeable>::get_version(env)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "version")), &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "last_upgrade")), &env.ledger().sequence());
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("upgraded")),
+            crate::events::ContractUpgradedEvent {
+                old_version,
+                new_version,
+                wasm_hash: new_wasm_hash,
+                admin,
+                upgrade_ledger: env.ledger().sequence(),
+            },
+        );
+
+        Ok(())
+    }
+
     /// Upgrade the contract with new WASM hash (admin only)
     pub fn upgrade_contract(
         env: Env,
         new_wasm_hash: BytesN<32>,
         new_version: String,
-        description: String,
+        _description: String,
     ) -> Result<(), Error> {
         let admin = require_admin(&env)?;
 
         // Execute pre-upgrade hook
-        let pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
+        let _pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
             env.clone(),
             new_version.clone(),
             new_wasm_hash.clone(),
@@ -306,12 +347,17 @@ impl AgentRegistryContract {
         .map_err(|_| Error::NotAdmin)?; // Convert upgrade error to contract error
 
         // Update the contract WASM
-        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         // Execute post-upgrade hook
         let old_version = String::from_str(&env, CURRENT_VERSION);
-        <Self as Upgradeable>::post_upgrade_hook(env.clone(), old_version.clone(), new_version.clone())
-            .map_err(|_| Error::NotAdmin)?;
+        <Self as Upgradeable>::post_upgrade_hook(
+            env.clone(),
+            old_version.clone(),
+            new_version.clone(),
+        )
+        .map_err(|_| Error::NotAdmin)?;
 
         // Emit upgrade event
         env.events().publish(
@@ -334,7 +380,7 @@ impl AgentRegistryContract {
         target_version: String,
     ) -> Result<VersionCompatibility, Error> {
         let current_version = <Self as Upgradeable>::get_version(env.clone());
-        
+
         version_utils::check_compatibility(&env, current_version, target_version)
             .map_err(|_| Error::InvalidRecord)
     }
@@ -353,17 +399,22 @@ impl AgentRegistryContract {
         }
 
         // Perform the rollback
-        env.deployer().update_current_contract_wasm(rollback_wasm_hash);
+        env.deployer()
+            .update_current_contract_wasm(rollback_wasm_hash);
 
         // Update version info
-        env.storage()
-            .instance()
-            .set(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "version")), &rollback_version);
+        env.storage().instance().set(
+            &DataKey::Agent(soroban_sdk::Symbol::new(&env, "version")),
+            &rollback_version,
+        );
 
         // Clear rollback availability
         env.storage()
             .instance()
-            .remove(&DataKey::Agent(soroban_sdk::Symbol::new(&env, "last_upgrade")));
+            .remove(&DataKey::Agent(soroban_sdk::Symbol::new(
+                &env,
+                "last_upgrade",
+            )));
 
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("rollback")),
@@ -387,10 +438,15 @@ fn validate_data_integrity(env: &Env) -> Result<String, UpgradeableError> {
     Ok(String::from_str(env, "Data integrity validated"))
 }
 
-fn validate_storage_compatibility(env: &Env, new_version: &String) -> Result<String, UpgradeableError> {
+fn validate_storage_compatibility(
+    env: &Env,
+    new_version: &String,
+) -> Result<String, UpgradeableError> {
     // Check if new version can read existing storage format
+    let version_str = new_version.to_string();
+
     // Simple compatibility check based on version
-    if new_version == &String::from_str(env, "1.0.0") {
+    if starts_with(new_version, "1.") {
         Ok(String::from_str(env, "Storage format compatible"))
     } else {
         Ok(String::from_str(env, "Storage migration required"))
@@ -405,26 +461,46 @@ fn validate_admin_access(env: &Env) -> Result<String, UpgradeableError> {
 }
 
 fn execute_migration_step(env: &Env, step: &String) -> Result<String, UpgradeableError> {
-    if step == &String::from_str(env, "backup_existing_data") {
-        Ok(String::from_str(env, "Data backup completed"))
-    } else if step == &String::from_str(env, "validate_data_integrity") {
-        validate_data_integrity(env)
-    } else if step == &String::from_str(env, "migrate_storage_format") {
-        Ok(String::from_str(env, "Storage format migrated"))
-    } else if step == &String::from_str(env, "update_schema") {
-        Ok(String::from_str(env, "Schema updated"))
-    } else if step == &String::from_str(env, "rebuild_indexes") {
-        Ok(String::from_str(env, "Indexes rebuilt"))
-    } else if step == &String::from_str(env, "verify_migration") {
-        Ok(String::from_str(env, "Migration verified"))
-    } else if step == &String::from_str(env, "update_metadata_format") {
-        Ok(String::from_str(env, "Metadata format updated"))
-    } else if step == &String::from_str(env, "refresh_indexes") {
-        Ok(String::from_str(env, "Indexes refreshed"))
-    } else if step == &String::from_str(env, "validate_compatibility") {
-        Ok(String::from_str(env, "Compatibility validated"))
-    } else {
-        Ok(String::from_str(env, "Unknown migration step"))
+    let step_str = step.to_string();
+
+    match step_str.as_str() {
+        "backup_existing_data" => {
+            // In practice, this would create a backup
+            Ok(String::from_str(env, "Data backup completed"))
+        }
+        "validate_data_integrity" => validate_data_integrity(env),
+        "migrate_storage_format" => {
+            // Migrate storage keys and data format
+            Ok(String::from_str(env, "Storage format migrated"))
+        }
+        "update_schema" => {
+            // Update data schema for new version
+            Ok(String::from_str(env, "Schema updated"))
+        }
+        "rebuild_indexes" => {
+            // Rebuild capability indexes
+            Ok(String::from_str(env, "Indexes rebuilt"))
+        }
+        "verify_migration" => {
+            // Verify migration completed successfully
+            Ok(String::from_str(env, "Migration verified"))
+        }
+        "update_metadata_format" => {
+            // Update metadata format for minor version changes
+            Ok(String::from_str(env, "Metadata format updated"))
+        }
+        "refresh_indexes" => {
+            // Refresh indexes for minor changes
+            Ok(String::from_str(env, "Indexes refreshed"))
+        }
+        "validate_compatibility" => {
+            // Basic compatibility validation for patch versions
+            Ok(String::from_str(env, "Compatibility validated"))
+        }
+        _ => Ok(String::from_str(
+            env,
+            &format!("Unknown migration step: {}", step_str),
+        )),
     }
 }
 
@@ -434,10 +510,10 @@ fn validate_post_migration_state(env: &Env) -> Result<String, UpgradeableError> 
     Ok(String::from_str(env, "Post-migration state validated"))
 }
 
-fn estimate_data_items(env: &Env) -> u32 {
+fn estimate_data_items(_env: &Env) -> u32 {
     // Estimate the number of data items that need to be migrated
     // This is a simplified estimation - in practice would count actual records
-    
+
     // Placeholder estimation based on contract usage
     100 // Assuming ~100 agent records on average
 }

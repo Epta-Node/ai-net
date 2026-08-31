@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
+# rlib is required so agent-registry can link this crate as a
+# dependency; cdylib alone only produces a loadable contract artifact.
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
@@ -13,6 +15,12 @@ soroban-sdk = "22.0.1"
 soroban-sdk = { version = "22.0.1", features = ["testutils"] }
 
 [features]
+# Exports the UpgradeManager contract entry points. On by default so this crate
+# still builds as a deployable contract, but agent-registry links it with
+# default-features = false: a dependency that exports contract symbols would
+# collide with the dependent's own exports at wasm link time.
+default = ["contract"]
+contract = []
 testutils = ["soroban-sdk/testutils"]
 
 [profile.release]

@@ -4,7 +4,7 @@
 //! and threshold configuration.
 
 use crate::GasConfig;
-use soroban_sdk::{contracttype, Address, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
 
 /// On-chain metrics for an agent, combining SLA terms and analytics.
 #[contracttype]
@@ -185,4 +185,122 @@ pub struct DiscoveryStats {
     pub total_matches_found: u64,
     /// Number of queries served from in-memory / temporary storage cache.
     pub cache_hits: u64,
+}
+
+// ─── Cross-chain identity bridging (issue #259) ──────────────────────────────
+
+/// Chains an agent identity can be bridged to.
+///
+/// The variant determines how an off-chain verifier reconstructs the signed
+/// message, so adding a chain is a deliberate, versioned change rather than a
+/// free-form string.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetChain {
+    /// Any EVM-compatible chain, identified by its EIP-155 chain id.
+    Evm(u32),
+    /// Solana; the cluster is carried out of band.
+    Solana,
+}
+
+/// A time-limited attestation that a registered agent controls a Stellar key.
+///
+/// The registry stores the proof so a verifier can check it on-chain, and the
+/// signature travels with it so a contract on the target chain can verify the
+/// agent's authorisation independently, without trusting this registry.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BridgeProof {
+    /// Agent the proof attests to.
+    pub agent_id: Symbol,
+    /// Raw ed25519 public key the agent signs with.
+    pub stellar_pubkey: BytesN<32>,
+    /// Chain the proof is scoped to. A proof for one chain is not valid on another.
+    pub target_chain: TargetChain,
+    /// Ledger timestamp when the proof was issued, in seconds.
+    pub issued_at: u64,
+    /// Ledger timestamp after which the proof is no longer valid, in seconds.
+    pub expiry: u64,
+    /// SHA-256 over the canonical encoding of the fields above.
+    pub digest: BytesN<32>,
+    /// Agent's ed25519 signature over `digest`.
+    pub signature: BytesN<64>,
+}
+
+// ─── Security audit trail (issue #261) ───────────────────────────────────────
+
+/// Why an operation was flagged as anomalous.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AnomalyKind {
+    /// Caller exceeded the permitted operation count within the rate window.
+    RateExceeded,
+    /// Operation moved more value than the high-value threshold.
+    HighValue,
+    /// Caller has no prior audited activity in the retained history.
+    FirstSeenCaller,
+}
+
+/// One immutable record of a privileged operation.
+///
+/// Written for every admin entry point so a post-incident investigation can
+/// reconstruct who did what, and when, without replaying the whole ledger.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditLogEntry {
+    /// Monotonic sequence number; also the storage key.
+    pub seq: u64,
+    /// Address that authorised the operation.
+    pub caller: Address,
+    /// Short operation name, e.g. `pause`, `slash_bond`.
+    pub operation: Symbol,
+    /// Agent the operation acted on, when it targets one.
+    pub target: Option<Symbol>,
+    /// Value moved, in stroops. Zero for operations that move none.
+    pub amount_stroops: i128,
+    /// True when `amount_stroops` met or exceeded the high-value threshold.
+    pub high_value: bool,
+    /// Ledger timestamp, in seconds.
+    pub timestamp: u64,
+    /// Ledger sequence the operation was included in.
+    pub ledger: u32,
+}
+
+/// A page of audit entries, newest-first.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditPage {
+    /// Entries on this page.
+    pub entries: Vec<AuditLogEntry>,
+    /// Sequence to pass as `before_seq` for the next page, or `None` at the end.
+    pub next_cursor: Option<u64>,
+    /// Total entries ever written, including any already expired.
+    pub total: u64,
+}
+
+/// Thresholds governing audit logging and anomaly detection.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditConfig {
+    /// Value at or above which an operation is flagged high-value, in stroops.
+    pub high_value_threshold: i128,
+    /// Operations one caller may perform within `rate_window_secs` before
+    /// being flagged.
+    pub rate_limit: u32,
+    /// Width of the rate-limiting window, in seconds.
+    pub rate_window_secs: u64,
+    /// Retention for audit entries, in ledgers.
+    pub retention_ledgers: u32,
+}
+
+/// Rolling per-caller counter backing the rate check.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallerActivity {
+    /// Operations counted so far in the current window.
+    pub count: u32,
+    /// Timestamp the current window opened, in seconds.
+    pub window_start: u64,
+    /// Timestamp of this caller's most recent audited operation.
+    pub last_seen: u64,
 }
