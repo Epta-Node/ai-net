@@ -66,7 +66,7 @@ const Navbar: React.FC = () => {
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80 shadow-[0_1px_0_rgba(255,255,255,0.02)]">
+      <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80 shadow-sm">
         {/* Left: Hamburger + Logo */}
         <div className="flex items-center gap-1.5">
           <motion.button
@@ -89,7 +89,7 @@ const Navbar: React.FC = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
-            <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
+            <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-info-glow">
               a
             </div>
             <span className="font-semibold text-[14px] text-text-primary tracking-wide hidden sm:inline">
@@ -100,7 +100,7 @@ const Navbar: React.FC = () => {
 
         {/* Center: Global Search (Desktop) */}
         <div className="flex-1 max-w-[320px] mx-auto sm:mx-0 sm:flex-none sm:w-[260px] hidden sm:block">
-          <div className="flex items-center w-full h-[32px] rounded-lg border border-border-subtle/60 bg-background-surface/40 hover:bg-background-surface/70 transition-all group focus-within:border-accent-cyan/30 focus-within:bg-background-surface/80 focus-within:shadow-[0_0_10px_rgba(56,189,248,0.05)]">
+          <div className="flex items-center w-full h-[32px] rounded-lg border border-border-subtle/60 bg-background-surface/40 hover:bg-background-surface/70 transition-all group focus-within:border-accent-cyan/30 focus-within:bg-background-surface/80 focus-within:shadow-info-glow-subtle">
             <div className="flex items-center gap-1.5 pl-2.5 pr-1 pointer-events-none">
               <Search size={13} className="text-text-secondary/30 group-focus-within:text-accent-cyan/60 transition-colors" />
             </div>
@@ -132,7 +132,7 @@ const Navbar: React.FC = () => {
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-background-surface/30 border border-border-subtle/50">
             <span className="relative flex w-1.5 h-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
-              <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+              <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-success-glow" />
             </span>
             <span className="text-[11px] font-medium text-text-secondary/70 tracking-wide">
               {t('landing.navbar.network')}
@@ -153,7 +153,7 @@ const Navbar: React.FC = () => {
             <div className="flex items-center gap-0.5 bg-background-surface/40 border border-border-subtle/60 rounded-md pl-2 pr-1 py-0.5">
               <span className="relative flex w-1.5 h-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-green opacity-50" />
-                <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
+                <span className="relative inline-flex rounded-full w-1.5 h-1.5 bg-accent-green shadow-success-glow" />
               </span>
               <span className="text-[11px] font-medium text-text-primary font-mono tracking-wide mx-1">
                 {truncateKey(publicKey)}
@@ -185,7 +185,7 @@ const Navbar: React.FC = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.97 }}
               onClick={() => navigate('/wallet')}
-              className="group flex items-center gap-1.5 bg-background-surface/40 border border-border-subtle/60 rounded-md px-2.5 py-1 cursor-pointer hover:border-accent-cyan/30 hover:bg-background-surface/70 hover:shadow-[0_0_12px_rgba(56,189,248,0.04)] transition-all"
+              className="group flex items-center gap-1.5 bg-background-surface/40 border border-border-subtle/60 rounded-md px-2.5 py-1 cursor-pointer hover:border-accent-cyan/30 hover:bg-background-surface/70 hover:shadow-info-glow-subtle transition-all"
             >
               <Wallet size={12} className="text-accent-cyan/80 group-hover:text-accent-cyan group-hover:scale-110 transition-all" />
               <span className="text-[11px] font-medium text-text-secondary/60 group-hover:text-text-primary/90 transition-colors hidden sm:inline">
@@ -206,7 +206,7 @@ const Navbar: React.FC = () => {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="flex items-center h-9 rounded-lg bg-background-surface border border-border-subtle/60 focus-within:border-accent-cyan/30 focus-within:shadow-[0_0_10px_rgba(56,189,248,0.05)] transition-all">
+            <div className="flex items-center h-9 rounded-lg bg-background-surface border border-border-subtle/60 focus-within:border-accent-cyan/30 focus-within:shadow-info-glow-subtle transition-all">
               <Search size={14} className="ml-2.5 text-text-secondary/30" />
               <input
                 ref={mobileSearchRef}
@@ -252,7 +252,7 @@ const Navbar: React.FC = () => {
               transition={{ type: 'spring', damping: 30, stiffness: 320 }}
             >
               <div className="flex items-center gap-2.5 px-3 pb-4 mb-3 border-b border-border-subtle/60">
-                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
+                <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-info-glow">
                   a
                 </div>
                 <div className="flex flex-col">

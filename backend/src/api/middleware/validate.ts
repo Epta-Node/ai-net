@@ -1,11 +1,34 @@
 import { z, ZodSchema } from "zod";
 import { Request, Response, NextFunction } from "express";
+import { toFieldErrors, type FieldError } from "../../schemas/common";
+import { routeParameters, type OpenApiParameter } from "../../schemas/openapi";
 
 type ValidateTargets = {
   body?: ZodSchema;
   query?: ZodSchema;
   params?: ZodSchema;
 };
+
+/** Express middleware that also carries the OpenAPI parameters it enforces. */
+export interface ValidateMiddleware {
+  (req: Request, res: Response, next: NextFunction): void;
+  /** Parameters derived from the query and path schemas, for the spec. */
+  openApiParameters: OpenApiParameter[];
+}
+
+/** 400 payload emitted when validation fails. */
+export interface ValidationErrorBody {
+  error: "Validation failed";
+  /** Per-target field errors, e.g. `{ body: { prompt: ["Prompt is required"] } }`. */
+  details: Record<string, Record<string, string[]>>;
+  /**
+   * Flat list with full dotted paths.
+   *
+   * `details` loses the path for nested objects, so a form cannot tell which
+   * input to highlight; `fieldErrors` keeps it.
+   */
+  fieldErrors: FieldError[];
+}
 
 /**
  * Reusable Zod validation middleware.
@@ -16,6 +39,9 @@ type ValidateTargets = {
  * values. On failure the middleware short-circuits with a 400 response
  * containing structured field errors.
  *
+ * Each target is validated independently, so one response reports every
+ * problem across body, query and params rather than only the first.
+ *
  * Supports two calling conventions:
  *
  * 1. Single schema (validates body only — backward compatible):
@@ -24,51 +50,71 @@ type ValidateTargets = {
  * 2. Object with target keys:
  *    router.get("/", validate({ query: TaskListSchema }), handler);
  *    router.get("/:id", validate({ params: IdParamSchema }), handler);
+ *
+ * The returned middleware exposes `openApiParameters`, derived from the same
+ * schemas, so documentation cannot drift from what is enforced.
  */
-export function validate(schemaOrTargets: ZodSchema | ValidateTargets) {
+export function validate(schemaOrTargets: ZodSchema | ValidateTargets): ValidateMiddleware {
   const targets: ValidateTargets =
     schemaOrTargets instanceof z.ZodObject || schemaOrTargets instanceof z.ZodType
       ? { body: schemaOrTargets as ZodSchema }
       : (schemaOrTargets as ValidateTargets);
 
-  return (req: Request, res: Response, next: NextFunction): void => {
+  const middleware = (req: Request, res: Response, next: NextFunction): void => {
     const errors: Record<string, Record<string, string[]>> = {};
+    const fieldErrors: FieldError[] = [];
 
-    if (targets.body) {
-      const result = targets.body.safeParse(req.body);
-      if (!result.success) {
-        errors.body = result.error.flatten().fieldErrors as Record<string, string[]>;
-      } else {
-        req.body = result.data;
+    /** Validate one target, recording errors or writing the parsed value back. */
+    const check = (
+      key: "body" | "query" | "params",
+      schema: ZodSchema | undefined,
+      value: unknown,
+      assign: (parsed: unknown) => void,
+    ): void => {
+      if (!schema) return;
+      const result = schema.safeParse(value);
+      if (result.success) {
+        assign(result.data);
+        return;
       }
-    }
+      errors[key] = result.error.flatten().fieldErrors as Record<string, string[]>;
+      // Prefix the target so `body.prompt` and `query.prompt` stay distinct.
+      for (const issue of toFieldErrors(result.error)) {
+        fieldErrors.push({ ...issue, field: `${key}.${issue.field}` });
+      }
+    };
 
-    if (targets.query) {
-      const result = targets.query.safeParse(req.query);
-      if (!result.success) {
-        errors.query = result.error.flatten().fieldErrors as Record<string, string[]>;
-      } else {
-        (req as any).query = result.data;
-      }
-    }
-
-    if (targets.params) {
-      const result = targets.params.safeParse(req.params);
-      if (!result.success) {
-        errors.params = result.error.flatten().fieldErrors as Record<string, string[]>;
-      } else {
-        req.params = result.data as any;
-      }
-    }
+    check("body", targets.body, req.body, (parsed) => {
+      req.body = parsed;
+    });
+    check("query", targets.query, req.query, (parsed) => {
+      // Express 5 defines `query` as a getter, so it cannot be assigned directly.
+      (req as any).query = parsed;
+    });
+    check("params", targets.params, req.params, (parsed) => {
+      req.params = parsed as any;
+    });
 
     if (Object.keys(errors).length > 0) {
-      res.status(400).json({
+      const body: ValidationErrorBody = {
         error: "Validation failed",
         details: errors,
-      });
+        fieldErrors,
+      };
+      res.status(400).json(body);
       return;
     }
 
     next();
   };
+
+  // Attached rather than closed over so callers (and the spec generator) can
+  // read the parameters straight off the mounted middleware.
+  const handler = middleware as ValidateMiddleware;
+  handler.openApiParameters = routeParameters({
+    query: targets.query,
+    params: targets.params,
+  });
+
+  return handler;
 }

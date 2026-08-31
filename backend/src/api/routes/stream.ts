@@ -9,10 +9,27 @@ import type { EventStore, StoredEvent } from '../../events/eventStore';
 import type { Task } from '../../types/task';
 import { WS_CLOSE } from '../../types/stream';
 import { createLogger } from '../../utils/logger';
+import { getConfig } from '../../config';
 
 const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;
 
 const logger = createLogger({ module: 'ws-stream' });
+
+/**
+ * Every WebSocketServer created by attachTaskStream(), tracked so
+ * getStreamConnectionCount() can report a live total across all of them
+ * (normally just one, per HTTP server) for the health/metrics dashboard.
+ */
+const activeStreamServers = new Set<WebSocketServer>();
+
+/** Total connected WebSocket clients across every attached stream server. */
+export function getStreamConnectionCount(): number {
+  let count = 0;
+  for (const wss of activeStreamServers) {
+    count += wss.clients.size;
+  }
+  return count;
+}
 
 // ---------------------------------------------------------------------------
 // Wire-format normalisation
@@ -89,7 +106,7 @@ function getClientIp(req: IncomingMessage): string {
 }
 
 function trackConnection(ip: string): boolean {
-  const maxConnections = Number(process.env.WS_MAX_CONNECTIONS_PER_CLIENT ?? 5);
+  const maxConnections = getConfig().WS_MAX_CONNECTIONS_PER_CLIENT;
   let tracker = clientConnections.get(ip);
   if (!tracker) {
     tracker = { count: 0, resetTimer: null };
@@ -233,7 +250,7 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
     inactivityTimeoutMs = DEFAULT_INACTIVITY_TIMEOUT_MS,
   } = deps;
 
-  const maxMessagesPerMinute = Number(process.env.WS_MAX_MESSAGES_PER_MINUTE ?? 100);
+  const maxMessagesPerMinute = getConfig().WS_MAX_MESSAGES_PER_MINUTE;
 
   const wss = new WebSocketServer({ noServer: true });
   activeStreamServers.add(wss);

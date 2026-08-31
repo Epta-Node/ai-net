@@ -1,9 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 
 // Helper to get a fresh module (so NODE_ENV changes take effect)
+function setTestConfigEnv(nodeEnv: string) {
+  process.env.NODE_ENV = nodeEnv;
+  process.env.VENICE_API_KEY = "test-venice-key";
+  process.env.DATABASE_URL = ":memory:";
+}
+
 function freshErrorHandler(nodeEnv: string) {
   jest.resetModules();
-  process.env.NODE_ENV = nodeEnv;
+  setTestConfigEnv(nodeEnv);
   return require("../src/api/middleware/errorHandler")
     .errorHandler as typeof import("../src/api/middleware/errorHandler").errorHandler;
 }
@@ -38,6 +44,8 @@ jest.mock("../src/utils/logger", () => ({
 
 afterEach(() => {
   delete process.env.NODE_ENV;
+  delete process.env.VENICE_API_KEY;
+  delete process.env.DATABASE_URL;
   jest.resetModules();
 });
 
@@ -202,7 +210,7 @@ describe("errorHandler — development mode", () => {
 describe("errorHandler — AppError instances", () => {
   it("uses AppError.statusCode, code, and message", () => {
     jest.resetModules();
-    process.env.NODE_ENV = "production";
+    setTestConfigEnv("production");
     const { errorHandler } = require("../src/api/middleware/errorHandler");
     const { NotFoundError } = require("../src/errors");
     const res = makeRes();
@@ -219,7 +227,7 @@ describe("errorHandler — AppError instances", () => {
 
   it("does not include details in production for AppError", () => {
     jest.resetModules();
-    process.env.NODE_ENV = "production";
+    setTestConfigEnv("production");
     const { errorHandler } = require("../src/api/middleware/errorHandler");
     const { ValidationError } = require("../src/errors");
     const res = makeRes();
@@ -233,7 +241,7 @@ describe("errorHandler — AppError instances", () => {
 
   it("includes details in development for AppError", () => {
     jest.resetModules();
-    process.env.NODE_ENV = "development";
+    setTestConfigEnv("development");
     const { errorHandler } = require("../src/api/middleware/errorHandler");
     const { ValidationError } = require("../src/errors");
     const res = makeRes();
