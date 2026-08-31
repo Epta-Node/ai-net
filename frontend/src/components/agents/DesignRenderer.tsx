@@ -8,6 +8,7 @@ import { Maximize2 } from 'lucide-react';
 
 interface Props {
   result: DesignResult | null | undefined;
+  searchQuery?: string;
 }
 
 // Collapsible Tree Node Component
@@ -100,6 +101,15 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
     );
   }
 
+  // Search filtering
+  const query = searchQuery ? searchQuery.toLowerCase() : '';
+  const filteredColors = query
+    ? details.colors.filter((c) => (c.name || '').toLowerCase().includes(query) || (c.hex || '').toLowerCase().includes(query))
+    : details.colors;
+  const filteredImages = query
+    ? details.images.filter((img) => (img.title || '').toLowerCase().includes(query) || (img.alt || '').toLowerCase().includes(query))
+    : details.images;
+
   const handleCopyColor = async (hex: string) => {
     try {
       await navigator.clipboard.writeText(hex);
@@ -189,7 +199,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
       )}
 
       {/* Color Palette Swatches */}
-      {details.colors.length > 0 && (
+      {filteredColors.length > 0 && (
         <div style={{ marginBottom: '32px' }}>
           <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('agent.design.colorPalette')}</h4>
           <div
@@ -199,7 +209,7 @@ const DesignRenderer: React.FC<Props> = ({ result }) => {
               gap: '12px',
             }}
           >
-            {details.colors.map((color, idx) => {
+            {filteredColors.map((color, idx) => {
               const hexVal = color.hex || color.value || '#000000';
               const nameVal = color.name || hexVal;
               const isCopied = copiedColor === hexVal;
