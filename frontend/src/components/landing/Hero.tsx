@@ -13,11 +13,8 @@ const Hero: React.FC = () => {
   const { canvasRef, prefersReducedMotion } = useParticles()
 
   return (
-    <motion.section
+    <section
       className={`flex flex-col items-center text-center pt-24 pb-20 px-4 max-w-4xl mx-auto ${styles.heroContainer}`}
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
     >
       {!prefersReducedMotion ? (
         <canvas ref={canvasRef} className={styles.particleCanvas} />
@@ -36,7 +33,7 @@ const Hero: React.FC = () => {
         style={{ animationDelay: '100ms' }}
       >
         <div className="absolute inset-0 bg-gradient-primary opacity-20 blur-xl" />
-        <div className="w-[42px] h-[42px] rounded-xl bg-gradient-primary flex items-center justify-center font-bold text-white text-2xl relative z-10 shadow-[0_0_20px_rgba(56,189,248,0.4)]">
+        <div className="w-[42px] h-[42px] rounded-xl bg-gradient-primary flex items-center justify-center font-bold text-white text-2xl relative z-10 shadow-info-glow-strong">
           a
         </div>
       </div>
@@ -46,9 +43,9 @@ const Hero: React.FC = () => {
         className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-background-surface-alt border border-border-subtle mb-8 slide-up"
         style={{ animationDelay: '200ms' }}
       >
-        <div className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse" />
+        <div className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-success-glow animate-pulse" />
         <span className="text-xs font-semibold text-accent-green tracking-wide">{t('landing.hero.badge')}</span>
-      </motion.div>
+      </div>
 
       {/* Headline */}
       <h1
@@ -59,10 +56,12 @@ const Hero: React.FC = () => {
           i18nKey="landing.hero.headline"
           components={[
             <br key="break" />,
-            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary" />,
+            <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary">
+              {typedText || '\u00A0'}
+            </span>,
           ]}
         />
-      </motion.h1>
+      </h1>
 
       {/* Subtext */}
       <p
@@ -70,7 +69,7 @@ const Hero: React.FC = () => {
         style={{ animationDelay: '400ms' }}
       >
         {t('landing.hero.subtitle')}
-      </motion.p>
+      </p>
 
       {/* CTAs */}
       <div
@@ -79,7 +78,7 @@ const Hero: React.FC = () => {
       >
         <button
           onClick={() => navigate('/tasks/new')}
-          className="group w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-primary text-white font-semibold shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_35px_rgba(139,92,246,0.5)] transition-all hover-scale focus-ring"
+          className="group w-full sm:w-auto flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-primary text-white font-semibold shadow-info-glow hover:shadow-info-glow-strong transition-all hover-scale focus-ring"
         >
           <Sparkles size={18} className="group-hover:rotate-12 transition-transform" />
           <span>{t('landing.hero.startTask')}</span>

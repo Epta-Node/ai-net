@@ -4,15 +4,16 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { CodingResult } from '../../types/agent';
 import { getCodeDetails } from '../../utils/agentUtils';
+import CopyButton from '../common/CopyButton';
 
 interface Props {
   result: CodingResult | null | undefined;
+  searchQuery?: string;
 }
 
 const CodingRenderer: React.FC<Props> = ({ result }) => {
   const { t } = useTranslation();
   const details = getCodeDetails(result);
-  const [copied, setCopied] = useState(false);
 
   if (!details || !details.code) {
     return (
@@ -23,9 +24,9 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
         {t('agent.coding.empty')}
@@ -33,14 +34,40 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
     );
   }
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(details.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy code to clipboard', err);
-    }
+  const matchesSearch =
+    !searchQuery || details.code.toLowerCase().includes(searchQuery.toLowerCase());
+
+  if (!matchesSearch) {
+    return (
+      <div
+        style={{
+          padding: '20px',
+          textAlign: 'center',
+          color: 'var(--text-secondary)',
+          fontSize: '0.85rem',
+          fontStyle: 'italic',
+        }}
+      >
+        No code matching search filter "{searchQuery}".
+      </div>
+    );
+  }
+
+  const containerStyle: React.CSSProperties = {
+    position: 'relative',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    backgroundColor: '#1e1e1e',
+  };
+
+  const headerStyle: React.CSSProperties = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '8px 16px',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
   };
 
   return (
@@ -51,8 +78,8 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
         position: 'relative',
         borderRadius: '8px',
         overflow: 'hidden',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        backgroundColor: '#1e1e1e',
+        border: '1px solid var(--white-alpha-10)',
+        backgroundColor: 'var(--surface-black)',
       }}
     >
       <button
@@ -64,9 +91,9 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           top: '12px',
           right: '12px',
           zIndex: 10,
-          background: copied ? 'var(--success)' : 'rgba(255, 255, 255, 0.08)',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          color: '#fff',
+          background: copied ? 'var(--success)' : 'var(--white-alpha-08)',
+          border: '1px solid var(--white-alpha-15)',
+          color: 'var(--text-inverse)',
           padding: '6px 12px',
           borderRadius: '6px',
           cursor: 'pointer',
@@ -81,9 +108,10 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
       <SyntaxHighlighter
         language={details.language}
         style={vscDarkPlus}
+        showLineNumbers
         customStyle={{
           margin: 0,
-          padding: '20px',
+          padding: '16px 20px',
           fontSize: '0.9rem',
           backgroundColor: 'transparent',
         }}

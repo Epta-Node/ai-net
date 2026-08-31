@@ -1,82 +1,3 @@
-/**
- * GET /api/health       — shallow health check
- * GET /api/health/deep  — checks Venice + Stellar Horizon reachability
- *
- * Cache TTL: CACHE_TTL_HEALTH (default 10s)
- */
-
-import { Router } from 'express';
-import { config, ttlForRoute } from '../../config/index';
-import { cacheMiddleware } from '../middleware/cache';
-
-const router = Router();
-
-const startTime = Date.now();
-
-// GET /api/health
-router.get(
-  '/',
-  cacheMiddleware({ ttl: ttlForRoute('health') }),
-  (_req, res) => {
-    res.json({
-      status: 'ok',
-      uptime: Math.floor((Date.now() - startTime) / 1000),
-      version: process.env['npm_package_version'] ?? '0.1.0',
-      stellarNetwork: config.STELLAR_NETWORK,
-    });
-  },
-);
-
-// GET /api/health/deep
-router.get(
-  '/deep',
-  cacheMiddleware({ ttl: ttlForRoute('health') }),
-  async (_req, res) => {
-    const [veniceStatus, horizonStatus] = await Promise.all([
-      checkVenice(),
-      checkHorizon(),
-    ]);
-
-    const allOk = veniceStatus === 'ok' && horizonStatus === 'ok';
-    res.status(allOk ? 200 : 503).json({
-      status: allOk ? 'ok' : 'degraded',
-      services: {
-        venice: veniceStatus,
-        horizon: horizonStatus,
-      },
-    });
-  },
-);
-
-async function checkVenice(): Promise<'ok' | 'unreachable'> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const url = 'https://api.venice.ai/api/v1/models';
-    const resp = await fetch(url, {
-      signal: controller.signal,
-      headers: { Authorization: `Bearer ${config.VENICE_API_KEY}` },
-    });
-    clearTimeout(timer);
-    return resp.ok || resp.status === 401 ? 'ok' : 'unreachable';
-  } catch {
-    return 'unreachable';
-  }
-}
-
-async function checkHorizon(): Promise<'ok' | 'unreachable'> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    const resp = await fetch(config.STELLAR_HORIZON_URL, { signal: controller.signal });
-    clearTimeout(timer);
-    return resp.ok ? 'ok' : 'unreachable';
-  } catch {
-    return 'unreachable';
-  }
-}
-
-export default router;
 import { Router, Request, Response } from "express";
 import { getConfig } from "../../config";
 import { adminAuthMiddleware } from "../middleware/auth";
@@ -84,38 +5,19 @@ import { metricsService } from "../../services/metrics";
 import { tracingService } from "../../services/tracing";
 
 const router = Router();
+const startTime = Date.now();
 
-let startTime = Date.now();
+function cachedRoute(group: "health"): RequestHandler {
+  let middleware: RequestHandler | null = null;
+  return (req, res, next) => {
+    if (!middleware) {
+      middleware = cacheMiddleware({ ttl: ttlForRoute(group) });
+    }
+    return middleware(req, res, next);
+  };
+}
 
-/**
- * @openapi
- * /health:
- *   get:
- *     summary: Basic liveness check
- *     operationId: getLiveness
- *     description: Returns immediately with process uptime and version info. Does not check external dependencies — use /health/deep for that.
- *     tags: [Health]
- *     security: []
- *     responses:
- *       200:
- *         description: Service is up
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   enum: [ok]
- *                 uptime:
- *                   type: number
- *                   description: Seconds since process start
- *                 version:
- *                   type: string
- *                 stellarNetwork:
- *                   type: string
- */
-router.get("/", (_req: Request, res: Response) => {
+router.get("/", cachedRoute("health"), (_req: Request, res: Response) => {
   const config = getConfig();
   res.json({
     status: "ok",
@@ -123,99 +25,64 @@ router.get("/", (_req: Request, res: Response) => {
     version: config.NPM_PACKAGE_VERSION,
     stellarNetwork: config.STELLAR_NETWORK,
   });
-});
+}
+
+router.get("/", livenessHandler);
 
 /**
  * @openapi
- * /health/deep:
+ * /health/live:
  *   get:
- *     summary: Deep health check
- *     operationId: getDeepHealth
- *     description: >
- *       Checks reachability of external dependencies (Venice AI and Stellar
- *       Horizon) with a 5 second timeout each. Always returns 200 —
- *       individual dependency failures are reported in the response body,
- *       not via HTTP status.
+ *     summary: Basic liveness check
+ *     operationId: getLive
+ *     description: Alias for `GET /health` — process-only liveness, no dependency checks.
  *     tags: [Health]
  *     security: []
  *     responses:
  *       200:
- *         description: Dependency status report
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 venice:
- *                   type: string
- *                   enum: [ok, unreachable]
- *                 horizon:
- *                   type: string
- *                   enum: [ok, unreachable]
+ *         description: Service is up
  */
-router.get("/deep", async (_req: Request, res: Response) => {
-  const config = getConfig();
-  const horizonUrl = config.STELLAR_HORIZON_URL;
+router.get("/live", livenessHandler);
 
+router.get("/deep", cachedRoute("health"), async (_req: Request, res: Response) => {
+  const config = getConfig();
   const [veniceStatus, horizonStatus] = await Promise.all([
     checkVenice(config.VENICE_API_KEY),
-    checkHorizon(horizonUrl),
+    checkHorizon(config.STELLAR_HORIZON_URL),
   ]);
 
-  res.json({
+  const allOk = veniceStatus === "ok" && horizonStatus === "ok";
+  res.status(allOk ? 200 : 503).json({
+    status: allOk ? "ok" : "degraded",
+    services: {
+      venice: veniceStatus,
+      horizon: horizonStatus,
+    },
     venice: veniceStatus,
     horizon: horizonStatus,
   });
 });
 
-/**
- * @openapi
- * /health/ready:
- *   get:
- *     summary: Readiness probe
- *     operationId: getReadiness
- *     description: Verifies database connectivity for task and payment subsystems. Returns 200 when ready to serve traffic, 500/503 otherwise.
- *     tags: [Health]
- *     security: []
- *     responses:
- *       200:
- *         description: Subsystems are healthy and ready
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ReadinessStatus'
- *             example:
- *               status: "ok"
- *               checks:
- *                 tasks: "ok"
- *                 payments: "ok"
- *       500:
- *         description: One or more subsystems failed readiness checks
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ReadinessStatus'
- *             example:
- *               status: "error"
- *               checks:
- *                 tasks: "ok"
- *                 payments: "error"
- */
 router.get("/ready", async (_req: Request, res: Response) => {
-  const checks: Record<string, "ok" | "error"> = {
+  const checks: Record<string, "ok" | "error" | "unknown"> = {
     tasks: "ok",
     payments: "ok",
+    queue: "ok",
+    venice: "ok",
+    horizon: "ok",
+    websocket: "ok",
   };
 
   try {
     const tasksModule = await import("../../db/tasks.js");
     const paymentsModule = await import("../../db/index.js");
+    const queueModule = await import("../../queue/jobStore.js");
 
     try {
       const taskDb = (tasksModule.getTaskDb as Function)();
       taskDb.prepare("SELECT 1").get();
-    } catch (error) {
-      (checks as any).tasks = "error";
+    } catch {
+      checks.tasks = "error";
     } finally {
       (tasksModule.closeTaskDb as Function)();
     }
@@ -223,83 +90,51 @@ router.get("/ready", async (_req: Request, res: Response) => {
     try {
       const paymentDb = (paymentsModule.getDb as Function)();
       paymentDb.prepare("SELECT 1").get();
-    } catch (error) {
-      (checks as any).payments = "error";
+    } catch {
+      checks.payments = "error";
     } finally {
       (paymentsModule.closeDb as Function)();
+    }
+
+    try {
+      const jobDb = (queueModule.getJobDb as Function)();
+      jobDb.prepare("SELECT 1").get();
+    } catch (error) {
+      (checks as any).queue = "error";
+    } finally {
+      (queueModule.closeJobDb as Function)();
     }
   } catch (error) {
     res.status(500).json({ status: "error", checks, error: String(error) });
     return;
   }
 
-  const allOk = Object.values(checks).every((status) => status === "ok");
-  res.status(allOk ? 200 : 500).json({ status: allOk ? "ok" : "error", checks });
+  const config = getConfig();
+  const timeoutMs = config.HEALTH_PROBE_TIMEOUT_MS;
+  const [veniceStatus, horizonStatus] = await Promise.all([
+    checkVenice(config.VENICE_API_KEY, timeoutMs),
+    checkHorizon(config.STELLAR_HORIZON_URL, timeoutMs),
+  ]);
+  checks.venice = veniceStatus === "ok" ? "ok" : "error";
+  checks.horizon = horizonStatus === "ok" ? "ok" : "error";
+
+  const websocketStatus = metricsService.getWebSocketStatus();
+  checks.websocket =
+    websocketStatus.status === "unknown"
+      ? "unknown"
+      : websocketStatus.status === "ok"
+        ? "ok"
+        : "error";
+
+  // A missing WebSocket probe ("unknown") is a valid configuration — the
+  // stream layer may simply not be attached — so it alone does not fail
+  // readiness. A probe that *is* attached and reports "error" (not
+  // listening) does, same as every other dependency.
+  const failing = Object.values(checks).filter((status) => status === "error");
+  const ready = failing.length === 0;
+  res.status(ready ? 200 : 500).json({ status: ready ? "ok" : "error", checks });
 });
 
-/**
- * @openapi
- * /health/dashboard:
- *   get:
- *     summary: Comprehensive health and metrics dashboard
- *     operationId: getHealthDashboard
- *     description: >
- *       Returns a full system snapshot: HTTP traffic analytics (rate, average /
- *       p95 / p99 latency, error rate), dependency reachability (SQLite,
- *       Venice AI, Stellar Horizon, WebSocket), process health (memory, CPU,
- *       uptime, garbage collection), and domain counters for agents, tasks and
- *       payments.
- *
- *
- *       The snapshot is cached for `METRICS_CACHE_TTL_MS` (default 5 seconds);
- *       `cacheAgeMs` reports how stale the served copy is. Pass `?refresh=true`
- *       to bypass the cache.
- *
- *
- *       Requires the admin API key via `X-Admin-API-Key` or
- *       `Authorization: Bearer`. Responds 503 when `ADMIN_API_KEY` is unset.
- *     tags: [Health]
- *     parameters:
- *       - in: query
- *         name: refresh
- *         required: false
- *         schema:
- *           type: string
- *           enum: ["true", "false"]
- *         description: Bypass the metrics cache and collect a fresh snapshot.
- *     responses:
- *       200:
- *         description: Dashboard snapshot
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 status:
- *                   type: string
- *                   enum: [healthy, degraded, unhealthy]
- *                 timestamp:
- *                   type: string
- *                   format: date-time
- *                 cacheAgeMs:
- *                   type: number
- *                 requests:
- *                   type: object
- *                 dependencies:
- *                   type: object
- *                 system:
- *                   type: object
- *                 agents:
- *                   type: object
- *                 tasks:
- *                   type: object
- *                 payments:
- *                   type: object
- *       401:
- *         description: Missing or invalid admin API key
- *       503:
- *         description: ADMIN_API_KEY is not configured
- */
 router.get("/dashboard", adminAuthMiddleware, async (req: Request, res: Response) => {
   try {
     const dashboard = await metricsService.getDashboard(req.query.refresh === "true");
@@ -313,80 +148,45 @@ router.get("/dashboard", adminAuthMiddleware, async (req: Request, res: Response
   }
 });
 
-/**
- * @openapi
- * /health/traces/{correlationId}:
- *   get:
- *     summary: Retrieve distributed trace by correlation ID
- *     operationId: getTrace
- *     description: >
- *       Returns the in-memory trace for the given correlation ID, including all
- *       recorded spans with their timestamps, durations, and statuses.
- *       Returns 404 when no spans have been recorded for the ID.
- *     tags: [Health]
- *     security: []
- *     parameters:
- *       - in: path
- *         name: correlationId
- *         required: true
- *         schema:
- *           type: string
- *         description: The UUID v4 correlation ID propagated via X-Correlation-ID header
- *     responses:
- *       200:
- *         description: Trace found
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 correlationId:
- *                   type: string
- *                 spans:
- *                   type: array
- *                 startedAt:
- *                   type: string
- *                 endedAt:
- *                   type: string
- *                 totalDurationMs:
- *                   type: number
- *       404:
- *         description: No trace found for the given correlation ID
- */
-router.get("/traces/:correlationId", (req: Request, res: Response) => {
-  const trace = tracingService.getTrace(req.params.correlationId);
+router.get("/traces/:traceId", (req: Request, res: Response) => {
+  const trace = tracingService.getTrace(req.params.traceId);
   if (!trace) {
-    res.status(404).json({ error: "Trace not found", correlationId: req.params.correlationId });
+    res.status(404).json({
+      error: "Trace not found",
+      traceId: req.params.traceId,
+      correlationId: req.params.traceId,
+    });
     return;
   }
   res.json(trace);
 });
 
-async function checkVenice(apiKey: string): Promise<"ok" | "unreachable"> {
+async function checkVenice(apiKey: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch("https://api.venice.ai/api/v1/models", {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch("https://api.venice.ai/api/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` },
-      signal: ctrl.signal,
+      signal: controller.signal,
     });
-    clearTimeout(t);
-    return res.ok ? "ok" : "unreachable";
+    clearTimeout(timeout);
+    return response.ok || response.status === 401 ? "ok" : "unreachable";
   } catch {
     return "unreachable";
   }
 }
 
-async function checkHorizon(url: string): Promise<"ok" | "unreachable"> {
+async function checkHorizon(url: string, timeoutMs = 5000): Promise<"ok" | "unreachable"> {
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(t);
-    return res.ok ? "ok" : "unreachable";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
+    return response.ok ? "ok" : "unreachable";
   } catch {
     return "unreachable";
   }
 }
 
 export { router as healthRouter };
+export default router;

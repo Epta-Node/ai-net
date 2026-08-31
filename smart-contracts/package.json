@@ -8,6 +8,7 @@
     "dev": "ts-node src/index.ts",
     "test": "jest --runInBand --forceExit",
     "test:unit": "jest --runInBand --forceExit --testPathIgnorePatterns=tests/e2e/ --testPathIgnorePatterns=tests/integration/",
+    "test:upgrade": "jest --runInBand --forceExit tests/upgrade-migration.test.ts",
     "test:integration": "RUN_INTEGRATION_TESTS=true jest --runInBand --forceExit --testPathPattern='tests/e2e|tests/integration'",
     "test:e2e": "RUN_STELLAR_E2E_TESTS=true jest --runInBand --forceExit tests/e2e/market-report.test.ts",
     "lint": "eslint src --ext .ts"

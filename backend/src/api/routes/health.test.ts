@@ -135,9 +135,40 @@ describe("GET /health/deep", () => {
   });
 });
 
+// ── GET /health/live ──────────────────────────────────────────────────────────
+
+describe("GET /health/live", () => {
+  const app = buildApp();
+
+  it("returns the same shape as GET /health", async () => {
+    const res = await request(app).get("/health/live");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(typeof res.body.uptime).toBe("number");
+    expect(typeof res.body.version).toBe("string");
+    expect(typeof res.body.stellarNetwork).toBe("string");
+  });
+});
+
 // ── GET /health/ready ─────────────────────────────────────────────────────────
 
 describe("GET /health/ready", () => {
+  let fetchSpy: jest.SpyInstance;
+  let wsSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    fetchSpy = jest.spyOn(global, "fetch" as any).mockResolvedValue({ ok: true } as Response);
+    const { metricsService } = require("../../services/metrics");
+    wsSpy = jest
+      .spyOn(metricsService, "getWebSocketStatus")
+      .mockReturnValue({ status: "unknown", error: "WebSocket server not attached" });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    wsSpy.mockRestore();
+  });
+
   it("returns 200 or 500 with structured checks response", async () => {
     // The /health/ready endpoint performs dynamic imports of DB modules and
     // runs SELECT 1 against them. In the test environment without real DB files
@@ -152,11 +183,56 @@ describe("GET /health/ready", () => {
     expect(["ok", "error"]).toContain(res.body.status);
   });
 
-  it("checks object always has tasks and payments keys", async () => {
+  it("checks object has tasks, payments, queue, venice, horizon, and websocket keys", async () => {
     const app = buildApp();
     const res = await request(app).get("/health/ready");
     expect(res.body.checks).toHaveProperty("tasks");
     expect(res.body.checks).toHaveProperty("payments");
+    expect(res.body.checks).toHaveProperty("queue");
+    expect(res.body.checks).toHaveProperty("venice");
+    expect(res.body.checks).toHaveProperty("horizon");
+    expect(res.body.checks).toHaveProperty("websocket");
+  });
+
+  it("fails readiness when Venice is unreachable, even if the databases are fine", async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes("venice.ai")) return Promise.reject(new Error("network error"));
+      return Promise.resolve({ ok: true } as Response);
+    });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.status).toBe(500);
+    expect(res.body.status).toBe("error");
+    expect(res.body.checks.venice).toBe("error");
+  });
+
+  it("fails readiness when Stellar Horizon is unreachable", async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes("venice.ai")) return Promise.resolve({ ok: true } as Response);
+      return Promise.reject(new Error("network error"));
+    });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.status).toBe(500);
+    expect(res.body.checks.horizon).toBe("error");
+  });
+
+  it("reports websocket as unknown (not a failure) when no probe is attached", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.body.checks.websocket).toBe("unknown");
+    // An "unknown" websocket alone must not drag down an otherwise-ready service.
+    if (res.body.checks.tasks === "ok" && res.body.checks.payments === "ok" && res.body.checks.queue === "ok") {
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("fails readiness when the websocket probe reports it is not listening", async () => {
+    wsSpy.mockReturnValue({ status: "unreachable", error: "not listening" });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.body.checks.websocket).toBe("error");
+    expect(res.status).toBe(500);
   });
 });
 

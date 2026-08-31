@@ -9,6 +9,8 @@ The ai-net smart contracts support two upgrade methods:
 1. **Upgrade Manager** (Recommended): Safe upgrades with validation, migration hooks, and rollback support
 2. **Direct Upgrade**: Traditional upgrade method for compatibility
 
+> 📖 **Operator Runbook:** For step-by-step testnet deployment, migration verification, and emergency rollback commands, see the [Testnet Contract Upgrade Runbook](TESTNET_UPGRADE_RUNBOOK.md).
+
 ## Upgrade Manager Architecture
 
 ### Components

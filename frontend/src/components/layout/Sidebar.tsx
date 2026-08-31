@@ -1,6 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { LayoutDashboard, PlusCircle, Bot, Wallet, History } from 'lucide-react'
+import { motion } from 'framer-motion'
+import { NAV_GROUPS, isNavItemActive } from './navigation'
 import './Sidebar.css'
 
 interface SidebarProps {
@@ -9,20 +10,8 @@ interface SidebarProps {
   onNavigate: (path: string) => void
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ 
-  collapsed, 
-  currentPath, 
-  onNavigate 
-}) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, currentPath, onNavigate }) => {
   const { t } = useTranslation()
-
-  const navItems = [
-    { path: '/', icon: <LayoutDashboard size={18} />, label: t('nav.dashboard') },
-    { path: '/tasks/new', icon: <PlusCircle size={18} />, label: t('nav.newTask') },
-    { path: '/tasks/history', icon: <History size={18} />, label: t('nav.taskHistory') },
-    { path: '/agents', icon: <Bot size={18} />, label: t('nav.agents') },
-    { path: '/wallet', icon: <Wallet size={18} />, label: t('nav.wallet') },
-  ]
 
   const handleKeyDown = (e: React.KeyboardEvent, path: string) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -37,25 +26,60 @@ const Sidebar: React.FC<SidebarProps> = ({
       aria-label={t('a11y.sidebar')}
     >
       <nav className="sidebar-nav" role="navigation" aria-label={t('a11y.mainNavigation')}>
-        <ul>
-          {navItems.map((item) => {
-            const isActive = currentPath === item.path
-            return (
-              <li key={item.path}>
-                <button
-                  className={`nav-item ${isActive ? 'active' : ''}`}
-                  onClick={() => onNavigate(item.path)}
-                  onKeyDown={(e) => handleKeyDown(e, item.path)}
-                  aria-current={isActive ? 'page' : undefined}
-                  title={collapsed ? item.label : undefined}
-                >
-                  <span className="nav-icon">{item.icon}</span>
-                  {!collapsed && <span className="nav-label">{item.label}</span>}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+        {NAV_GROUPS.map((group) => (
+          <div className="nav-group" key={group.id}>
+            {/*
+              The heading is hidden from sight when collapsed but kept in the
+              accessibility tree, so screen-reader users keep the grouping that
+              sighted users lose to the narrow rail.
+            */}
+            <h2
+              className={`nav-group-label ${collapsed ? 'visually-hidden' : ''}`}
+              id={`nav-group-${group.id}`}
+            >
+              {t(group.labelKey)}
+            </h2>
+            <ul aria-labelledby={`nav-group-${group.id}`}>
+              {group.items.map((item) => {
+                const isActive = isNavItemActive(currentPath, item.path)
+                const label = t(item.labelKey)
+                const Icon = item.icon
+                return (
+                  <li key={item.path}>
+                    <button
+                      className={`nav-item ${isActive ? 'active' : ''}`}
+                      onClick={() => onNavigate(item.path)}
+                      onKeyDown={(e) => handleKeyDown(e, item.path)}
+                      aria-current={isActive ? 'page' : undefined}
+                      title={collapsed ? label : undefined}
+                    >
+                      {/*
+                        `layoutId` makes the active pill slide between items
+                        instead of blinking out and back in. It is shared across
+                        every button, so framer-motion animates the one element
+                        from its old position to its new one.
+                      */}
+                      {isActive && (
+                        <motion.span
+                          className="nav-item-indicator"
+                          layoutId="sidebar-active-indicator"
+                          transition={{ type: 'spring', stiffness: 500, damping: 40 }}
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="nav-icon">
+                        <Icon size={18} />
+                      </span>
+                      <span className={`nav-label ${collapsed ? 'visually-hidden' : ''}`}>
+                        {label}
+                      </span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
     </aside>
   )

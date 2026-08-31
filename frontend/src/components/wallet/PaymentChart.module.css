@@ -12,7 +12,7 @@
   .chartCard {
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
     padding: 20px;
     min-width: 0;
   }
