@@ -16,10 +16,14 @@ import type {
   AgentQualityMetrics,
   DimensionScore,
   QualityDimension,
+  QualityScorerConfig,
   QualityScore,
   QualityScoreRecord,
   QualityScoringRules,
   QualityTrend,
+  ValidationEntry,
+  ValidationReport,
+  ValidationResult,
 } from './qualityScorer.types';
 import { ResearchOutputSchema } from '../agents/research/research';
 import { CodingOutputSchema } from '../agents/coding/coding';
@@ -38,6 +42,29 @@ export const DEFAULT_WEIGHTS: Record<QualityDimension, number> = {
 };
 
 export const DEFAULT_REVIEW_THRESHOLD = 60;
+
+/**
+ * Load quality scorer configuration from process.env.
+ * Called lazily so config changes (env vars) take effect without redeploy.
+ * Falls back to defaults when env vars are not set.
+ */
+export function loadScorerConfig(): QualityScorerConfig {
+  const weightComp = Number(process.env.QUALITY_WEIGHT_COMPLETENESS ?? 0.4);
+  const weightRel = Number(process.env.QUALITY_WEIGHT_RELEVANCE ?? 0.3);
+  const weightFmt = Number(process.env.QUALITY_WEIGHT_FORMAT ?? 0.3);
+  const reviewThreshold = Number(process.env.QUALITY_REVIEW_THRESHOLD ?? 60);
+  const percentileEnabled = process.env.QUALITY_PERCENTILE_ENABLED === 'true';
+  const percentileMinSamples = Number(process.env.QUALITY_PERCENTILE_MIN_SAMPLES ?? 10);
+
+  return {
+    weightCompleteness: clamp(weightComp, 0, 1),
+    weightRelevance: clamp(weightRel, 0, 1),
+    weightFormat: clamp(weightFmt, 0, 1),
+    reviewThreshold: clamp(reviewThreshold, 0, 100),
+    percentileEnabled,
+    percentileMinSamples,
+  };
+}
 
 /** Small connector words excluded from prompt-token extraction. */
 const STOPWORDS = new Set([
@@ -235,28 +262,139 @@ export function computeTotalScore(
   return clamp(Math.round(total), 0, 100);
 }
 
+// ─── Percentile Normalization ────────────────────────────────────────────────
+
+/**
+ * Normalize a raw score to a percentile rank based on a historical distribution.
+ * The returned value (0–100) indicates what percentage of historical scores
+ * the raw score meets or exceeds.
+ *
+ * @param rawScore     The raw quality score (0–100).
+ * @param distribution Historical scores, sorted ascending.
+ * @returns Percentile rank, 0–100.
+ */
+export function percentileNormalize(rawScore: number, distribution: number[]): number {
+  if (distribution.length === 0) return rawScore;
+
+  const sorted = [...distribution].sort((a, b) => a - b);
+  let countBelow = 0;
+  for (const s of sorted) {
+    if (s < rawScore) countBelow += 1;
+    else break;
+  }
+  // Percentile = percentage of values less than the raw score.
+  const percentile = (countBelow / sorted.length) * 100;
+  return clamp(Math.round(percentile), 0, 100);
+}
+
+// ─── Validation Set ─────────────────────────────────────────────────────────
+
+/**
+ * Run a validation set through the scorer and produce a report.
+ * Each entry is scored against its agent type rules; the result records
+ * whether the score fell within the expected range.
+ *
+ * This makes scores re-derivable from documented inputs — every entry in
+ * the validation set is a documented input/output pair.
+ */
+export function runValidationSet(
+  scorer: QualityScorer,
+  entries: ValidationEntry[],
+): ValidationReport {
+  const results: ValidationResult[] = entries.map((entry) => {
+    const quality = scorer.scoreForAgentType(entry.output, entry.prompt, entry.agentType);
+    const actualScore = quality?.score ?? 0;
+    const actualNeedsReview = quality?.needsReview ?? true;
+
+    const [lo, hi] = entry.expectedScoreRange;
+    const passed = actualScore >= lo && actualScore <= hi && actualNeedsReview === entry.expectedNeedsReview;
+    const midpoint = (lo + hi) / 2;
+    const deviation = Math.abs(actualScore - midpoint);
+
+    return { entry, actualScore, actualNeedsReview, passed, deviation };
+  });
+
+  const passed = results.filter((r) => r.passed).length;
+  const averageDeviation = results.length > 0
+    ? round2(results.reduce((acc, r) => acc + r.deviation, 0) / results.length)
+    : 0;
+
+  return {
+    totalEntries: results.length,
+    passed,
+    failed: results.length - passed,
+    averageDeviation,
+    results,
+  };
+}
+
 // ─── Scorer ──────────────────────────────────────────────────────────────────
 
 export class QualityScorer {
   private readonly rulesByAgentType: Map<string, QualityScoringRules>;
+  private config: QualityScorerConfig;
+  /** Historical scores used for percentile normalization. */
+  private historicalScores: number[] = [];
 
-  /** @param rules Custom per-agent-type rules merged over the built-in defaults. */
-  constructor(rules: QualityScoringRules[] = []) {
+  /**
+   * @param rules  Custom per-agent-type rules merged over the built-in defaults.
+   * @param config Optional scorer configuration. When omitted, loaded from
+   *               process.env via `loadScorerConfig()`. Changing env vars and
+   *               recreating the scorer applies new weights without redeploy.
+   */
+  constructor(rules: QualityScoringRules[] = [], config?: QualityScorerConfig) {
     this.rulesByAgentType = new Map(rules.map((rule) => [rule.agentType, rule]));
+    this.config = config ?? loadScorerConfig();
+  }
+
+  /** Reload configuration from process.env. Call after env vars change. */
+  reloadConfig(): void {
+    this.config = loadScorerConfig();
+    log.info({ config: this.config }, 'quality scorer config reloaded');
+  }
+
+  /** Return the current configuration (read-only snapshot). */
+  getConfig(): Readonly<QualityScorerConfig> {
+    return this.config;
+  }
+
+  /**
+   * Load historical scores from the database for percentile normalization.
+   * Call this once at startup or periodically to keep the distribution fresh.
+   */
+  loadHistoricalScores(agentId?: string): void {
+    try {
+      const records = createTaskDb(getTaskDb()).listQualityScores(agentId);
+      this.historicalScores = records.map((r) => r.score);
+    } catch (err) {
+      log.warn({ err }, 'failed to load historical scores for percentile normalization');
+    }
+  }
+
+  /** Set historical scores directly (useful for testing). */
+  setHistoricalScores(scores: number[]): void {
+    this.historicalScores = [...scores];
   }
 
   /** Effective rules for an agent type (defaults merged with custom rules). */
   getRules(agentType: string): QualityScoringRules {
     const defaults = DEFAULT_QUALITY_RULES[agentType];
     const custom = this.rulesByAgentType.get(agentType);
+    const globalWeights: Partial<Record<QualityDimension, number>> = {
+      completeness: this.config.weightCompleteness,
+      relevance: this.config.weightRelevance,
+      format: this.config.weightFormat,
+    };
     return {
       // Sensible defaults for agent types without an explicit entry.
-      reviewThreshold: DEFAULT_REVIEW_THRESHOLD,
+      reviewThreshold: this.config.reviewThreshold,
       enabled: true,
       ...(defaults ?? {}),
       ...(custom ?? {}),
       // Always resolve to the queried type.
       agentType,
+      // Merge global config weights; per-type weights from rules take precedence.
+      weights: { ...globalWeights, ...(custom?.weights ?? defaults?.weights ?? {}) },
     };
   }
 
@@ -271,11 +409,20 @@ export class QualityScorer {
     const completeness = scoreCompleteness(output, rules);
     const relevance = scoreRelevance(output, prompt ?? '', rules);
     const format = scoreFormat(output, rules);
-    const total = computeTotalScore(
+    let total = computeTotalScore(
       { completeness: completeness.score, relevance: relevance.score, format: format.score },
       rules.weights,
     );
-    const reviewThreshold = rules.reviewThreshold ?? DEFAULT_REVIEW_THRESHOLD;
+
+    // Apply percentile normalization when enabled and enough data is available.
+    if (
+      this.config.percentileEnabled &&
+      this.historicalScores.length >= this.config.percentileMinSamples
+    ) {
+      total = percentileNormalize(total, this.historicalScores);
+    }
+
+    const reviewThreshold = rules.reviewThreshold ?? this.config.reviewThreshold;
 
     return {
       score: total,

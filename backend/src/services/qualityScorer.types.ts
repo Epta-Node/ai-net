@@ -107,3 +107,70 @@ export interface AgentQualityMetrics {
   /** Most recent scores, oldest first. */
   lastScores: number[];
 }
+
+// ─── Calibration & Validation ───────────────────────────────────────────────
+
+/**
+ * Configuration for the quality scorer loaded from environment variables.
+ * Changing these values (via env or config reload) updates scoring behaviour
+ * without a redeploy.
+ */
+export interface QualityScorerConfig {
+  /** Relative weight of the completeness dimension (0–1). Default 0.4. */
+  weightCompleteness: number;
+  /** Relative weight of the relevance dimension (0–1). Default 0.3. */
+  weightRelevance: number;
+  /** Relative weight of the format dimension (0–1). Default 0.3. */
+  weightFormat: number;
+  /** Scores below this threshold are flagged needsReview. Default 60. */
+  reviewThreshold: number;
+  /** Enable percentile normalization against historical scores. Default false. */
+  percentileEnabled: boolean;
+  /** Minimum number of historical scores before percentile normalization kicks in. Default 10. */
+  percentileMinSamples: number;
+}
+
+/**
+ * A single entry in a validation set: an output + prompt pair with a known
+ * expected quality label. Used to verify the scorer produces consistent,
+ * documented results.
+ */
+export interface ValidationEntry {
+  /** Human-readable label for this validation entry. */
+  label: string;
+  /** The agent output to score. */
+  output: unknown;
+  /** The original prompt. */
+  prompt: string;
+  /** The agent type to score against. */
+  agentType: string;
+  /** Expected total score range [min, max] that the scorer should produce. */
+  expectedScoreRange: [number, number];
+  /** Expected needsReview flag. */
+  expectedNeedsReview: boolean;
+}
+
+/**
+ * Result of running a validation set against the scorer. Each entry records
+ * whether the scorer's output fell within the expected range.
+ */
+export interface ValidationResult {
+  entry: ValidationEntry;
+  actualScore: number;
+  actualNeedsReview: boolean;
+  passed: boolean;
+  /** How far the actual score is from the expected range midpoint. */
+  deviation: number;
+}
+
+/**
+ * Aggregated result of validating all entries in a validation set.
+ */
+export interface ValidationReport {
+  totalEntries: number;
+  passed: number;
+  failed: number;
+  /** Average absolute deviation across all entries. */
+  averageDeviation: number;
+  results: ValidationResult[];
+}

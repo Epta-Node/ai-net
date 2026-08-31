@@ -57,6 +57,14 @@ const envSchema = z.object({
   METRICS_CACHE_TTL_MS: z.coerce.number().int().positive().default(5_000),
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
+
+  // ── Quality Scorer Calibration ───────────────────────────────────────────
+  QUALITY_WEIGHT_COMPLETENESS: z.coerce.number().min(0).max(1).default(0.4),
+  QUALITY_WEIGHT_RELEVANCE: z.coerce.number().min(0).max(1).default(0.3),
+  QUALITY_WEIGHT_FORMAT: z.coerce.number().min(0).max(1).default(0.3),
+  QUALITY_REVIEW_THRESHOLD: z.coerce.number().min(0).max(100).default(60),
+  QUALITY_PERCENTILE_ENABLED: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
+  QUALITY_PERCENTILE_MIN_SAMPLES: z.coerce.number().int().min(2).default(10),
 });
 
 let _config: z.infer<typeof envSchema> | null = null;
