@@ -9,9 +9,9 @@ import { aggregateDailySpend, aggregateByCounterparty } from '../../hooks/useTra
 import { formatDate } from '../../utils/format'
 import { useTheme } from '../../hooks/useTheme'
 import styles from './PaymentChart.module.css'
+import { AccessibleChart } from '../common/AccessibleChart'
 
-const DARK_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ec4899', '#06b6d4', '#a855f7', '#ef4444', '#64748b']
-const LIGHT_COLORS = ['#7c3aed', '#059669', '#d97706', '#db2777', '#0ea5e9', '#a855f7', '#dc2626', '#475569']
+const SLICE_COLORS = ['var(--accent-secondary)', 'var(--status-success)', 'var(--status-warning)', 'var(--accent-text-strong)', 'var(--accent-info)', 'var(--accent)', 'var(--status-danger)', 'var(--text-muted)']
 
 interface PaymentChartProps {
   transactions: TransactionEvent[]
@@ -66,7 +66,7 @@ export function PaymentChart({ transactions }: PaymentChartProps) {
                   color: textColor,
                 }}
               />
-              <Bar dataKey="total" fill={SLICE_COLORS[0]} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="total" fill="var(--accent-secondary)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         ) : (
@@ -92,43 +92,40 @@ export function PaymentChart({ transactions }: PaymentChartProps) {
           </button>
         </div>
         {hasBreakdown ? (
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={byAgent}
-                dataKey="total"
-                nameKey="counterparty"
-                cx="50%"
-                cy="50%"
-                outerRadius={80}
-                label={(entry: { counterparty?: string; percent?: number }) =>
-                  `${truncateAddress(entry.counterparty ?? '')} (${((entry.percent ?? 0) * 100).toFixed(0)}%)`
-                }
-              >
-                {byAgent.map((entry, index) => (
-                  <Cell key={entry.counterparty} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(value: number, _name: string, item: { payload?: AgentSpendSlicePayload }) => [
-                  `${value.toFixed(7)} XLM`,
-                  truncateAddress(item?.payload?.counterparty ?? ''),
-                ]}
-                contentStyle={{
-                  backgroundColor: effectiveTheme === 'dark' ? '#1A1F2E' : '#F8FAFC',
-                  border: `1px solid ${effectiveTheme === 'dark' ? '#2A3040' : '#E6E9EE'}`,
-                  borderRadius: '8px',
-                  color: textColor,
-                }}
-              />
-              {legendOpen && (
-                <Legend
-                  formatter={(value: string) => truncateAddress(value)}
-                  wrapperStyle={{ fontSize: 11, color: textColor, paddingTop: '12px' }}
+          <AccessibleChart
+            label={t('wallet.chart.byAgentHeading')}
+            points={byAgent.map((point) => ({
+              label: truncateAddress(point.counterparty),
+              value: `${point.total.toFixed(7)} XLM`,
+            }))}
+          >
+            <ResponsiveContainer width="100%" height={220}>
+              <PieChart>
+                <Pie
+                  data={byAgent}
+                  dataKey="total"
+                  nameKey="counterparty"
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  label={(entry: { counterparty?: string; percent?: number }) =>
+                    `${truncateAddress(entry.counterparty ?? '')} (${((entry.percent ?? 0) * 100).toFixed(0)}%)`
+                  }
+                >
+                  {byAgent.map((entry, index) => (
+                    <Cell key={entry.counterparty} fill={SLICE_COLORS[index % SLICE_COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: number, _name: string, item: { payload?: AgentSpendSlicePayload }) => [
+                    `${value.toFixed(7)} XLM`,
+                    truncateAddress(item?.payload?.counterparty ?? ''),
+                  ]}
                 />
-              )}
-            </PieChart>
-          </ResponsiveContainer>
+                <Legend formatter={(value: string) => truncateAddress(value)} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </AccessibleChart>
         ) : (
           <p className={styles.empty}>{t('wallet.chart.noData')}</p>
         )}

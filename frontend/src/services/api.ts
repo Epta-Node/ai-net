@@ -1,4 +1,5 @@
 import { NetworkStats, TaskResponse, AgentRecord } from '../types/api';
+import { progressStart, progressDone, progressError } from '../context/RouteProgressContext';
 
 export class ApiError extends Error {
   statusCode: number;
@@ -31,6 +32,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   
   const fullUrl = `${BASE_URL}${path}`;
 
+  progressStart();
+  try {
   while (true) {
     let response: Response;
     try {
@@ -45,6 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         headers,
       });
     } catch (err: unknown) {
+      progressError();
       throw err;
     }
 
@@ -72,16 +76,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
           message = errorText || message;
         } catch {}
       }
+      progressError();
       throw new ApiError(response.status, message, path);
     }
 
     if (response.status === 204) {
+      progressDone();
       return {} as T;
     }
 
     const contentType = response.headers?.get('content-type');
     const isJson = (contentType && contentType.includes('application/json')) || (typeof response.json === 'function' && typeof response.text !== 'function');
 
+    progressDone();
     if (isJson && typeof response.json === 'function') {
       return response.json() as Promise<T>;
     }
@@ -92,6 +99,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       return response.json() as Promise<T>;
     }
     return {} as unknown as Promise<T>;
+  }
+  } catch (err) {
+    // Ensure counter is balanced for any unexpected throw path
+    progressDone();
+    throw err;
   }
 }
 

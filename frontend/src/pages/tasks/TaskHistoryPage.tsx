@@ -10,7 +10,43 @@ import {
 import { TaskFilterBar } from '../../components/tasks/TaskFilterBar';
 import { TaskTimeline } from '../../components/tasks/TaskTimeline';
 import { TaskComparison } from '../../components/tasks/TaskComparison';
+import { Skeleton, SkeletonCard, SkeletonTable } from '../../components/common/Skeleton';
 import styles from './TaskHistoryPage.module.css';
+
+/**
+ * Context-aware skeleton that mirrors the task history page layout so there is
+ * no layout shift between the loading and loaded states.
+ */
+export const TaskHistoryPageSkeleton: React.FC = () => (
+  <div
+    className={styles.page}
+    data-testid="task-history-skeleton"
+    aria-busy="true"
+    aria-label="Loading task history"
+  >
+    {/* Header skeleton */}
+    <div className={styles.header}>
+      <div className={styles.headerLeft}>
+        <Skeleton variant="circular" width={22} height={22} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <Skeleton width="8rem" height="1.5rem" />
+          <Skeleton width="6rem" height="0.75rem" />
+        </div>
+      </div>
+    </div>
+
+    {/* Filter bar skeleton */}
+    <SkeletonCard style={{ marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' as const }}>
+      <Skeleton variant="pill" width="6rem" height="2rem" />
+      <Skeleton variant="pill" width="8rem" height="2rem" />
+      <Skeleton variant="pill" width="7rem" height="2rem" />
+      <Skeleton variant="pill" width="9rem" height="2rem" />
+    </SkeletonCard>
+
+    {/* Timeline skeleton */}
+    <SkeletonTable rows={6} columns={5} />
+  </div>
+);
 
 const TaskHistoryPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -62,6 +98,11 @@ const TaskHistoryPage: React.FC = () => {
     !!filters.dateFrom ||
     !!filters.dateTo ||
     !!filters.search;
+
+  // Show skeleton on initial load (no data yet)
+  if (loading && allTasks.length === 0) {
+    return <TaskHistoryPageSkeleton />;
+  }
 
   return (
     <div className={styles.page}>

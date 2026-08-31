@@ -1,8 +1,8 @@
 use soroban_sdk::{contracterror, contracttype, Address, Bytes, BytesN, Vec};
 
-pub const DEFAULT_TTL_DAYS: u32 = 90;
-pub const MAX_TTL_DAYS: u32 = 365;
-pub const MAX_COMPRESSED_DAG_BYTES: u32 = 8 * 1024;
+pub const DEFAULT_TTL_DAYS: u32 = 14;
+pub const MAX_TTL_DAYS: u32 = 30;
+pub const MAX_COMPRESSED_DAG_BYTES: u32 = 4 * 1024;
 pub const LEDGERS_PER_DAY: u32 = 17_280;
 
 /// Schema version stamped on every task lifecycle event payload (see
@@ -35,6 +35,8 @@ pub struct TaskMetadata {
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
+    Admin,
+    Version,
     Task(BytesN<32>),
 }
 
@@ -94,4 +96,8 @@ pub enum Error {
     NotAssignedAgent = 7,
     InvalidStatusTransition = 8,
     Expired = 9,
+    AlreadyInitialized = 10,
+    NotInitialized = 11,
+    Unauthorized = 12,
+    UpgradeFailed = 13,
 }
