@@ -10,7 +10,7 @@
   background-size: 200% 100%;
   background-repeat: no-repeat;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: transparent;
   user-select: none;
   pointer-events: none;
@@ -27,15 +27,15 @@
 
 /* Variants */
 .text {
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .pill {
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 .circular {
-  border-radius: 50%;
+  border-radius: var(--radius-round);
 }
 
 .rectangular {
@@ -46,7 +46,7 @@
 .card {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 1rem;
 }
 
