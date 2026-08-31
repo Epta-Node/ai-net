@@ -17,10 +17,9 @@ import RendererDemoPage from './pages/RendererDemoPage'
 import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
-import { ProtectedRoute } from './components/common/ProtectedRoute'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import './components/common/Toast.css'
 
 /**
@@ -35,16 +34,21 @@ const AppContent: React.FC = () => {
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/wallet" element={<ProtectedRoute><WalletPage /></ProtectedRoute>} />
+          <Route path="/agents" element={<ProtectedRoute><AgentsPage /></ProtectedRoute>} />
           <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
+          <Route path="/tasks/history" element={<ProtectedRoute><TaskHistoryPage /></ProtectedRoute>} />
           <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
+          {import.meta.env.DEV && (
+            <Route path="/renderer-demo" element={<RendererDemoPage />} />
+          )}
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </AppShell>
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
+      <NotificationProvider>
+        <RoutedContent />
+      </NotificationProvider>
+    </Router>
   )
 }
 
@@ -56,45 +60,12 @@ const RoutedContent: React.FC = () => {
 
   return (
     <>
-      <Routes>
-        <Route path="/" element={<LandingPage />} />
-        <Route path="/*" element={
-          <AppShell>
-            <Routes>
-              <Route path="/dashboard" element={
-                <ProtectedRoute><DashboardPage /></ProtectedRoute>
-              } />
-              <Route path="/wallet" element={
-                <ProtectedRoute><WalletPage /></ProtectedRoute>
-              } />
-              <Route path="/agents" element={
-                <ProtectedRoute><AgentsPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/new" element={
-                <ProtectedRoute><NewTaskPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/history" element={
-                <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/:id" element={
-                <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
-              } />
-              {import.meta.env.DEV && (
-                <Route path="/renderer-demo" element={<RendererDemoPage />} />
-              )}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </AppShell>
-        } />
-        <Route path="*" element={<NotFoundPage />} />
-      </Routes>
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
         onSearch={search}
         recentSearches={recentSearches}
         onRecentSearchClick={(query) => {
-          // Trigger search with the recent query
           search(query)
         }}
       />
@@ -109,9 +80,7 @@ const App: React.FC = () => {
         <ThemeProvider>
           <WalletProvider>
             <ToastProvider>
-              <Router>
-                <AppContent />
-              </Router>
+              <AppContent />
             </ToastProvider>
           </WalletProvider>
         </ThemeProvider>

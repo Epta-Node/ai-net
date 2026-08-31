@@ -1,10 +1,19 @@
 import React from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
 import { Sparkles, ArrowRight } from 'lucide-react'
 import { useParticles } from '../../hooks/useParticles'
 import { useTypingAnimation } from '../../hooks/useTypingAnimation'
 import styles from './Hero.module.css'
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.1 },
+  },
+}
 
 const Hero: React.FC = () => {
   const { t } = useTranslation()
@@ -48,7 +57,7 @@ const Hero: React.FC = () => {
       >
         <div className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)] animate-pulse" />
         <span className="text-xs font-semibold text-accent-green tracking-wide">{t('landing.hero.badge')}</span>
-      </motion.div>
+      </div>
 
       {/* Headline */}
       <h1
@@ -62,7 +71,7 @@ const Hero: React.FC = () => {
             <span key="accent" className="bg-clip-text text-transparent bg-gradient-primary" />,
           ]}
         />
-      </motion.h1>
+      </h1>
 
       {/* Subtext */}
       <p
@@ -70,7 +79,7 @@ const Hero: React.FC = () => {
         style={{ animationDelay: '400ms' }}
       >
         {t('landing.hero.subtitle')}
-      </motion.p>
+      </p>
 
       {/* CTAs */}
       <div
@@ -93,7 +102,7 @@ const Hero: React.FC = () => {
           <ArrowRight size={18} className="group-hover:translate-x-0.5 transition-transform" />
         </button>
       </div>
-    </section>
+    </motion.section>
   )
 }
 

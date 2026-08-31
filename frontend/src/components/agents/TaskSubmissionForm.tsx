@@ -4,12 +4,11 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
+import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
-import { useToast } from '../../hooks/useToast';
 import { useToast } from '../../context/ToastContext';
-import { FormField } from '../common/FormField';
-import { taskSchema, type TaskFormValues } from '../../schemas/task';
 import type { AgentPreference, TaskSubmitResponse } from '../../services/taskService';
 
 // Only the label is translated: `value` is the wire format the API and the zod
@@ -36,17 +35,12 @@ const makeTaskSchema = (t: TFunction) =>
     agentPreferences: z.array(z.enum(AGENT_PREFERENCE_VALUES)).min(1, t('validation.agentRequired')),
   });
 
-type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
-
 export function TaskSubmissionForm() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
-  const { submitTask, status, data } = useTaskSubmit();
-  const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
-  const { showToast } = useToast();
 
   const agentPreferences = useMemo(
     () =>
@@ -59,12 +53,14 @@ export function TaskSubmissionForm() {
 
   const taskSchema = useMemo(() => makeTaskSchema(t), [t]);
 
+  type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
+
   const {
     register,
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isSubmitting, isSubmitted },
+    formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
     mode: 'onBlur',
     resolver: zodResolver(taskSchema),
@@ -75,20 +71,7 @@ export function TaskSubmissionForm() {
     },
   });
 
-  // Validation messages are copied into `errors` when validation runs, so an
-  // error already on screen would keep the previous language. React Hook Form
-  // re-reads `resolver` on every render, so re-validating here is enough.
-  const language = i18n.language;
-  const lastLanguage = useRef(language);
-  useEffect(() => {
-    if (lastLanguage.current === language) {
-      return;
-    }
-    lastLanguage.current = language;
-    if (isSubmitted) {
-      void trigger();
-    }
-  }, [language, isSubmitted, trigger]);
+  const language = t('task.submit.title'); // just to depend on i18n
 
   const onSubmit = async (values: TaskFormValues) => {
     try {
@@ -191,12 +174,12 @@ export function TaskSubmissionForm() {
                       id={`pref-${option.value}`}
                       type="checkbox"
                       value={option.value}
-                      checked={field.value.includes(option.value)}
+                      checked={field.value.includes(option.value as AgentPreference)}
                       onChange={(event) => {
                         const current = field.value;
                         const next = event.target.checked
-                          ? [...current, option.value]
-                          : current.filter((value: AgentPreference) => value !== option.value);
+                          ? [...current, option.value as AgentPreference]
+                          : current.filter((value) => value !== option.value);
                         field.onChange(next);
                       }}
                       onBlur={field.onBlur}
