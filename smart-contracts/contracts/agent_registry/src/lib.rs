@@ -32,6 +32,7 @@
 //! Callers inspect the returned `Vec<BatchResult>` / `Vec<VoidBatchResult>`:
 //! all-success means the batch committed; any failure means **no** writes occurred.
 
+pub mod shared_exit_codes;
 mod errors;
 mod events;
 mod upgrade;
@@ -40,6 +41,7 @@ mod upgrade;
 mod upgrade_tests;
 
 pub use upgrade::*;
+pub use shared_exit_codes::CommonExitCode;
 
 use events::{
     AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, ErrorReportedEvent,
@@ -47,6 +49,7 @@ use events::{
     OperationProposed, RegistryInitializedEvent, AnalyticsRecordedEvent,
     LeaderboardUpdatedEvent, SlaSetEvent, SlaViolationDetectedEvent, SlaBonusAwardedEvent,
 };
+pub use types::Attestation;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
     TryFromVal, Val, Vec,
@@ -2256,6 +2259,27 @@ impl AgentRegistryContract {
         };
 
         Some((sla, compliance))
+    }
+
+    /// Map a raw error code from any ai-net contract to its standardized
+    /// [`CommonExitCode`] equivalent.
+    ///
+    /// This is the single entry-point for cross-contract error interpretation.
+    /// Callers pass the raw `u32` error code returned by any contract call and
+    /// receive the standardized [`CommonExitCode`] if the code falls within the
+    /// reserved common range (1..=15), or `None` if it is contract-specific.
+    ///
+    /// ```text
+    /// // Off-chain usage:
+    /// let result = registry.error_mapper(raw_error_code);
+    /// match result {
+    ///     Some(CommonExitCode::NotFound) => { /* handle */ }
+    ///     Some(CommonExitCode::Unauthorized) => { /* handle */ }
+    ///     None => { /* contract-specific code, inspect locally */ }
+    /// }
+    /// ```
+    pub fn error_mapper(_env: Env, raw_code: u32) -> Option<CommonExitCode> {
+        shared_exit_codes::CommonExitCode::from_raw(raw_code)
     }
 }
 

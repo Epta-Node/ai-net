@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  stellar-standalone:
+    image: stellar/quickstart:testing
+    container_name: ai-net-stellar-standalone
+    ports:
+      - "8000:8000"
+      - "11626:11626"
+    command: --standalone --enable-soroban-rpc
+    environment:
+      - STELLAR_NETWORK=standalone
+      - ENABLE_SOROBAN_RPC=true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:8000/ | grep -q 'Stellar' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ai-net-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=sqlite:///app/data/ai_net.db
+      - SOROBAN_RPC_URL=http://stellar-standalone:8000/soroban/rpc
+      - STELLAR_HORIZON_URL=http://stellar-standalone:8000
+      - VENICE_API_KEY=${VENICE_API_KEY:-mock_local_key}
+      - SKIP_STELLAR_ACCOUNT_VERIFY=true
+    volumes:
+      - sqlite_data:/app/data
+    depends_on:
+      stellar-standalone:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: ai-net-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:3000
+      - VITE_STELLAR_NETWORK=standalone
+      - VITE_SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  sqlite_data:
+    driver: local

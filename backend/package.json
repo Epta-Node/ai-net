@@ -1,36 +1,5 @@
 {
   "name": "ai-net-backend",
-  "version": "0.1.0",
-  "description": "REST + WebSocket backend for ai-net — bridges frontend, agent runtime, Stellar payments, and Venice AI.",
-  "main": "dist/api/app.js",
-  "scripts": {
-    "build": "tsc",
-    "dev": "ts-node src/api/app.ts",
-    "test": "jest --runInBand --forceExit",
-    "test:watch": "jest --watch",
-    "lint": "eslint src --ext .ts"
-  },
-  "license": "MIT",
-  "dependencies": {
-    "express": "4.19.2",
-    "pino": "9.2.0",
-    "pino-http": "10.2.0",
-    "zod": "3.23.8",
-    "lru-cache": "10.4.3"
-  },
-  "devDependencies": {
-    "@types/express": "4.17.21",
-    "@types/jest": "29.5.12",
-    "@types/node": "20.14.2",
-    "@types/supertest": "6.0.2",
-    "@typescript-eslint/eslint-plugin": "7.13.0",
-    "@typescript-eslint/parser": "7.13.0",
-    "eslint": "8.57.0",
-    "jest": "29.7.0",
-    "supertest": "7.0.0",
-    "ts-jest": "29.2.2",
-    "ts-node": "10.9.2",
-    "typescript": "5.4.5"
   "private": true,
   "version": "0.1.0",
   "description": "ai-net backend — Node.js/TypeScript server",
@@ -40,7 +9,9 @@
     "dev": "ts-node src/index.ts",
     "test": "jest --testPathPattern=tests --runInBand --forceExit",
     "test:coverage": "jest --coverage --runInBand --forceExit",
-    "test:e2e": "jest --config ../tests/e2e/jest.config.js --runInBand --forceExit"
+    "test:e2e": "jest --config ../tests/e2e/jest.config.js --runInBand --forceExit",
+    "test:watch": "jest --watch",
+    "lint": "eslint src --ext .ts"
   },
   "license": "MIT",
   "dependencies": {
@@ -69,6 +40,7 @@
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/ws": "^8.18.1",
+    "eslint": "8.57.0",
     "jest": "29.7.0",
     "supertest": "^7.0.0",
     "ts-jest": "29.1.4",
