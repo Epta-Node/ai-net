@@ -75,6 +75,9 @@ jobs:
       - name: Unit tests & coverage
         run: npm run test:coverage
 
+      - name: Performance latency budgets
+        run: npm run test:performance
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest

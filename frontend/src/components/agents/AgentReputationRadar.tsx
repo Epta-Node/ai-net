@@ -2,6 +2,7 @@ import React from 'react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import type { ReputationDimensions } from '../../types/agent';
 import styles from './AgentReputationRadar.module.css';
+import { AccessibleChart } from '../common/AccessibleChart';
 
 interface AgentReputationRadarProps {
   dimensions: ReputationDimensions;

@@ -2,6 +2,7 @@ import React from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Brush } from 'recharts';
 import type { ReputationHistory } from '../../types/agent';
 import styles from './AgentReputationTrend.module.css';
+import { AccessibleChart } from '../common/AccessibleChart';
 
 interface AgentReputationTrendProps {
   history: ReputationHistory[];
