@@ -1,37 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import ReactFlow, { Background, Controls, Handle, Position, MarkerType, Node, Edge } from 'reactflow';
-import 'reactflow/dist/style.css';
+
 import { useTaskMonitor } from '../hooks/useTaskMonitor';
-import { AgentOutputPanel } from '../components/dashboard/AgentOutputPanel';
+import { TaskDetailTimeline } from '../components/dashboard/TaskDetailTimeline';
 import { PaymentTimeline } from '../components/dashboard/PaymentTimeline';
 import { Skeleton, SkeletonText } from '../components/common/Skeleton';
 import { AlertCircle, CheckCircle2, Play, RefreshCw } from 'lucide-react';
 
-const CustomNode: React.FC<{ id: string; data: { label: string; status: string } }> = ({ id, data }) => {
-  const { t } = useTranslation();
 
-  return (
-    <div id={id} className={`dag-node ${data.status} h-full flex flex-col justify-between`}>
-      <Handle type="target" position={Position.Left} style={{ background: '#64748b', width: 8, height: 8 }} />
-      <div>
-        <div className="text-[10px] uppercase font-extrabold tracking-wider opacity-60 mb-0.5">
-          {t('page.task.agentNode')}
-        </div>
-        <div className="text-sm font-bold truncate capitalize">{data.label}</div>
-      </div>
-      <div className="node-status text-[9px] font-mono font-bold uppercase tracking-widest mt-2 px-1.5 py-0.5 rounded bg-black/25 inline-block mx-auto">
-        {data.status}
-      </div>
-      <Handle type="source" position={Position.Right} style={{ background: '#64748b', width: 8, height: 8 }} />
-    </div>
-  );
-};
-
-const nodeTypes = {
-  custom: CustomNode,
-};
 
 /**
  * Context-aware skeleton that mirrors the task detail layout (header, DAG
@@ -58,12 +35,14 @@ export const TaskDetailSkeleton: React.FC = () => {
         </div>
       </div>
 
-      {/* DAG Graph Panel */}
+      {/* Timeline Panel */}
       <div className="glass-panel relative flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <Skeleton width="12rem" height="1rem" />
+        <Skeleton width="12rem" height="1.5rem" className="mb-4" />
+        <div className="space-y-4">
+          <Skeleton height="80px" />
+          <Skeleton height="80px" />
+          <Skeleton height="80px" />
         </div>
-        <Skeleton variant="rectangular" width="100%" height="280px" className="rounded-xl" />
       </div>
 
       {/* Combined Panels */}
@@ -83,100 +62,10 @@ const TaskDetailPage: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { task, loading, error, wsStatus, nodes, payments, outputs, refetch } = useTaskMonitor(id);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Check if any node is failed
   const failedNode = useMemo(() => {
     return nodes.find(n => n.status === 'failed');
-  }, [nodes]);
-
-  // Construct React Flow nodes dynamically based on node state
-  const flowNodes = useMemo<Node[]>(() => {
-    return nodes.map((node, index) => {
-      let background = 'rgba(30, 41, 59, 0.7)';
-      let borderColor = 'rgba(255, 255, 255, 0.08)';
-      let boxShadow = 'none';
-      let color = '#94a3b8';
-
-      if (node.status === 'completed') {
-        background = 'rgba(6, 78, 59, 0.8)';
-        borderColor = 'var(--success)';
-        boxShadow = '0 0 15px rgba(16, 185, 129, 0.35)';
-        color = '#a7f3d0';
-      } else if (node.status === 'running') {
-        background = 'rgba(30, 27, 75, 0.8)';
-        borderColor = 'var(--primary)';
-        boxShadow = '0 0 15px rgba(99, 102, 241, 0.45)';
-        color = '#e0e7ff';
-      } else if (node.status === 'failed') {
-        background = 'rgba(76, 5, 25, 0.8)';
-        borderColor = 'var(--danger)';
-        boxShadow = '0 0 15px rgba(239, 68, 68, 0.35)';
-        color = '#fecdd3';
-      }
-
-      const cleanLabel = node.nodeId.replace('node_', '').replace('node-', '');
-
-      return {
-        id: node.nodeId,
-        type: 'custom',
-        data: { 
-          label: cleanLabel, 
-          status: node.status 
-        },
-        position: { x: index * 240 + 60, y: 110 },
-        style: {
-          padding: '12px 16px',
-          borderRadius: '16px',
-          border: '2px solid',
-          backgroundColor: background,
-          borderColor: borderColor,
-          color: color,
-          boxShadow: boxShadow,
-          minWidth: '160px',
-          height: '92px',
-          textAlign: 'center',
-          fontWeight: 'bold',
-          transition: 'all 0.3s ease',
-          cursor: 'pointer',
-        },
-      };
-    });
-  }, [nodes]);
-
-  // Construct React Flow edges dynamically based on dependency state
-  const flowEdges = useMemo<Edge[]>(() => {
-    const edges: Edge[] = [];
-    nodes.forEach(node => {
-      if (node.dependsOn && node.dependsOn.length > 0) {
-        node.dependsOn.forEach(depId => {
-          let strokeColor = '#475569';
-          let animated = false;
-          
-          if (node.status === 'completed') {
-            strokeColor = '#10b981'; // green for completed paths
-          } else if (node.status === 'running') {
-            strokeColor = '#6366f1'; // blue animated for active paths
-            animated = true;
-          } else if (node.status === 'failed') {
-            strokeColor = '#ef4444'; // red for failed paths
-          }
-
-          edges.push({
-            id: `edge-${depId}-${node.nodeId}`,
-            source: depId,
-            target: node.nodeId,
-            animated,
-            style: { stroke: strokeColor, strokeWidth: 2.5 },
-            markerEnd: {
-              type: MarkerType.ArrowClosed,
-              color: strokeColor,
-            },
-          });
-        });
-      }
-    });
-    return edges;
   }, [nodes]);
 
   if (loading && !nodes.length) {
@@ -310,56 +199,10 @@ const TaskDetailPage: React.FC = () => {
         </div>
       </div>
 
-      {/* DAG Graph Panel */}
-      <div className="glass-panel relative flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <Play size={16} className="text-indigo-400" />
-          <h3 className="text-md font-semibold text-[var(--text-primary)]">{t('page.task.dagTitle')}</h3>
-          <span className="text-[10px] text-slate-500 ml-auto">{t('page.task.dagHint')}</span>
-        </div>
-        
-        <div 
-          id="dag-preview"
-          className="w-full bg-slate-950/40 rounded-xl border border-[var(--panel-border)] overflow-hidden relative"
-          style={{ height: '280px' }}
-        >
-          {flowNodes.length > 0 ? (
-            <ReactFlow
-              nodes={flowNodes}
-              edges={flowEdges}
-              nodeTypes={nodeTypes}
-              onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              nodesConnectable={false}
-              nodesDraggable={false}
-              zoomOnScroll={false}
-              zoomOnPinch={false}
-              zoomOnDoubleClick={false}
-              panOnDrag={true}
-              preventScrolling={true}
-              attributionPosition="bottom-left"
-            >
-              <Background color="#1e293b" gap={16} size={1} />
-              <Controls showInteractive={false} />
-            </ReactFlow>
-          ) : (
-            <div className="flex items-center justify-center h-full text-slate-500">
-              {t('page.task.dagEmpty')}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Combined Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3">
-          <AgentOutputPanel
-            outputs={outputs}
-            nodes={nodes}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-          />
+          <TaskDetailTimeline nodes={nodes} outputs={outputs} />
         </div>
         <div className="lg:col-span-2">
           <PaymentTimeline payments={payments} />
