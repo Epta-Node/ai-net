@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense, lazy } from 'react'
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
@@ -9,19 +9,30 @@ import { ThemeProvider } from './context/ThemeContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
-import AgentsPage from './pages/AgentsPage'
-import NewTaskPage from './pages/tasks/NewTaskPage'
-import TaskHistoryPage from './pages/tasks/TaskHistoryPage'
-import TaskDetailPage from './pages/TaskDetailPage'
-import RendererDemoPage from './pages/RendererDemoPage'
-import WalletPage from './pages/WalletPage'
-import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/common/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
+import { ProtectedRoute as AuthProtectedRoute } from './components/auth/ProtectedRoute'
+import { Skeleton, SkeletonCard, SkeletonTable } from './components/common/Skeleton'
 import './components/common/Toast.css'
+
+// Lazy-loaded pages
+const DashboardPage = lazy(() => import('./pages/dashboard'))
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const WalletPage = lazy(() => import('./pages/WalletPage'))
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
+const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
+const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
+const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
+
+const RouteLoadingFallback: React.FC = () => (
+  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    {Array.from({ length: 3 }).map((_, i) => (
+      <SkeletonCard key={i} style={{ height: '100px' }} />
+    ))}
+  </div>
+)
 
 /**
  * Everything that needs router context lives here, so `<Router>` (mounted by
@@ -34,56 +45,49 @@ const AppContent: React.FC = () => {
       <AppShell>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
         </Routes>
       </AppShell>
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
+      <NotificationProvider>
+        <RoutedContent />
+      </NotificationProvider>
+    </Router>
   )
 }
 
-// Lives INSIDE <Router>: useCommandPalette() calls useNavigate(), which
-// throws the "may be used only in the context of a <Router>" invariant when
-// rendered above it.
 const RoutedContent: React.FC = () => {
   const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
 
   return (
     <>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
         <Route path="/*" element={
           <AppShell>
-            <Routes>
-              <Route path="/dashboard" element={
-                <ProtectedRoute><DashboardPage /></ProtectedRoute>
-              } />
-              <Route path="/wallet" element={
-                <ProtectedRoute><WalletPage /></ProtectedRoute>
-              } />
-              <Route path="/agents" element={
-                <ProtectedRoute><AgentsPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/new" element={
-                <ProtectedRoute><NewTaskPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/history" element={
-                <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
-              } />
-              <Route path="/tasks/:id" element={
-                <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
-              } />
-              {import.meta.env.DEV && (
-                <Route path="/renderer-demo" element={<RendererDemoPage />} />
-              )}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
+            <Suspense fallback={<RouteLoadingFallback />}>
+              <Routes>
+                <Route path="/dashboard" element={
+                  <ProtectedRoute><DashboardPage /></ProtectedRoute>
+                } />
+                <Route path="/wallet" element={
+                  <ProtectedRoute><WalletPage /></ProtectedRoute>
+                } />
+                <Route path="/agents" element={
+                  <ProtectedRoute><AgentsPage /></ProtectedRoute>
+                } />
+                <Route path="/tasks/new" element={
+                  <ProtectedRoute><NewTaskPage /></ProtectedRoute>
+                } />
+                <Route path="/tasks/history" element={
+                  <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
+                } />
+                <Route path="/tasks/:id" element={
+                  <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
+                } />
+                {import.meta.env.DEV && (
+                  <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                )}
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </Suspense>
           </AppShell>
         } />
         <Route path="*" element={<NotFoundPage />} />
@@ -94,7 +98,6 @@ const RoutedContent: React.FC = () => {
         onSearch={search}
         recentSearches={recentSearches}
         onRecentSearchClick={(query) => {
-          // Trigger search with the recent query
           search(query)
         }}
       />

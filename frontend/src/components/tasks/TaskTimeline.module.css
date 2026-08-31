@@ -307,6 +307,35 @@
   box-shadow: none;
 }
 
+/* ─── Row actions (on hover) ────────────────────────────────────── */
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.actionBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.actionBtn:hover {
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--accent);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
 /* ─── Execution bar ─────────────────────────────────────────────── */
 
 .execBar {
