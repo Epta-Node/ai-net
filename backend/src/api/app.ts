@@ -57,6 +57,7 @@ import {
   type JobQueue,
 } from "../queue";
 import { createAdminQueueRouter } from "./routes/admin";
+import { metricsRouter } from "./routes/metrics";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
@@ -209,6 +210,9 @@ export function createApp(opts: AppOptions = {}): {
       return v2TasksRouter(req, res, next);
     }
   });
+
+  // ── Prometheus metrics endpoint ──────────────────────────────────────
+  app.use("/metrics", metricsRouter);
 
   // ── Admin Queue routes ─────────────────────────────────────────────────────
   app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
