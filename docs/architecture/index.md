@@ -137,6 +137,15 @@ sequenceDiagram
     FE-->>User: Display Audit Report & Verification Tx
 ```
 
+### 3.1 Payment Flows & Escrow Lifecycle Architecture
+
+For detailed sequence diagrams, contract state machine matrices, dispute filing flows, and reconciliation audit loops, see the standalone [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).
+
+* **Auction Bidding (`agent_bidding`)**: Sealed-bid commitment hashing (`SHA-256`) with composite scoring (`0.60 * Price + 0.40 * Reputation`).
+* **Micro-Payment Escrow**: Trustless token locking in Soroban contract storage with explicit release and refund safety guards.
+* **Dispute Resolution (`dispute_resolution`)**: Multi-step jury voting with automated bond slashing and IPFS evidence hashing.
+* **Off-Chain Reconciliation**: Background worker loops for Soroban RPC event polling and PostgreSQL ledger synchronization.
+
 ---
 
 ## 4. Multi-Tier Security & Testing Strategy

@@ -1,191 +1,174 @@
-# Developer Setup Guide
+# 🛠️ AI-Net Developer Onboarding & Local Setup Guide
 
-This guide is the fastest way to get a local ai-net development environment running on a fresh machine. It covers local development, Stellar testnet funding, Freighter wallet setup, Docker-backed local Stellar nodes, and CI expectations.
+Welcome to **AI-Net**! This guide takes you from a clean machine checkout to a fully running multi-agent platform and local/testnet development environment in minutes.
 
-## 1. Prerequisites
+---
 
-### macOS / Linux
+## 1. System Prerequisites
 
-- Node.js 20 LTS or newer
-- npm 10+
-- Git
-- Docker Desktop or Docker Engine with Compose
-- Optional: Stellar CLI (`stellar`), Soroban CLI (`soroban`)
+Install the following foundational toolchains before starting:
 
-### Windows
+| Tool | Recommended Version | Purpose | Installation Guide |
+|---|---|---|---|
+| **Node.js** | `v20.x LTS` (or `v22.x`) | Backend API & Next.js Frontend | [nodejs.org](https://nodejs.org/) |
+| **npm** | `v10.x+` | Package management | Included with Node.js |
+| **Rust & Cargo** | `v1.80.0+` | Soroban Smart Contracts | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| **WASM Target** | `wasm32-unknown-unknown` | Compiling Rust to WebAssembly | `rustup target add wasm32-unknown-unknown` |
+| **Stellar CLI** | `v21.x+` | Soroban contract deployments & RPC | `cargo install --locked stellar-cli --features opt` |
+| **Docker & Compose** | `v24.x+` / Compose `v2.x+` | PostgreSQL, Redis, and local node | [docker.com](https://www.docker.com/) |
 
-- Use Git Bash, WSL 2, or PowerShell with the same Node.js version
-- Enable Docker Desktop with WSL integration
-- Prefer Unix-compatible shell commands for the project scripts
-- If PowerShell is used, keep environment variables in `$env:FOO` format
+---
 
-### Required credentials
+## 2. Quick Start (All-in-One Local Setup)
 
-- A Venice AI API key: https://venice.ai
-- A Stellar testnet account or Friendbot-funded wallet
-- Freighter wallet extension for browser-based testing
-
-## 2. Clone and install
-
+### Step 1: Clone Repository
 ```bash
 git clone https://github.com/Epta-Node/ai-net.git
 cd ai-net
-npm install
-cd backend && npm install
-cd ../frontend && npm install
 ```
 
-## 3. Environment variables
-
-Create backend and frontend env files from the examples if present.
+### Step 2: Configure Environment Variables
+Copy the example environment configurations:
 
 ```bash
 cp backend/.env.example backend/.env
-cp smart-contracts/.env.example smart-contracts/.env
+cp frontend/.env.example frontend/.env.local
 ```
 
-Minimal backend values:
-
-```dotenv
+Default local `.env` values:
+```ini
+# Backend configuration (.env)
 PORT=3000
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ai_net_dev
+REDIS_URL=redis://localhost:6379
 STELLAR_NETWORK=testnet
-DATABASE_URL=sqlite://./dev.db
-VENICE_API_KEY=your_venice_key
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+VENICE_API_KEY=mock_local_key
 ```
 
-For the frontend, most local UI flows use the browser wallet and the public testnet endpoints; keep any API base URL aligned with the backend server.
-
-## 4. One-command builds
-
-From the repository root:
+### Step 3: Start Infrastructure via Docker Compose
+Start PostgreSQL 16 and Redis 7 in the background:
 
 ```bash
-npm --prefix backend run build
-npm --prefix frontend run build
+docker-compose up -d postgres redis
 ```
 
-If you want a single script to automate the build steps, add a helper command in your shell:
-
+### Step 4: Install Dependencies & Run Database Migrations
 ```bash
-npm --prefix backend run build && npm --prefix frontend run build
+# Install root, backend, and frontend packages
+npm install
+cd backend && npm install && cd ../frontend && npm install && cd ..
+
+# Run backend DB migrations
+cd backend && npm run db:migrate && cd ..
 ```
 
-## 5. Start the local backend and frontend
-
-### Backend
-
+### Step 5: Start Development Servers
 ```bash
-cd backend
-npm run dev
+# In Terminal 1 — Backend API:
+cd backend && npm run dev
+
+# In Terminal 2 — Frontend Web App:
+cd frontend && npm run dev
 ```
 
-The backend exposes the API at `http://localhost:3000` and the Swagger docs at `http://localhost:3000/docs`.
+* **Backend API**: `http://localhost:3000` (`http://localhost:3000/health`)
+* **Frontend Web App**: `http://localhost:3001` (or `http://localhost:3000`)
 
-### Frontend
+---
 
-```bash
-cd frontend
-npm run dev
-```
+## 3. Stellar Soroban Smart Contract Development
 
-The frontend is typically available at `http://localhost:5173`.
-
-## 6. Stellar testnet funding
-
-Create or import a wallet in Freighter or the Stellar laboratory, then fund it with Friendbot:
-
-```bash
-curl "https://friendbot.stellar.org?addr=YOUR_PUBLIC_KEY"
-```
-
-If you are using the Stellar CLI:
-
-```bash
-stellar keys generate --global dev-wallet
-stellar account fund --network testnet --source dev-wallet
-```
-
-This gives the account enough XLM for small test transactions.
-
-## 7. Freighter wallet setup
-
-1. Install the Freighter extension.
-2. Create or import a Stellar account.
-3. Switch the network to Testnet.
-4. Open the wallet and copy the public key.
-5. Use that public key in the backend request headers or in the local wallet flow.
-6. For browser-only flows, keep the frontend connected to the `testnet` network and make sure the wallet is unlocked.
-
-## 8. Local Stellar node with Docker Compose
-
-From the repository root, use the local Docker stack when you need an isolated blockchain environment:
-
-```bash
-cd docs
-# use the project-provided docker-compose or service scripts if present
-```
-
-If your local setup includes a compose file, start it with:
-
-```bash
-docker compose up -d
-```
-
-The local node should expose Horizon and RPC endpoints for the project to point at in local development. Update your environment variables so the backend and smart-contract tooling target the local node instead of public testnet endpoints during local debugging.
-
-## 9. Contract workflow
-
-From the `smart-contracts` directory:
+### 3.1 Build Smart Contracts
+Compile all smart contracts to optimized WebAssembly (`.wasm`):
 
 ```bash
 cd smart-contracts
-npm install
-./scripts/deploy.sh --network testnet
+cargo build --target wasm32-unknown-unknown --release
 ```
 
-For CI or reproducible builds, prefer the same shell commands used in the project automation rather than ad hoc manual deployment steps.
-
-## 10. Running the e2e suite
-
-A fresh contributor machine should be able to run the project verification flow with:
+### 3.2 Run Smart Contract Tests
+Execute the Rust unit and contract invariant test suite:
 
 ```bash
+cargo test
+```
+
+### 3.3 Deploy to Stellar Testnet
+
+1. **Generate a Developer Keypair**:
+   ```bash
+   stellar keys generate alice --network testnet
+   ```
+
+2. **Fund Keypair via Friendbot Faucet**:
+   ```bash
+   stellar keys fund alice --network testnet
+   # Or using curl:
+   curl "https://friendbot.stellar.org?addr=$(stellar keys address alice)"
+   ```
+
+3. **Deploy Agent Registry & Escrow Contracts**:
+   ```bash
+   # Deploy Agent Registry
+   stellar contract deploy \
+     --wasm target/wasm32-unknown-unknown/release/agent_registry.wasm \
+     --source alice \
+     --network testnet
+   ```
+
+---
+
+## 4. Wallet Setup (Freighter Browser Extension)
+
+To test the frontend with on-chain payments:
+
+1. Install the **[Freighter Wallet Extension](https://www.freighter.app/)** for Chrome / Firefox / Brave.
+2. In Freighter Settings, toggle the network to **Testnet**.
+3. Copy your public key (`G...`) and fund it using Friendbot:
+   ```bash
+   curl "https://friendbot.stellar.org?addr=<YOUR_FREIGHTER_PUBLIC_KEY>"
+   ```
+4. Connect Freighter to the frontend at `http://localhost:3001`.
+
+---
+
+## 5. Running the Automated Test Suite
+
+AI-Net uses a multi-tier testing pipeline:
+
+```bash
+# 1. Run Backend Unit & Integration Tests:
 cd backend && npm test
+
+# 2. Run Frontend Unit Tests:
 cd frontend && npm test
+
+# 3. Run Smart Contract Tests:
+cd smart-contracts && cargo test
+
+# 4. Run End-to-End Pipeline Tests:
+cd backend && npm run test:e2e
 ```
 
-If the repo is configured for end-to-end verification, run the repo-local suite:
+---
 
-```bash
-npm run test:e2e
-```
+## 6. Operating System Quirks & Troubleshooting
 
-## 11. CI notes
+### 🐧 Linux (Ubuntu / Debian / Arch / Fedora)
+* **Docker permissions**: Ensure your user is in the `docker` group (`sudo usermod -aG docker $USER && newgrp docker`).
+* **File Watcher Limits**: If `npm run dev` fails with `ENOSPC`, increase inotify watchers:
+  ```bash
+  echo fs.inotify.max_user_watches=524288 | sudo tee -a /etc/sysctl.conf && sudo sysctl -p
+  ```
 
-- Use Node.js 20 LTS in CI runners.
-- Install dependencies before running build/test jobs.
-- Export `STELLAR_NETWORK=testnet` and any Venice API credentials in the environment.
-- Keep Freighter-specific browser tests behind a flag when a real wallet is required.
-- Prefer deterministic `npm ci` on CI for lockfile-driven installs.
+### 🍏 macOS (Apple Silicon M1/M2/M3)
+* **Rust WASM target**: Install Xcode command line tools (`xcode-select --install`).
+* **Docker Colima / OrbStack**: Ensure port forwarding is enabled for `5432` and `6379`.
 
-## 12. Troubleshooting
-
-### Docker is not available
-
-Use WSL 2 or install Docker Desktop and restart the shell before re-running the backend and smart-contract commands.
-
-### Wallet connection fails
-
-- Confirm the wallet is on Testnet.
-- Ensure the public key is funded via Friendbot.
-- Check the extension permissions and refresh the page.
-
-### Backend cannot reach Horizon or Venice
-
-- Confirm the network variables are set correctly.
-- Test with a direct `curl` to the configured Horizon endpoint.
-- Verify that the Venice key is valid and not expired.
-
-### Windows shell quirks
-
-Use the same commands in a Unix-like shell for backend and contract scripts; some `.sh` tooling is easier to run under Git Bash or WSL.
+### 🪟 Windows (WSL2 Required)
+* **Always run inside WSL2 (Ubuntu)**: Avoid running Node/Rust in native Windows CMD/PowerShell to prevent path and symlink issues.
+* **Git Line Endings**: Configure autocrlf to prevent newline mismatches in bash scripts:
+  ```bash
+  git config --global core.autocrlf input
+  ```

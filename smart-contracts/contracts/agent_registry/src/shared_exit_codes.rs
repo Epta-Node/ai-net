@@ -30,14 +30,19 @@
 //! | 14   | RateLimited         | Operation rejected due to rate limiting                 |
 //! | 15   | ContractNotLinked   | Cross-contract call target is not configured            |
 
-use soroban_sdk::contracterror;
+use soroban_sdk::contracttype;
 
 /// Standardized common exit codes shared across all ai-net contracts.
 ///
 /// Contracts should map their local error variants to these codes when
 /// propagating errors cross-contract. Off-chain callers can match on
 /// `CommonExitCode` without knowing which contract produced the error.
-#[contracterror]
+// `contracttype`, not `contracterror`: `error_mapper` returns this enum as a
+// *value*. A `contracterror` type crossing the host boundary as a return value
+// is escalated to a contract error, so every lookup panicked with
+// `Error(Contract, #N)` instead of yielding the code. Nothing returns this via
+// `Err(..)`; it is a lookup result, and the attribute now says so.
+#[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum CommonExitCode {
@@ -146,7 +151,7 @@ mod tests {
         ];
         for code in &codes {
             let raw = *code as u32;
-            assert!(raw >= 1 && raw <= 15);
+            assert!((1..=15).contains(&raw));
             let recovered = CommonExitCode::from_raw(raw).unwrap();
             assert_eq!(recovered as u32, raw);
         }

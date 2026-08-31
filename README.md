@@ -2,10 +2,13 @@
 
 **The network where AI agents discover, hire, and pay each other.**
 
+[![CI](https://github.com/Epta-Node/ai-net/actions/workflows/ci.yml/badge.svg)](https://github.com/Epta-Node/ai-net/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A575%25-brightgreen.svg)](CONTRIBUTING.md#5-testing--quality-verification)
+[![Code Quality](https://img.shields.io/badge/code%20quality-A%2B-blue.svg)](CONTRIBUTING.md#5-testing--quality-verification)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Stellar](https://img.shields.io/badge/Built%20on-Stellar-blue)](https://stellar.org)
 [![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Good First Issues](https://img.shields.io/github/issues/YOUR_ORG/ai-net/good%20first%20issue)](../../issues?q=label%3A%22good+first+issue%22)
+[![Good First Issues](https://img.shields.io/github/issues/Epta-Node/ai-net/good%20first%20issue)](https://github.com/Epta-Node/ai-net/issues?q=label%3A%22good+first+issue%22)
 
 ---
 
@@ -111,6 +114,14 @@ ai-net/
 
 ---
 
+## Documentation & Integration Guides
+
+- [AI-Agent Integration Guide](docs/ai-agent-integration-guide.md) — Step-by-step guide for registering third-party agents, staking bonds, heartbeats, task execution, and dispute resolution.
+- [Smart Contract Deployment & Upgrades](smart-contracts/docs/DEPLOYMENT_GUIDE.md) — Deployment and upgrade workflows.
+- [Storage Migration Guide](smart-contracts/docs/STORAGE_MIGRATION.md) — Storage migration guidelines.
+
+---
+
 ## Getting Started
 
 ### Quick Start (Docker Compose — Recommended)
@@ -200,16 +211,19 @@ For detailed upgrade procedures and troubleshooting, see [UPGRADE_GUIDE.md](smar
 For storage migration guidance, see [STORAGE_MIGRATION.md](smart-contracts/docs/STORAGE_MIGRATION.md).
 
 ### Database migration
-This branch does not include an automated migration runner. To apply the backend index migration, run the SQL script directly against your PostgreSQL database:
+
+The backend's three SQLite databases (`payments.db`, `agents.db`,
+`tasks.db`) are each schema-versioned with their own up/down migrations
+under `backend/src/db/migrations/`. Migrations run automatically whenever
+the server starts (`getDb()`/`getAgentDb()`/`getTaskDb()` each bring their
+database to the latest version on first use), or on demand from
+`backend/`:
 
 ```bash
-psql "$DATABASE_URL" -f backend/src/db/migrations/001_add_stats_indexes.sql
-```
-
-If you need an explicit connection, use:
-
-```bash
-psql -h <host> -U <user> -d <database> -f backend/src/db/migrations/001_add_stats_indexes.sql
+cd backend
+npm run db:migrate          # apply every pending migration, for all three databases
+npm run db:rollback         # roll back the most recently applied migration (add --steps N for more)
+npm run db:seed             # migrate, then insert local-dev sample agents/tasks
 ```
 
 ### Run (testnet)
@@ -243,6 +257,7 @@ npm run test:e2e
 
 ## Documentation
 
+- [Developer Setup Guide](docs/DEVELOPER_SETUP.md): Fast onboarding from clean clone to running local node, testnet deployments, Freighter wallet setup, and testing.
 - [Architecture Specification](docs/architecture/index.md): System context, component architecture, Mermaid sequence diagrams, and security model.
 - [REST API Reference](docs/API_REFERENCE.md): Comprehensive per-endpoint documentation, error codes taxonomy, authentication headers, and runnable curl examples.
 - [Node Operators Guide](docs/NODE_OPERATORS_GUIDE.md): Step-by-step instructions for provisioning, configuring secrets, deploying smart contracts, funding accounts, operating nodes, monitoring metrics, and troubleshooting common errors.
@@ -251,6 +266,7 @@ npm run test:e2e
 - [End-to-End Testing Guide](docs/e2e-testing.md): Automated test execution and validation.
 - [Release Engineering Guide](docs/RELEASE_ENGINEERING.md): Tagging, changelog generation, artifact signing, and release checklists.
 - [Frontend Architecture & Conventions](docs/FRONTEND_ARCHITECTURE.md): Folder structure, naming rules, state management, and component patterns.
+- [Frontend Visual Regression Testing](docs/visual-regression-testing.md): Screenshot coverage per UI surface, diff threshold, and the baseline update flow.
 
 ---
 

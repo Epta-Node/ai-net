@@ -13,5 +13,6 @@ export class RateLimitError extends AppError {
     correlationId?: string,
   ) {
     super(message, 429, "RATE_LIMITED", details, correlationId);
+    this.name = "RateLimitError";
   }
 }
