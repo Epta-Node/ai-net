@@ -34,6 +34,7 @@ describe('WalletWizard', () => {
     
     vi.spyOn(WalletBalanceHook, 'useWalletBalance').mockReturnValue({
       balance: '0',
+      balances: [],
       loading: false,
       error: null,
     })

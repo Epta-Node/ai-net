@@ -587,6 +587,15 @@ export class MetricsService {
     this.webSocketProbe = probe;
   }
 
+  /**
+   * Current WebSocket reachability, without a full dashboard collection.
+   * Used by GET /health/ready. See {@link checkWebSocket} for the "no probe
+   * registered" -> `unknown` semantics.
+   */
+  getWebSocketStatus(): DependencyStatus {
+    return checkWebSocket(this.webSocketProbe);
+  }
+
   /** Begin observing GC pauses. Safe to call more than once. */
   startGcObserver(): void {
     if (this.gcObserver) return;

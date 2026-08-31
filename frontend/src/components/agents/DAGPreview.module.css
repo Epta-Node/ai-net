@@ -1,9 +1,9 @@
 .container {
   width: 100%;
   min-height: 240px;
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   overflow: hidden;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--text-primary);
 }
 
 @media (min-width: 768px) {
