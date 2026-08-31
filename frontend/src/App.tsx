@@ -11,18 +11,28 @@ import { RouteProgressProvider } from './context/RouteProgressContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
-import AgentsPage from './pages/AgentsPage'
-import NewTaskPage from './pages/tasks/NewTaskPage'
-import TaskHistoryPage from './pages/tasks/TaskHistoryPage'
-import TaskDetailPage from './pages/TaskDetailPage'
-import RendererDemoPage from './pages/RendererDemoPage'
-import WalletPage from './pages/WalletPage'
-import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
 import './components/common/Toast.css'
+
+// Lazy-loaded pages
+const DashboardPage = lazy(() => import('./pages/dashboard'))
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const WalletPage = lazy(() => import('./pages/WalletPage'))
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
+const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
+const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
+const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
+
+const RouteLoadingFallback: React.FC = () => (
+  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    {Array.from({ length: 3 }).map((_, i) => (
+      <SkeletonCard key={i} style={{ height: '100px' }} />
+    ))}
+  </div>
+)
 
 /**
  * Everything below the router.

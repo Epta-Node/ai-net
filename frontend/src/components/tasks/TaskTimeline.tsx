@@ -9,6 +9,9 @@ import {
   ChevronRight,
   ExternalLink,
   AlertCircle,
+  Copy,
+  Download,
+  Play,
 } from 'lucide-react';
 import type { TaskResponse } from '../../types/api';
 import {
@@ -147,6 +150,7 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
 }) => {
   const navigate = useNavigate();
   const [errorExpanded, setErrorExpanded] = useState(false);
+  const [showActions, setShowActions] = useState(false);
 
   const taskId = task.taskId || task.id || '';
   const meta = getStatusMeta(task.status);
@@ -171,12 +175,36 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
     navigate(`/tasks/${taskId}`);
   };
 
+  const handleResume = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate('/tasks/new', { state: { previousTask: task } });
+  };
+
+  const handleDuplicate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate('/tasks/new', { state: { duplicateFrom: task } });
+  };
+
+  const handleExport = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const json = JSON.stringify(task, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `task-${taskId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div
       className={`${styles.entry} ${isSelected ? styles.entrySelected : ''} ${
         hasFailed ? styles.entryFailed : ''
       }`}
       aria-selected={isSelected}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
     >
       {/* Timeline connector */}
       <div className={styles.connectorArea}>
@@ -245,6 +273,39 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
             >
               <ExternalLink size={13} />
             </button>
+
+            {/* Row actions (visible on hover) */}
+            {showActions && (
+              <div className={styles.rowActions}>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleResume}
+                  title="Resume task"
+                  aria-label="Resume task"
+                >
+                  <Play size={13} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleDuplicate}
+                  title="Duplicate task"
+                  aria-label="Duplicate task"
+                >
+                  <Copy size={13} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleExport}
+                  title="Export as JSON"
+                  aria-label="Export task as JSON"
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

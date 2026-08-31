@@ -274,3 +274,106 @@
   color: var(--text-secondary);
   max-width: 240px;
 }
+
+/* Filters */
+.notification-panel-filters {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-subtle, #1f2630);
+  background: rgba(22, 27, 36, 0.3);
+  overflow-x: auto;
+}
+
+.filter-btn {
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary, #8a93a3);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.filter-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #f5f7fa);
+}
+
+.filter-btn.active {
+  background: rgba(56, 189, 248, 0.15);
+  border-color: rgba(56, 189, 248, 0.3);
+  color: var(--accent-cyan, #38bdf8);
+}
+
+/* Grouped Notifications */
+.notification-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.notification-group {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.group-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: none;
+  color: var(--text-secondary, #8a93a3);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s ease;
+  border-radius: 8px;
+}
+
+.group-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #f5f7fa);
+}
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-count {
+  font-size: 0.75rem;
+  opacity: 0.6;
+}
+
+.group-mark-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--accent-cyan, #38bdf8);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.group-mark-read:hover {
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.group-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 0 6px 0;
+}
