@@ -10,6 +10,7 @@
  *   WebSocket) and read domain counters out of SQLite.
  * • Serve the assembled snapshot from a short-lived cache so that a scraping
  *   dashboard cannot turn `/health/dashboard` into a load generator.
+ * • Export Prometheus metrics and track agent quality and reputation telemetry.
  *
  * The heavy lifting lives in exported pure functions (`calculateRequestMetrics`,
  * `summarizePayments`, …) so that every metric calculation is unit-testable
