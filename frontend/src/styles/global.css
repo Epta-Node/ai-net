@@ -1,6 +1,7 @@
 @import './tokens.css';
 @import './animations.css';
 @import './micro-interactions.css';
+@import './report.css';
 
 @tailwind base;
 @tailwind components;
