@@ -697,6 +697,60 @@ impl AgentBiddingContract {
         Ok(())
     }
 
+    /// Allow a losing bidder to claim their bid bond refund after a winner is selected.
+    ///
+    /// This path intentionally excludes the winner because the winning bid proceeds to
+    /// escrow award. It lets unsuccessful bidders recover independently if `award_contract`
+    /// is delayed by the creator or an off-chain coordinator.
+    pub fn claim_bid_refund(env: Env, task_id: Symbol, bidder: Address) -> Result<(), Error> {
+        bidder.require_auth();
+
+        let auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Auction(task_id.clone()))
+            .ok_or(Error::NotFound)?;
+
+        if auction.phase != AuctionPhase::Reveal {
+            return Err(Error::NotInRevealPhase);
+        }
+
+        let winner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Winner(task_id.clone()))
+            .ok_or(Error::WinnerNotDetermined)?;
+        if winner == bidder {
+            return Err(Error::WinnerCannotClaimRefund);
+        }
+
+        let bid_key = DataKey::Bid(task_id.clone(), bidder.clone());
+        let mut bid: SealedBid = env
+            .storage()
+            .persistent()
+            .get(&bid_key)
+            .ok_or(Error::NotFound)?;
+        if bid.refunded {
+            return Err(Error::RefundAlreadyClaimed);
+        }
+
+        bid.refunded = true;
+        let bond = bid.bond;
+        env.storage().persistent().set(&bid_key, &bid);
+        extend_ttl_for_key(&env, &bid_key);
+
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("ref_claim")),
+            BondRefundClaimedEvent {
+                task_id,
+                bidder,
+                bond,
+            },
+        );
+
+        Ok(())
+    }
+
     // ── Award Contract ─────────────────────────────────────────────────────
 
     /// Award the contract to the winner determined by `reveal_bids`.
@@ -2046,6 +2100,71 @@ mod test {
             "a bidder who never revealed must forfeit their bond"
         );
         assert!(!ghost_bid.refunded);
+    }
+
+    #[test]
+    fn unsuccessful_bidder_can_claim_refund_after_reveal() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_ref");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let winner = Address::generate(&env);
+        let loser = Address::generate(&env);
+        let terms = String::from_str(&env, "Terms");
+        let winner_salt = BytesN::<32>::from_array(&env, &[51u8; 32]);
+        let loser_salt = BytesN::<32>::from_array(&env, &[52u8; 32]);
+        let winner_price = 2_000_000i128;
+        let loser_price = 5_000_000i128;
+        let winner_commitment = test_commitment(&env, &winner, winner_price, &terms, &winner_salt);
+        let loser_commitment = test_commitment(&env, &loser, loser_price, &terms, &loser_salt);
+
+        client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
+        client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &winner, &winner_price, &terms, &winner_salt);
+        client.reveal_bid(&task_id, &loser, &loser_price, &terms, &loser_salt);
+        client.reveal_bids(&task_id);
+
+        client.claim_bid_refund(&task_id, &loser);
+
+        let loser_bid = client.get_bid(&task_id, &loser).unwrap();
+        assert!(loser_bid.refunded);
+        let events = env.events().all();
+        assert_eq!(
+            events.last().unwrap().1,
+            (symbol_short!("bidding"), symbol_short!("ref_claim")).into_val(&env)
+        );
+    }
+
+    #[test]
+    fn winner_cannot_claim_unsuccessful_bidder_refund() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "win_ref");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let winner = Address::generate(&env);
+        let loser = Address::generate(&env);
+        let terms = String::from_str(&env, "Terms");
+        let winner_salt = BytesN::<32>::from_array(&env, &[53u8; 32]);
+        let loser_salt = BytesN::<32>::from_array(&env, &[54u8; 32]);
+        let winner_commitment = test_commitment(&env, &winner, 2_000_000, &terms, &winner_salt);
+        let loser_commitment = test_commitment(&env, &loser, 5_000_000, &terms, &loser_salt);
+
+        client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
+        client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &winner, &2_000_000, &terms, &winner_salt);
+        client.reveal_bid(&task_id, &loser, &5_000_000, &terms, &loser_salt);
+        client.reveal_bids(&task_id);
+
+        let err = client.try_claim_bid_refund(&task_id, &winner);
+        assert_eq!(err.err(), Some(Ok(Error::WinnerCannotClaimRefund)));
     }
 
     #[test]
