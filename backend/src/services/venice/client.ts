@@ -69,6 +69,8 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   constructor(config: VeniceClientConfig) {
+    this.apiKey = config.apiKey;
+    this.baseUrl = config.baseUrl ?? getConfig().VENICE_BASE_URL;
     this.breaker = config.circuitBreaker ?? new CircuitBreaker();
 
     const env = this.resolveConfig() as any;

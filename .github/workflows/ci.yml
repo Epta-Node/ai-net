@@ -66,11 +66,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests & coverage
+        run: npm run test:coverage
+
+      - name: Performance latency budgets
+        run: npm run test:performance
 
   frontend:
     name: frontend
@@ -93,11 +99,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests (vitest)
-        run: npm test
+      - name: Unit tests & coverage (vitest)
+        run: npm run test:coverage
 
   contracts:
     name: smart-contracts
