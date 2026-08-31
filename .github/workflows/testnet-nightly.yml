@@ -1,0 +1,186 @@
+name: Testnet Contract Farm (nightly)
+
+# Nightly job proving the contracts against the LIVE Stellar testnet.
+# Local environments hide network-specific failures (RPC sdk mismatch, fee
+# schedule, cross-contract auth). This job deploys all core contracts, runs the
+# registry → bidding → task cross-contract flows, records gas from the network,
+# publishes a pass/fail + gas-delta report artifact, and pages maintainers on
+# breakage.
+
+on:
+  schedule:
+    # Daily 03:17 UTC — off-peak to reduce load on the shared testnet RPC.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "smart-contracts/contracts/**"
+      - "smart-contracts/scripts/**"
+      - "smart-contracts/tests/testnet/**"
+      - ".github/workflows/testnet-nightly.yml"
+
+concurrency:
+  group: testnet-farm-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write # to open/comment on breakage issues
+
+jobs:
+  testnet-farm:
+    name: testnet-contract-farm
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # ── Rust resource limits (mirror ci.yml contracts job) ─────────────
+      CARGO_BUILD_JOBS: "1"
+      RUSTFLAGS: "-C codegen-units=1"
+      CARGO_INCREMENTAL: "0"
+    defaults:
+      run:
+        working-directory: smart-contracts
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: smart-contracts/package-lock.json
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: wasm32v1-none
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts
+
+      - name: Set up Stellar CLI
+        uses: stellar/stellar-cli@v27.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Guard: only run when secrets are configured ────────────────────
+      - name: Verify farm secrets present
+        id: secrets
+        run: |
+          if [ -n "$STELLAR_SECRET_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_ENV"
+          else
+            echo "configured=false" >> "$GITHUB_ENV"
+          fi
+        env:
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_FARM_SECRET }}
+
+      # ── Deploy + run the cross-contract farm against live testnet ───────
+      - name: Run contract test farm (deploy + cross-contract flows + gas)
+        if: env.configured == 'true'
+        run: npm run testnet:farm:run
+        env:
+          RUN_TESTNET_FARM: "true"
+          STELLAR_SECRET_KEY: ${{ secrets.STELLAR_TESTNET_FARM_SECRET }}
+          STELLAR_NETWORK: testnet
+          STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+          STELLAR_HORIZON_URL: https://horizon-testnet.stellar.org
+          FARM_OUTPUT_DIR: testnet-farm-output
+          SOROBAN_CLI_BIN: stellar
+
+      - name: Skip notice
+        if: env.configured != 'true'
+        run: echo "Testnet farm secret not configured — skipping nightly farm."
+
+      # ── Publish the report artifact ──────────────────────────────────────
+      - name: Upload farm report artifact
+        if: env.configured == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-farm-report
+          path: |
+            smart-contracts/testnet-farm-output/testnet-farm-report.json
+            smart-contracts/testnet-farm-output/testnet-farm-report.md
+            smart-contracts/testnet-farm-output/deployed-contracts.json
+            smart-contracts/testnet-farm-output/gas-measurements.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      # ── Page maintainers on breakage ────────────────────────────────────
+      - name: Open / update breakage issue on failure
+        if: failure() && env.configured == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let body = "## ⚠️ Testnet contract farm FAILED\n\n";
+            body += "The nightly cross-contract test farm (registry → bidding → task) " +
+                    "failed against the live Stellar testnet. These failures are "
+                    "network-specific and are not caught by local unit tests.\n\n";
+            if (fs.existsSync('smart-contracts/testnet-farm-output/testnet-farm-report.json')) {
+              const report = JSON.parse(
+                fs.readFileSync('smart-contracts/testnet-farm-output/testnet-farm-report.json', 'utf8'));
+              body += `- **Commit:** \`${report.commit}\`\n`;
+              body += `- **Status:** \`${report.status}\` (exit ${report.exit_code})\n`;
+              body += `- **Network:** ${report.network}\n`;
+            }
+            body += "\nPlease inspect the `testnet-farm-report` artifact on this workflow run " +
+                    "for gas deltas and the failing assertion.\n";
+            body += "\n_This issue is auto-generated by the nightly testnet farm._";
+
+            const label = 'testnet-farm';
+            const q = `repo:${context.repo.owner}/${context.repo.repo} ` +
+                      `in:title type:issue is:open "${context.workflow}-breakage"`;
+            const matches = await github.rest.search.issuesAndPullRequests({ q });
+            const existing = matches.data.items.find(
+              (i) => i.title === `${context.workflow} breakage`);
+            const title = `${context.workflow} breakage`;
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+                state: 'open',
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label],
+              });
+            }
+
+      - name: Comment on issue when recovered
+        if: success() && env.configured == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const q = `repo:${context.repo.owner}/${context.repo.repo} ` +
+                      `in:title type:issue is:open "${context.workflow} breakage"`;
+            const matches = await github.rest.search.issuesAndPullRequests({ q });
+            const existing = matches.data.items.find(
+              (i) => i.title === `${context.workflow} breakage`);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: "✅ The nightly testnet farm has recovered (all cross-contract " +
+                      "flows passed).",
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                state: 'closed',
+              });
+            }
