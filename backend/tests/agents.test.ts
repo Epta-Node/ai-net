@@ -1,10 +1,11 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import type { AddressInfo } from "net";
 import request from "supertest";
 import { createAgentsRouter } from "../src/api/routes/agents";
 import { createTasksRouter } from "../src/api/routes/tasks";
 import { AgentRecord, createAgentDb } from "../src/db/agents";
 import Database from "better-sqlite3";
+import { AppError } from "../src/errors";
 
 const codingAgent: AgentRecord = {
   id: "coding-1",
@@ -16,6 +17,20 @@ const codingAgent: AgentRecord = {
   lastSeenAt: new Date().toISOString(),
   status: "online"
 };
+
+function testErrorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
+  if (err instanceof AppError) {
+    const body: Record<string, unknown> = {
+      error: { code: err.code, message: err.message },
+    };
+    if (err.details !== undefined) {
+      (body.error as Record<string, unknown>).details = err.details;
+    }
+    res.status(err.statusCode).json(body);
+    return;
+  }
+  res.status(500).json({ error: { code: "INTERNAL_ERROR", message: err.message } });
+}
 
 function createTestApp(initialAgents: AgentRecord[] = [], healthTimeoutMs = 500) {
   const rawDb = new Database(":memory:");
@@ -38,6 +53,7 @@ function createTestApp(initialAgents: AgentRecord[] = [], healthTimeoutMs = 500)
   const app = express();
   app.use(express.json());
   app.use("/api/agents", createAgentsRouter({ db, healthTimeoutMs }));
+  app.use(testErrorHandler);
   return app;
 }
 
@@ -77,7 +93,7 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).get("/api/agents/missing");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: "Agent not found" });
+    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
   });
 
   it("returns healthy status and latency for a reachable agent endpoint", async () => {
@@ -124,12 +140,13 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).get("/api/agents/missing/health");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: "Agent not found" });
+    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
   });
 
-  it("returns 200 with the updated lastSeenAt on heartbeat", async () => {
+  it("returns 200 and updates lastSeenAt on heartbeat", async () => {
     const app = createTestApp([codingAgent]);
-    const before = new Date();
+    // SQLite's datetime('now') has second precision, so floor the baseline.
+    const before = new Date(Math.floor(Date.now() / 1000) * 1000);
 
     const response = await request(app).post("/api/agents/coding-1/heartbeat");
 
@@ -145,13 +162,12 @@ describe("Agents API route", () => {
     const response = await request(createTestApp()).post("/api/agents/missing/heartbeat");
 
     expect(response.status).toBe(404);
-    expect(response.body).toEqual({ error: "Agent not found" });
+    expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
   });
 });
 
 describe("Stellar public key validation", () => {
-  // Must satisfy /^G[A-Z2-7]{55}$/ — 56 characters total.
-  const VALID_KEY = "GDPDTI4X27QVEKWCZ3XOOB2G5ZVBCQFF3LTUXPITCVYQQIHDK2DW6CG2";
+  const VALID_KEY = "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ";
 
   beforeAll(() => {
     process.env.SKIP_STELLAR_ACCOUNT_VERIFY = "true";
@@ -234,23 +250,25 @@ describe("Stellar public key validation", () => {
       return app;
     }
 
-    // walletPublicKey is optional by design (header or body, falling back to
-    // "anonymous") — see createTaskSchema in src/api/routes/tasks.ts.
-    it("accepts an invalid walletpublickey header as anonymous", async () => {
+    it("creates the task with an unvalidated walletpublickey header value", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .set("walletpublickey", "INVALID-KEY-123")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
       expect(response.status).toBe(201);
+      expect(response.body.status).toBe("queued");
+      expect(response.body.taskId).toBeDefined();
     });
 
-    it("accepts a missing walletpublickey header as anonymous", async () => {
+    it("creates the task with an anonymous wallet when the header is missing", async () => {
       const response = await request(createTaskTestApp())
         .post("/api/tasks")
         .send({ prompt: "Do something", maxBudgetXLM: 1 });
 
       expect(response.status).toBe(201);
+      expect(response.body.status).toBe("queued");
+      expect(response.body.taskId).toBeDefined();
     });
   });
 });

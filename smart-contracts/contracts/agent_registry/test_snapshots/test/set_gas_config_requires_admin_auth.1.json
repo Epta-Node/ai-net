@@ -20,6 +20,22 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "cleanup_error"
+                      },
+                      "val": {
+                        "u64": 8000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cleanup_error_marginal"
+                      },
+                      "val": {
+                        "u64": 4000
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "deregister_with_bond"
                       },
                       "val": {
@@ -140,6 +156,22 @@
                         },
                         "val": {
                           "map": [
+                            {
+                              "key": {
+                                "symbol": "cleanup_error"
+                              },
+                              "val": {
+                                "u64": 8000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "cleanup_error_marginal"
+                              },
+                              "val": {
+                                "u64": 4000
+                              }
+                            },
                             {
                               "key": {
                                 "symbol": "deregister_with_bond"

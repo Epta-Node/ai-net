@@ -32,10 +32,10 @@
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { scValToNative } from "@stellar/stellar-base";
 import { getAgentDb, createAgentDb } from "../db/agents";
+import { createLogger } from "../utils/logger";
+import { getConfig } from "../config";
 
-const RPC_URL =
-  process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
-const CONTRACT_ID = process.env.REGISTRY_CONTRACT_ID;
+const logger = createLogger({ module: "registry-sync" });
 
 let syncInterval: NodeJS.Timeout | null = null;
 let lastLedger = 0;
@@ -117,23 +117,23 @@ function handleEvent(
     // ── Contract lifecycle ────────────────────────────────────────────────
     case TOPICS.INITIALIZED: {
       const data = payload as { admin?: string };
-      console.log(`[sync] Registry initialized. Genesis admin: ${data.admin ?? "unknown"}`);
+      logger.info({ admin: data.admin }, "registry initialized, genesis admin set");
       break;
     }
 
     case TOPICS.ADMIN_CHANGED: {
       const data = payload as { old_admin?: string; new_admin?: string };
-      console.log(`[sync] Admin rotated: ${data.old_admin} → ${data.new_admin}`);
+      logger.info({ oldAdmin: data.old_admin, newAdmin: data.new_admin }, "admin rotated");
       break;
     }
 
     case TOPICS.PAUSED: {
-      console.log("[sync] Registry paused on-chain.");
+      logger.info("registry paused on-chain");
       break;
     }
 
     case TOPICS.UNPAUSED: {
-      console.log("[sync] Registry unpaused on-chain.");
+      logger.info("registry unpaused on-chain");
       break;
     }
 
@@ -154,9 +154,9 @@ function handleEvent(
         status: "online",
       });
 
-      console.log(
-        `[sync] Agent registered: id=${data.agent_id} ` +
-        `capability=${data.capability} owner=${data.owner}`
+      logger.info(
+        { agentId: data.agent_id, capability: data.capability, owner: data.owner },
+        "agent registered"
       );
       break;
     }
@@ -167,9 +167,9 @@ function handleEvent(
       // Remove the agent from the local DB using the existing delete method.
       db.delete(data.agent_id);
 
-      console.log(
-        `[sync] Agent deregistered: id=${data.agent_id} ` +
-        `capability=${data.capability} owner=${data.owner}`
+      logger.info(
+        { agentId: data.agent_id, capability: data.capability, owner: data.owner },
+        "agent deregistered"
       );
       break;
     }
@@ -186,7 +186,7 @@ function handleEvent(
       if (existing) {
         db.upsert({ ...existing, status: "offline" });
       }
-      console.log(`[sync] Agent frozen (marked offline): ${agentId}`);
+      logger.info({ agentId }, "agent frozen (marked offline)");
       break;
     }
 
@@ -201,7 +201,7 @@ function handleEvent(
       if (existing) {
         db.upsert({ ...existing, status: "online", lastSeenAt: new Date().toISOString() });
       }
-      console.log(`[sync] Agent unfrozen (marked online): ${agentId}`);
+      logger.info({ agentId }, "agent unfrozen (marked online)");
       break;
     }
 
@@ -221,9 +221,9 @@ function handleEvent(
           pricingXLM: Number(priceStroops) / 10_000_000,
         });
       }
-      console.log(
-        `[sync] Price updated: agent=${agentId} ` +
-        `price_xlm=${(Number(priceStroops) / 10_000_000).toFixed(7)}`
+      logger.info(
+        { agentId, priceXLM: (Number(priceStroops) / 10_000_000).toFixed(7) },
+        "price updated"
       );
       break;
     }
@@ -233,9 +233,16 @@ function handleEvent(
     // These can be wired up once an errors table is added to the schema.
     case TOPICS.ERR_REPORTED: {
       const data = payload as ErrorReportedPayload;
-      console.log(
-        `[sync] Error reported: id=${data.error_id} reporter=${data.reporter} ` +
-        `(no DB schema for errors — logging only)`
+      db.upsertError?.({
+        id: data.error_id,
+        reporter: data.reporter,
+        resolved: false,
+        resolution: null,
+        reportedAt: new Date().toISOString(),
+      });
+      logger.warn(
+        { errorId: data.error_id, reporter: data.reporter },
+        "error reported and persisted to error registry"
       );
       break;
     }
@@ -243,9 +250,10 @@ function handleEvent(
     case TOPICS.ERR_RESOLVED: {
       const data = payload as ErrorResolvedPayload;
       const label = resolutionLabel(data.resolution_code);
-      console.log(
-        `[sync] Error resolved: id=${data.error_id} resolution=${label} ` +
-        `(no DB schema for errors — logging only)`
+      db.resolveError?.(data.error_id, label);
+      logger.info(
+        { errorId: data.error_id, resolution: label },
+        "error resolved and persisted to error registry"
       );
       break;
     }
@@ -253,7 +261,7 @@ function handleEvent(
     default: {
       // Unknown action — log and skip to stay forward-compatible with future
       // contract versions that may emit additional event types.
-      console.debug(`[sync] Unhandled event action: "${action}"`);
+      logger.debug({ action }, "unhandled event action");
       break;
     }
   }
@@ -268,12 +276,15 @@ function handleEvent(
  * last known ledger and dispatches them to `handleEvent`.
  */
 export function startAgentSync(): void {
-  if (!CONTRACT_ID) {
-    console.warn("[sync] No REGISTRY_CONTRACT_ID provided, skipping agent sync");
+  const config = getConfig();
+  const contractId = config.REGISTRY_CONTRACT_ID;
+
+  if (!contractId) {
+    logger.warn("no REGISTRY_CONTRACT_ID provided, skipping agent sync");
     return;
   }
 
-  const server = new Server(RPC_URL);
+  const server = new Server(config.SOROBAN_RPC_URL);
 
   const poll = async () => {
     try {
@@ -283,7 +294,7 @@ export function startAgentSync(): void {
           const latest = await server.getLatestLedger();
           lastLedger = Math.max(latest.sequence - 100, 0);
         } catch (e) {
-          console.warn("[sync] Could not fetch latest ledger, will retry", e);
+          logger.warn({ err: e }, "could not fetch latest ledger, will retry");
           return;
         }
       }
@@ -301,7 +312,7 @@ export function startAgentSync(): void {
         filters: [
           {
             type: "contract",
-            contractIds: [CONTRACT_ID],
+            contractIds: [contractId],
             topics: [],
           },
         ],
@@ -328,11 +339,11 @@ export function startAgentSync(): void {
 
           handleEvent(action, payload, db);
         } catch (e) {
-          console.error("[sync] Error parsing event", e);
+          logger.error({ err: e }, "error parsing event");
         }
       }
     } catch (error) {
-      console.error("[sync] Poll failed:", error);
+      logger.error({ err: error }, "poll failed");
     }
   };
 

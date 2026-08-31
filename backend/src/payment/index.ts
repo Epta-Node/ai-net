@@ -1,6 +1,8 @@
 import { Keypair } from '@stellar/stellar-sdk';
 import type { PaymentReleaseFn } from '../coordinator/coordinator';
 import { getTask } from '../coordinator/taskStore';
+import { getConfig } from '../config';
+import { createLogger } from '../utils/logger';
 
 /**
  * Matches the signature of smart-contracts/src/payment/payment.ts releasePayment.
@@ -26,19 +28,16 @@ export type StellarReleasePaymentFn = (
 export function createPaymentReleaseFn(
   stellarRelease?: StellarReleasePaymentFn
 ): PaymentReleaseFn {
-  const secret = process.env.STELLAR_COORDINATOR_SECRET;
+  const logger = createLogger({ module: 'payment-release' });
+  const secret = getConfig().STELLAR_COORDINATOR_SECRET;
 
   if (!secret) {
-    console.warn(
-      '[payment] STELLAR_COORDINATOR_SECRET not set — payment release skipped'
-    );
+    logger.warn('STELLAR_COORDINATOR_SECRET not set; payment release skipped');
     return async () => 'noop';
   }
 
   if (!stellarRelease) {
-    console.warn(
-      '[payment] Stellar release function unavailable — payment release skipped'
-    );
+    logger.warn('Stellar release function unavailable; payment release skipped');
     return async () => 'noop';
   }
 

@@ -4,7 +4,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { z } from 'zod';
+import { AlertCircle } from 'lucide-react';
 import type { TFunction } from 'i18next';
+import { AlertCircle } from 'lucide-react';
 import { DAGPreview } from './DAGPreview';
 import { useTaskSubmit } from '../../hooks/useTaskSubmit';
 import { useToast } from '../../context/ToastContext';
@@ -39,9 +42,9 @@ type TaskFormValues = z.infer<ReturnType<typeof makeTaskSchema>>;
 export function TaskSubmissionForm() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [preview, setPreview] = useState<TaskSubmitResponse['dagPreview'] | null>(null);
   const { submitTask, status, error, data } = useTaskSubmit();
-  const { showToast } = useToast();
 
   const agentPreferences = useMemo(
     () =>
@@ -59,8 +62,9 @@ export function TaskSubmissionForm() {
     handleSubmit,
     control,
     trigger,
-    formState: { errors, isSubmitting, isSubmitted },
+    formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
+    mode: 'onBlur',
     resolver: zodResolver(taskSchema),
     defaultValues: {
       prompt: '',
@@ -88,6 +92,7 @@ export function TaskSubmissionForm() {
     try {
       const result = await submitTask(values);
       setPreview(result.dagPreview);
+      showToast('Task submitted successfully!', 'success');
 
       window.setTimeout(() => {
         navigate(`/tasks/${result.taskId}`);
@@ -123,11 +128,11 @@ export function TaskSubmissionForm() {
             {...register('prompt')}
             rows={6}
             maxLength={1000}
-            style={{ width: '100%', padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
+            style={{ width: '100%', padding: 'var(--space-3)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.prompt)}
             aria-describedby="prompt-error"
           />
-          <p id="prompt-error" style={{ color: '#b91c1c', marginTop: 8 }}>
+          <p id="prompt-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
             {errors.prompt?.message}
           </p>
         </div>
@@ -142,11 +147,11 @@ export function TaskSubmissionForm() {
             step="0.1"
             min="0.1"
             {...register('maxBudgetXLM', { valueAsNumber: true })}
-            style={{ width: 180, padding: 12, borderRadius: 10, border: '1px solid var(--border-color)' }}
+            style={{ width: 180, padding: 'var(--space-3)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
-          <p id="budget-error" style={{ color: '#b91c1c', marginTop: 8 }}>
+          <p id="budget-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
             {budgetHelperText}
           </p>
         </div>
@@ -174,8 +179,8 @@ export function TaskSubmissionForm() {
                       display: 'flex',
                       alignItems: 'center',
                       gap: 10,
-                      padding: 12,
-                      borderRadius: 10,
+                      padding: 'var(--space-3)',
+                      borderRadius: 'var(--radius-xl)',
                       border: '1px solid var(--border-color)',
                       cursor: 'pointer',
                     }}
@@ -201,9 +206,14 @@ export function TaskSubmissionForm() {
               </div>
             )}
           />
-          <p id="agentPreferences-error" style={{ color: '#b91c1c', marginTop: 8 }}>
-            {errors.agentPreferences?.message}
-          </p>
+          <div aria-live="polite" id="agentPreferences-error">
+            {errors.agentPreferences && (
+              <p style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--status-danger-strong)', marginTop: 8, fontSize: '0.875rem' }}>
+                <AlertCircle size={16} />
+                {errors.agentPreferences.message}
+              </p>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 32 }}>
@@ -213,17 +223,18 @@ export function TaskSubmissionForm() {
             disabled={isLoading}
             style={{
               padding: '12px 20px',
-              borderRadius: 10,
+              borderRadius: 'var(--radius-xl)',
               border: 'none',
-              background: '#2563eb',
+              background: isLoading ? '#9ca3af' : '#2563eb',
               color: '#ffffff',
               cursor: isLoading ? 'not-allowed' : 'pointer',
+              transition: 'background 0.2s',
             }}
           >
             {isLoading ? t('task.submit.submitting') : t('task.submit.submit')}
           </button>
           {status === 'success' && (
-            <span style={{ color: '#16a34a' }}>{t('task.submit.success')}</span>
+            <span style={{ color: 'var(--success)' }}>{t('task.submit.success')}</span>
           )}
         </div>
       </form>
@@ -231,10 +242,10 @@ export function TaskSubmissionForm() {
       <section style={{ marginBottom: 24 }}>
         <h2>{t('task.submit.dagTitle')}</h2>
         {isLoading && (
-          <div aria-busy="true" style={{ padding: 24, background: 'var(--bg-secondary)', borderRadius: 12 }}>
-            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 8, marginBottom: 12 }} />
-            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 8 }} />
+          <div aria-busy="true" style={{ padding: 'var(--space-6)', background: 'var(--bg-secondary)', borderRadius: 'var(--radius-xl)' }}>
+            <div style={{ height: 18, width: '45%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 'var(--space-3)' }} />
+            <div style={{ height: 18, width: '70%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)', marginBottom: 'var(--space-3)' }} />
+            <div style={{ height: 18, width: '55%', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-lg)' }} />
           </div>
         )}
         {!isLoading && <DAGPreview dagPreview={previewData ?? undefined} />}
@@ -246,9 +257,10 @@ export function TaskSubmissionForm() {
           style={{
             marginTop: 24,
             padding: 16,
-            borderRadius: 12,
-            background: '#f8d7da',
-            color: '#842029',
+            borderRadius: 'var(--radius-xl)',
+            background: 'var(--bg-secondary)',
+            color: 'var(--danger)',
+            border: '1px solid var(--danger)',
           }}
         >
           {error}

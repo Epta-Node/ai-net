@@ -1,7 +1,8 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
+import { ToastContainer } from '../components/common/Toast';
 
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
 export interface ToastAction {
   label: string;
@@ -12,33 +13,72 @@ export interface Toast {
   id: string;
   message: string;
   type: ToastType;
-  duration?: number;
-  action?: ToastAction;
+  duration: number;
 }
 
 interface ToastContextValue {
-  toasts: Toast[];
-  showToast: (message: string, type?: ToastType, action?: ToastAction, duration?: number) => void;
-  dismissToast: (id: string) => void;
+  toasts: Toast[]
+  showToast: (message: string, type?: ToastType, duration?: number) => void
+  dismissToast: (id: string) => void
 }
 
-export const ToastContext = createContext<ToastContextValue | null>(null);
+const defaultDurations: Record<ToastType, number> = {
+  success: 5000,
+  info: 5000,
+  warning: 10000,
+  error: 10000,
+}
+
+export const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const { activeToasts, showToast, dismissToast } = useToastManager();
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((toast) => toast.id !== id))
+  }, [])
+
+  const showToast = useCallback(
+    (message: string, type: ToastType = 'info', duration = defaultDurations[type]) => {
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2);
+
+      setToasts((prev) => [...prev, { id, message, type, duration }])
+
+      if (duration > 0) {
+        window.setTimeout(() => dismissToast(id), duration)
+      }
+    },
+    [dismissToast],
+  )
 
   useEffect(() => {
-    const handleGlobalToast = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      const { message, type, action, duration } = customEvent.detail;
-      showToast(message, type, action, duration);
+    const handleExternalToast = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        message?: string;
+        type?: ToastType;
+        duration?: number;
+      }>;
+      const message = customEvent.detail?.message;
+      if (!message) return;
+
+      const type = customEvent.detail?.type ?? 'info';
+      showToast(message, type, customEvent.detail?.duration ?? defaultDurations[type]);
     };
-    window.addEventListener('global_toast', handleGlobalToast);
-    return () => window.removeEventListener('global_toast', handleGlobalToast);
-  }, [showToast]);
+
+    window.addEventListener('app-toast', handleExternalToast as EventListener)
+    return () => window.removeEventListener('app-toast', handleExternalToast as EventListener)
+  }, [showToast])
+
+  const value = useMemo<ToastContextValue>(
+    () => ({ toasts, showToast, dismissToast }),
+    [toasts, showToast, dismissToast],
+  );
 
   return (
-    <ToastContext.Provider value={{ toasts: activeToasts, showToast, dismissToast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer toasts={activeToasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
@@ -49,49 +89,4 @@ export function useToast() {
   const context = useContext(ToastContext);
   if (!context) throw new Error('useToast must be used within ToastProvider');
   return context;
-}
-
-function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
-  const { t } = useTranslation();
-
-  if (toasts.length === 0) return null;
-  return (
-    <div className="toast-container" role="alert" aria-live="polite">
-      {toasts.map(toast => (
-        <div key={toast.id} className={`toast toast-${toast.type}`}>
-          <span>{toast.message}</span>
-          {toast.action && (
-            <button onClick={() => {
-              toast.action?.onClick();
-              onDismiss(toast.id);
-            }}>
-              {toast.action.label}
-            </button>
-          )}
-          <button onClick={() => onDismiss(toast.id)} aria-label={t('a11y.dismiss')}>&times;</button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function useToastManager() {
-  const [activeToasts, setActiveToasts] = useState<Toast[]>([]);
-  const dismissToast = useCallback((id: string) => {
-    setActiveToasts(prev => prev.filter(toast => toast.id !== id));
-  }, []);
-  const showToast = useCallback((message: string, type: ToastType = 'info', action?: ToastAction, duration: number = 3000) => {
-    const id = Date.now().toString();
-    const newToast: Toast = { id, message, type, action, duration };
-    setActiveToasts(prev => {
-      if (prev.length >= 3) {
-        return [...prev.slice(1), newToast];
-      }
-      return [...prev, newToast];
-    });
-    if (duration > 0) {
-      setTimeout(() => dismissToast(id), duration);
-    }
-  }, [dismissToast]);
-  return { activeToasts, showToast, dismissToast };
 }

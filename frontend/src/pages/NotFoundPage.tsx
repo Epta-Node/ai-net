@@ -47,8 +47,8 @@ export const NotFoundPage: React.FC = () => {
                 <Link to="/dashboard" style={{
                 padding: '0.6rem 1.25rem',
                 borderRadius: '6px',
-                backgroundColor: 'var(--accent-color, var(--primary-color, #3b82f6))',
-                color: 'var(--text-primary, #ffffff)',
+                backgroundColor: 'var(--accent-info)',
+                color: 'var(--text-primary, var(--text-inverse))',
                 fontWeight: '500',
                 fontSize: '0.9rem',
                 textDecoration: 'none',
@@ -60,7 +60,7 @@ export const NotFoundPage: React.FC = () => {
             <Link to="/" style={{
                 padding: '0.6rem 1.25rem',
                 borderRadius: '6px',
-                border: '1px solid var(--border-color, #374151)',
+                border: '1px solid var(--border-color)',
                 backgroundColor: 'transparent',
                 color: 'var(--text-primary)',
                 fontWeight: '500',

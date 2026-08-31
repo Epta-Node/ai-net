@@ -1,0 +1,315 @@
+import { Router, Request, Response } from "express";
+import { z } from "zod";
+import { nanoid } from "nanoid";
+import { getTaskDb, createTaskDb } from "../../../db/tasks";
+import { decompose } from "../../../coordinator";
+import type { Task } from "../../../types/task";
+import { executeDAG, type DispatchFn, type PaymentReleaseFn } from "../../../coordinator/coordinator";
+import { createTask, getTask } from "../../../coordinator/taskStore";
+import { createLogger } from "../../../utils/logger";
+import { validate } from "../../middleware/validate";
+import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { getConfig } from "../../../config";
+
+import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
+
+// ── Validation config ────────────────────────────────────────────────────────
+const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
+
+// ── Schemas ──────────────────────────────────────────────────────────────────
+
+// Both schemas now live in src/schemas/task.ts so the three task routers, and
+// the frontend, share one definition. Re-exported to keep existing importers
+// of `createTaskSchema` working.
+export { createTaskSchema } from "../../../schemas/task";
+import { createTaskSchema, listTasksQuerySchema } from "../../../schemas/task";
+
+const TaskCursorListSchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]).optional(),
+  sort: z.enum(["createdAt:desc", "createdAt:asc"]).default("createdAt:desc"),
+  q: z.string().optional(),
+});
+
+/**
+ * Creates a v2 tasks router with enhanced response format.
+ * V2 includes additional metadata fields and improved response structure.
+ */
+export function createV2TasksRouter(
+  dispatch: DispatchFn,
+  releasePayment: PaymentReleaseFn,
+  queue?: JobQueue
+): Router {
+  const tasksRouter = Router();
+  const jobQueue = queue ?? getGlobalJobQueue();
+
+  // POST /api/tasks — v2 format with enhanced response
+  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+    const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
+    const walletPublicKey: string =
+      (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
+      (req.headers["walletpublickey"] as string | undefined) ??
+      "anonymous";
+
+    const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
+    if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
+      const db = createTaskDb(getTaskDb());
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
+      if (total >= dailyTaskLimit) {
+        res.status(429).json({
+          error: {
+            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
+            code: "DAILY_LIMIT_EXCEEDED",
+          },
+          _meta: {
+            version: "2.0",
+            timestamp: new Date().toISOString(),
+          },
+        });
+        return;
+      }
+    }
+
+    const taskId = `task_${nanoid(12)}`;
+    const dag = decompose(taskId, prompt);
+    const now = new Date().toISOString();
+    const task: Task = {
+      id: taskId,
+      prompt,
+      walletPublicKey,
+      status: "queued",
+      dag,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    createTask(task);
+
+    jobQueue.enqueue({
+      taskId: task.id,
+      type: "execute_task",
+      priority: (priority as JobPriority) ?? "normal",
+      payload: { taskId: task.id },
+    });
+
+    // v2 enhanced response format with additional metadata
+    res.status(201).json({
+      data: {
+        taskId: task.id,
+        dagPreview: dag,
+        status: "queued",
+      },
+      _meta: {
+        version: "2.0",
+        timestamp: now,
+        requestId: res.locals.requestId || null,
+        apiVersion: res.locals.apiVersion || "2.0",
+      },
+      _links: {
+        self: `/api/tasks/${task.id}`,
+        stream: `/api/tasks/${task.id}/stream`,
+      },
+    });
+  });
+
+  // GET /api/tasks — v2 format: cursor pagination when ?cursor or ?limit present, offset otherwise
+  tasksRouter.get("/", (req: Request, res: Response): void => {
+    const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
+    const now = new Date().toISOString();
+
+    // Use cursor mode when an explicit cursor or limit (without page) is provided
+    const useCursor = "cursor" in req.query || ("limit" in req.query && !("page" in req.query));
+
+    if (useCursor) {
+      const parse = TaskCursorListSchema.safeParse(req.query);
+      if (!parse.success) {
+        res.status(400).json({
+          error: parse.error.flatten(),
+          _meta: { version: "2.0", timestamp: now },
+        });
+        return;
+      }
+
+      const { cursor, limit, status, sort, q } = parse.data;
+      const db = createTaskDb(getTaskDb());
+      const page = db.listCursor(walletPublicKey, {
+        cursor,
+        limit,
+        status,
+        sort,
+        q: q && q.length > 0 ? q : undefined,
+      });
+
+      res.json({
+        data: {
+          items: page.items,
+          pagination: {
+            limit,
+            nextCursor: page.nextCursor ?? null,
+            hasNextPage: !!page.nextCursor,
+          },
+        },
+        _meta: {
+          version: "2.0",
+          timestamp: now,
+          requestId: res.locals.requestId || null,
+          apiVersion: res.locals.apiVersion || "2.0",
+        },
+        _links: {
+          self: `/api/tasks`,
+          ...(page.nextCursor
+            ? { next: `/api/tasks?cursor=${encodeURIComponent(page.nextCursor)}&limit=${limit}` }
+            : {}),
+        },
+      });
+      return;
+    }
+
+    // Offset fallback (backward-compatible)
+    const parse = TaskListSchema.safeParse(req.query);
+    if (!parse.success) {
+      res.status(400).json({
+        error: parse.error.flatten(),
+        _meta: { version: "2.0", timestamp: now },
+      });
+      return;
+    }
+
+    const { page, pageSize, status, sort, q } = parse.data;
+    const db = createTaskDb(getTaskDb());
+    const { tasks, total } = db.list(walletPublicKey, page, pageSize, {
+      status,
+      sort,
+      q: q && q.length > 0 ? q : undefined,
+    });
+
+    res.json({
+      data: {
+        tasks,
+        pagination: {
+          page,
+          pageSize,
+          total,
+          totalPages: Math.ceil(total / pageSize),
+          hasNextPage: page * pageSize < total,
+          hasPreviousPage: page > 1,
+        },
+      },
+      _meta: {
+        version: "2.0",
+        timestamp: now,
+        requestId: res.locals.requestId || null,
+        apiVersion: res.locals.apiVersion || "2.0",
+      },
+    });
+  });
+
+  // GET /api/tasks/:id — v2 format with enhanced response
+  tasksRouter.get("/:id", (req: Request, res: Response): void => {
+    const db = createTaskDb(getTaskDb());
+    const task = db.findById(req.params.id);
+    if (!task) {
+      res.status(404).json({
+        error: "Task not found",
+        _meta: {
+          version: "2.0",
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+    const requesterKey = req.headers["walletpublickey"] as string;
+    if (!requesterKey || requesterKey !== task.walletPublicKey) {
+      res.status(403).json({
+        error: "Access denied",
+        _meta: {
+          version: "2.0",
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    // v2 enhanced response format with links and metadata
+    res.json({
+      data: task,
+      _meta: {
+        version: "2.0",
+        timestamp: now,
+        requestId: res.locals.requestId || null,
+        apiVersion: res.locals.apiVersion || "2.0",
+      },
+      _links: {
+        self: `/api/tasks/${task.id}`,
+        stream: `/api/tasks/${task.id}/stream`,
+        cancel: `/api/tasks/${task.id}`,
+      },
+    });
+  });
+
+  // DELETE /api/tasks/:id — v2 format with enhanced response
+  tasksRouter.delete("/:id", (req: Request, res: Response): void => {
+    const db = createTaskDb(getTaskDb());
+    const task = db.findById(req.params.id);
+    if (!task) {
+      res.status(404).json({
+        error: "Task not found",
+        _meta: {
+          version: "2.0",
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    const requesterKey = req.headers["walletpublickey"] as string;
+    if (!requesterKey || requesterKey !== task.walletPublicKey) {
+      res.status(403).json({
+        error: "Not authorized to cancel this task",
+        _meta: {
+          version: "2.0",
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    if (task.status !== "queued") {
+      res.status(409).json({
+        error: `Cannot cancel task in '${task.status}' status`,
+        _meta: {
+          version: "2.0",
+          timestamp: new Date().toISOString(),
+        },
+      });
+      return;
+    }
+
+    db.updateStatus(req.params.id, "cancelled");
+
+    const now = new Date().toISOString();
+
+    // v2 enhanced response format
+    res.json({
+      data: {
+        taskId: req.params.id,
+        status: "cancelled",
+      },
+      _meta: {
+        version: "2.0",
+        timestamp: now,
+        requestId: res.locals.requestId || null,
+        apiVersion: res.locals.apiVersion || "2.0",
+      },
+      _links: {
+        self: `/api/tasks/${req.params.id}`,
+      },
+    });
+  });
+
+  return tasksRouter;
+}

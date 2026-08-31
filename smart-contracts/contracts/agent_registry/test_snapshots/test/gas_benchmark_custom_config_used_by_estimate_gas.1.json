@@ -19,6 +19,30 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "cleanup_error"
+                      },
+                      "val": {
+                        "u64": 20000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "cleanup_error_marginal"
+                      },
+                      "val": {
+                        "u64": 10000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "deregister_with_bond"
+                      },
+                      "val": {
+                        "u64": 80000
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "register_agent"
                       },
                       "val": {
@@ -47,6 +71,14 @@
                       },
                       "val": {
                         "u64": 20000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "slash_bond"
+                      },
+                      "val": {
+                        "u64": 60000
                       }
                     },
                     {
@@ -129,6 +161,30 @@
                           "map": [
                             {
                               "key": {
+                                "symbol": "cleanup_error"
+                              },
+                              "val": {
+                                "u64": 20000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "cleanup_error_marginal"
+                              },
+                              "val": {
+                                "u64": 10000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "deregister_with_bond"
+                              },
+                              "val": {
+                                "u64": 80000
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "register_agent"
                               },
                               "val": {
@@ -157,6 +213,14 @@
                               },
                               "val": {
                                 "u64": 20000
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "slash_bond"
+                              },
+                              "val": {
+                                "u64": 60000
                               }
                             },
                             {

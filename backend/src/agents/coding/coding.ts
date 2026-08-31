@@ -14,7 +14,12 @@ export class UnsafeCodeRequestError extends Error {
   }
 }
 
-const CodingOutputSchema = z.object({
+/**
+ * Canonical output shape of the coding agent. Exported for the quality
+ * scorer, which validates agent output against this schema in its format
+ * dimension.
+ */
+export const CodingOutputSchema = z.object({
   language: z.string().min(1),
   code: z.string().min(1),
   explanation: z.string().min(1),

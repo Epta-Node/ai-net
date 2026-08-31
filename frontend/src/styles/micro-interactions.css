@@ -1,0 +1,62 @@
+.hover-lift {
+  transition-property: transform, box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.hover-glow {
+  transition-property: box-shadow;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
+}
+
+.hover-glow:hover {
+  box-shadow: 0 0 15px var(--accent-cyan);
+}
+
+.hover-scale {
+  transition-property: transform;
+  transition-duration: 300ms;
+  transition-timing-function: ease;
+}
+
+.hover-scale:hover {
+  transform: scale(1.05);
+}
+
+.focus-ring {
+  outline: none;
+}
+
+.focus-ring:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.transition-fast {
+  transition-duration: 150ms;
+}
+
+.transition-normal {
+  transition-duration: 300ms;
+}
+
+.transition-slow {
+  transition-duration: 500ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hover-lift,
+  .hover-glow,
+  .hover-scale,
+  .transition-fast,
+  .transition-normal,
+  .transition-slow {
+    transition-duration: 0.01ms !important;
+  }
+}

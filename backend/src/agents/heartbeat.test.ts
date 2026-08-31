@@ -186,4 +186,37 @@ describe("HeartbeatClient — send error handling", () => {
     );
     client.stop();
   });
+
+  it("tracks consecutive failures and calls onFailureThresholdReached callback when threshold reached", async () => {
+    jest
+      .spyOn(global, "fetch" as any)
+      .mockResolvedValue({ ok: false, status: 503 } as Response);
+
+    const onThreshold = jest.fn();
+    const client = new HeartbeatClient({
+      apiBaseUrl: "http://localhost:3001",
+      agentId: "failing-agent",
+      intervalMs: 1_000,
+      failureThreshold: 3,
+      onFailureThresholdReached: onThreshold,
+    });
+
+    client.start();
+    await Promise.resolve(); // 1st failure
+    expect(client.getConsecutiveFailures()).toBe(1);
+    expect(onThreshold).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1_000);
+    await Promise.resolve(); // 2nd failure
+    expect(client.getConsecutiveFailures()).toBe(2);
+    expect(onThreshold).not.toHaveBeenCalled();
+
+    jest.advanceTimersByTime(1_000);
+    await Promise.resolve(); // 3rd failure
+    expect(client.getConsecutiveFailures()).toBe(3);
+    expect(onThreshold).toHaveBeenCalledWith(3);
+
+    client.stop();
+  });
 });
+

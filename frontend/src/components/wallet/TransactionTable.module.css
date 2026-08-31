@@ -1,7 +1,7 @@
 .container {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 24px;
   margin-bottom: 24px;
 }
@@ -9,13 +9,159 @@
 .heading {
   font-size: 1.125rem;
   font-weight: 600;
-  margin: 0 0 16px;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.toolbarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.searchField {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 8px 10px 8px 32px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  box-sizing: border-box;
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 3px var(--accent-surface);
+}
+
+.dateFilters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dateLabel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.dateInput {
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  margin-top: 4px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pageSizeLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.pageSizeSelect {
+  padding: 4px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+}
+
+.pageControls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pageButton {
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.pageButton:hover:not(:disabled) {
+  background: var(--bg-surface-alt);
+}
+
+.pageButton:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pageIndicator {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.runningTotal {
+  font-size: 0.8125rem;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
 .table {
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -94,20 +240,20 @@
 }
 
 .incoming {
-  color: #16a34a;
+  color: var(--status-success-strong);
 }
 
 .outgoing {
-  color: #dc2626;
+  color: var(--status-danger);
 }
 
 .amountIn {
-  color: #16a34a;
+  color: var(--status-success-strong);
   font-weight: 600;
 }
 
 .amountOut {
-  color: #dc2626;
+  color: var(--status-danger);
   font-weight: 600;
 }
 
@@ -126,14 +272,14 @@
 }
 
 .txLink {
-  color: #6366f1;
+  color: var(--accent-secondary);
   transition: color 0.15s, opacity 0.15s;
   display: inline-flex;
   align-items: center;
 }
 
 .txLink:hover {
-  color: #4f46e5;
+  color: var(--accent-secondary-hover);
   opacity: 0.8;
 }
 
@@ -182,7 +328,7 @@
 .skeletonIcon {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   background: var(--bg-surface-alt);
   animation: pulse 1.5s infinite;
 }
@@ -191,7 +337,7 @@
   flex: 1;
   height: 12px;
   background: var(--bg-surface-alt);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   animation: pulse 1.5s infinite;
 }
 

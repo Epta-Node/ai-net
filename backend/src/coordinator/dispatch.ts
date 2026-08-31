@@ -119,3 +119,26 @@ export async function httpDispatch(
 
   throw lastError;
 }
+
+/**
+ * Select a fallback agent from registered candidates matching the same capability,
+ * excluding the primary/failed agent, sorted by highest reputation (and lowest cost as tie-breaker).
+ */
+export function selectFallbackAgent(
+  agents: AgentRegistration[],
+  failedAgentId?: string
+): AgentRegistration | undefined {
+  const candidates = agents.filter(
+    (a) => a.status === 'online' && a.id !== failedAgentId
+  );
+  if (candidates.length === 0) return undefined;
+  return [...candidates].sort((a, b) => {
+    const repA = a.reputation ?? 0;
+    const repB = b.reputation ?? 0;
+    if (repB !== repA) {
+      return repB - repA;
+    }
+    return a.cost - b.cost;
+  })[0];
+}
+

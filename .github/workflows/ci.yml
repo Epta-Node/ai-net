@@ -41,11 +41,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests
-        run: npm test
+      - name: Unit tests & coverage
+        run: npm run test:coverage
 
   frontend:
     name: frontend
@@ -68,11 +71,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint check
+        run: npm run lint
+
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests (vitest)
-        run: npm test
+      - name: Unit tests & coverage (vitest)
+        run: npm run test:coverage
 
   contracts:
     name: smart-contracts
@@ -107,10 +113,12 @@ jobs:
           cache: npm
           cache-dependency-path: smart-contracts/package-lock.json
 
-      - name: Install Rust toolchain
+      - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          # The Soroban contracts build for this target (see "Cargo build"
+          # below); installing the target is what makes `cargo build` work.
           targets: wasm32v1-none
 
       - name: Cache Rust build

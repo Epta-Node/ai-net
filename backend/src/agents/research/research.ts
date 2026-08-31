@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { VeniceClient, type VeniceClientLike } from '../../services/venice/index.js';
 import type { AgentTask, AgentResult, AgentError, Source } from './types';
+import { getConfig } from '../../config/index.js';
 
 const SourceSchema = z.object({
   url: z.string().url(),
@@ -15,6 +16,20 @@ const VeniceResearchResponseSchema = z.object({
 });
 
 type VeniceResearchResponse = z.infer<typeof VeniceResearchResponseSchema>;
+
+/**
+ * Canonical output shape returned by `execute()` and consumed by the
+ * Coordinator. Exported for the quality scorer, which validates agent output
+ * against this schema in its format dimension.
+ */
+export const ResearchOutputSchema = z.object({
+  taskId: z.string(),
+  nodeId: z.string(),
+  summary: z.string().min(1),
+  keyFindings: z.array(z.string().min(1)).min(1),
+  sources: z.array(SourceSchema),
+  confidence: z.number().min(0).max(1),
+});
 
 export function deriveConfidence(sourceCount: number): number {
   if (sourceCount === 0) return 0.3;
@@ -61,14 +76,7 @@ export class ResearchAgent {
     if (config.veniceClient) {
       this.venice = config.veniceClient;
     } else {
-      const apiKey = process.env['VENICE_API_KEY'];
-      if (!apiKey) {
-        console.warn(
-          '[ResearchAgent] WARNING: VENICE_API_KEY is not set. ' +
-            'Venice calls will fail. Set this env var before running in production.'
-        );
-      }
-      this.venice = new VeniceClient({ apiKey: apiKey ?? '' });
+      this.venice = new VeniceClient({ apiKey: getConfig().VENICE_API_KEY });
     }
     this.apiBaseUrl = config.apiBaseUrl ?? 'http://127.0.0.1:3001';
     this.agentId = config.agentId ?? 'research-agent-1';
@@ -117,7 +125,7 @@ export class ResearchAgent {
       capabilities: ['research'],
       pricingXLM: 0.5,
       endpoint: `${this.apiBaseUrl}/agents/research`,
-      stellarPublicKey: process.env['STELLAR_PUBLIC_KEY'] ?? '',
+      stellarPublicKey: getConfig().STELLAR_PUBLIC_KEY ?? '',
     });
 
     try {
