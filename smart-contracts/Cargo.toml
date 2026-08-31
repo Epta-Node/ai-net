@@ -5,6 +5,7 @@ members = [
     "contracts/error-registry",
     "contracts/agent_bidding",
     "contracts/upgrade-manager",
+    "contracts/task_store",
 ]
 resolver = "2"
 

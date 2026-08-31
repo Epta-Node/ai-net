@@ -11,10 +11,10 @@ use soroban_sdk::{
 
 use upgrade_manager::{
     Upgradeable, UpgradeableError, MigrationMetadata, VersionCompatibility, UpgradeStatus,
-    version_utils, events::*,
+    version_utils, upgradeable::events::*,
 };
 
-use crate::{AgentRegistryContract, DataKey, Error, require_admin, events};
+use crate::{AgentRegistryContract, AgentRegistryContractClient, AgentRegistryContractArgs, DataKey, Error, require_admin};
 
 /// Current version of the agent registry contract
 const CURRENT_VERSION: &str = "1.0.0";
@@ -135,8 +135,8 @@ impl Upgradeable for AgentRegistryContract {
         // Execute data migrations based on version change
         let migration_steps = version_utils::generate_migration_steps(
             &env,
-            &old_version.to_string(),
-            &new_version.to_string(),
+            &old_version,
+            &new_version,
         )?;
 
         for step in migration_steps.iter() {
@@ -195,8 +195,8 @@ impl Upgradeable for AgentRegistryContract {
 
         let migration_steps = version_utils::generate_migration_steps(
             &env,
-            &current_version.to_string(),
-            &target_version.to_string(),
+            &current_version,
+            &target_version,
         )?;
 
         let mut validation_steps = Vec::new(&env);
@@ -301,12 +301,12 @@ impl AgentRegistryContract {
         let pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
             env.clone(),
             new_version.clone(),
-            new_wasm_hash,
+            new_wasm_hash.clone(),
         )
         .map_err(|_| Error::NotAdmin)?; // Convert upgrade error to contract error
 
         // Update the contract WASM
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
 
         // Execute post-upgrade hook
         let old_version = String::from_str(&env, CURRENT_VERSION);
@@ -319,7 +319,7 @@ impl AgentRegistryContract {
             crate::events::ContractUpgradedEvent {
                 old_version,
                 new_version,
-                wasm_hash: new_wasm_hash,
+                wasm_hash: new_wasm_hash.clone(),
                 admin,
                 upgrade_ledger: env.ledger().sequence(),
             },
@@ -389,10 +389,8 @@ fn validate_data_integrity(env: &Env) -> Result<String, UpgradeableError> {
 
 fn validate_storage_compatibility(env: &Env, new_version: &String) -> Result<String, UpgradeableError> {
     // Check if new version can read existing storage format
-    let version_str = new_version.to_string();
-    
     // Simple compatibility check based on version
-    if version_str.starts_with("1.") {
+    if new_version == &String::from_str(env, "1.0.0") {
         Ok(String::from_str(env, "Storage format compatible"))
     } else {
         Ok(String::from_str(env, "Storage migration required"))
@@ -407,47 +405,26 @@ fn validate_admin_access(env: &Env) -> Result<String, UpgradeableError> {
 }
 
 fn execute_migration_step(env: &Env, step: &String) -> Result<String, UpgradeableError> {
-    let step_str = step.to_string();
-    
-    match step_str.as_str() {
-        "backup_existing_data" => {
-            // In practice, this would create a backup
-            Ok(String::from_str(env, "Data backup completed"))
-        }
-        "validate_data_integrity" => {
-            validate_data_integrity(env)
-        }
-        "migrate_storage_format" => {
-            // Migrate storage keys and data format
-            Ok(String::from_str(env, "Storage format migrated"))
-        }
-        "update_schema" => {
-            // Update data schema for new version
-            Ok(String::from_str(env, "Schema updated"))
-        }
-        "rebuild_indexes" => {
-            // Rebuild capability indexes
-            Ok(String::from_str(env, "Indexes rebuilt"))
-        }
-        "verify_migration" => {
-            // Verify migration completed successfully
-            Ok(String::from_str(env, "Migration verified"))
-        }
-        "update_metadata_format" => {
-            // Update metadata format for minor version changes
-            Ok(String::from_str(env, "Metadata format updated"))
-        }
-        "refresh_indexes" => {
-            // Refresh indexes for minor changes
-            Ok(String::from_str(env, "Indexes refreshed"))
-        }
-        "validate_compatibility" => {
-            // Basic compatibility validation for patch versions
-            Ok(String::from_str(env, "Compatibility validated"))
-        }
-        _ => {
-            Ok(String::from_str(env, &format!("Unknown migration step: {}", step_str)))
-        }
+    if step == &String::from_str(env, "backup_existing_data") {
+        Ok(String::from_str(env, "Data backup completed"))
+    } else if step == &String::from_str(env, "validate_data_integrity") {
+        validate_data_integrity(env)
+    } else if step == &String::from_str(env, "migrate_storage_format") {
+        Ok(String::from_str(env, "Storage format migrated"))
+    } else if step == &String::from_str(env, "update_schema") {
+        Ok(String::from_str(env, "Schema updated"))
+    } else if step == &String::from_str(env, "rebuild_indexes") {
+        Ok(String::from_str(env, "Indexes rebuilt"))
+    } else if step == &String::from_str(env, "verify_migration") {
+        Ok(String::from_str(env, "Migration verified"))
+    } else if step == &String::from_str(env, "update_metadata_format") {
+        Ok(String::from_str(env, "Metadata format updated"))
+    } else if step == &String::from_str(env, "refresh_indexes") {
+        Ok(String::from_str(env, "Indexes refreshed"))
+    } else if step == &String::from_str(env, "validate_compatibility") {
+        Ok(String::from_str(env, "Compatibility validated"))
+    } else {
+        Ok(String::from_str(env, "Unknown migration step"))
     }
 }
 

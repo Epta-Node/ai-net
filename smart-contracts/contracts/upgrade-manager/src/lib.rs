@@ -123,7 +123,7 @@ pub enum DataKey {
 }
 
 /// Upgrade operation errors
-#[contracttype]
+#[soroban_sdk::contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum UpgradeError {
@@ -153,11 +153,7 @@ pub enum UpgradeError {
     DowngradeNotAllowed = 12,
 }
 
-impl From<UpgradeError> for soroban_sdk::Error {
-    fn from(err: UpgradeError) -> Self {
-        soroban_sdk::Error::from_contract_error(err as u32)
-    }
-}
+
 
 /// Main upgrade manager contract
 #[contract]
@@ -187,7 +183,7 @@ fn get_current_version(env: &Env) -> Option<ContractVersion> {
     env.storage().persistent().get(&DataKey::CurrentVersion)
 }
 
-fn is_version_newer(current: &str, proposed: &str) -> bool {
+fn is_version_newer(current: &String, proposed: &String) -> bool {
     // Simple semantic version comparison (for demo - in production use proper semver)
     proposed > current
 }
@@ -282,7 +278,7 @@ impl UpgradeManager {
         
         // Check if version is valid and newer
         if let Some(current) = get_current_version(&env) {
-            if !is_version_newer(&current.version.to_string(), &new_version.to_string()) {
+            if !is_version_newer(&current.version, &new_version) {
                 return Err(UpgradeError::DowngradeNotAllowed);
             }
         }
@@ -290,7 +286,7 @@ impl UpgradeManager {
         // Create proposal
         let proposal = UpgradeProposal {
             new_version: new_version.clone(),
-            new_wasm_hash,
+            new_wasm_hash: new_wasm_hash.clone(),
             description: description.clone(),
             proposed_ledger: env.ledger().sequence(),
             proposer: admin,
@@ -368,12 +364,12 @@ impl UpgradeManager {
         let rollback_deadline = env.ledger().sequence() + ROLLBACK_WINDOW_LEDGERS;
 
         // Execute the upgrade
-        env.deployer().update_current_contract_wasm(proposal.new_wasm_hash);
+        env.deployer().update_current_contract_wasm(proposal.new_wasm_hash.clone());
 
         // Create new version record
         let new_version = ContractVersion {
             version: proposal.new_version.clone(),
-            wasm_hash: proposal.new_wasm_hash,
+            wasm_hash: proposal.new_wasm_hash.clone(),
             upgrade_ledger: env.ledger().sequence(),
             description: proposal.description.clone(),
             admin,
@@ -389,9 +385,9 @@ impl UpgradeManager {
             .set(&DataKey::Version(proposal.new_version.clone()), &new_version);
 
         // Store rollback info if we had a previous version
-        if let Some(prev_version) = current_version {
+        if let Some(ref prev_version) = current_version {
             let rollback_record = RollbackRecord {
-                previous_version: prev_version,
+                previous_version: prev_version.clone(),
                 rollback_deadline,
                 can_rollback: true,
             };
@@ -415,7 +411,7 @@ impl UpgradeManager {
             UpgradeAppliedEvent {
                 old_version: current_version.map(|v| v.version).unwrap_or(String::from_str(&env, "none")),
                 new_version: proposal.new_version,
-                wasm_hash: proposal.new_wasm_hash,
+                wasm_hash: proposal.new_wasm_hash.clone(),
                 admin: new_version.admin,
             },
         );
@@ -444,8 +440,7 @@ impl UpgradeManager {
         let current_version = get_current_version(&env).unwrap();
 
         // Perform the rollback
-        env.deployer()
-            .update_current_contract_wasm(rollback_record.previous_version.wasm_hash);
+        env.deployer().update_current_contract_wasm(rollback_record.previous_version.wasm_hash.clone());
 
         // Restore previous version as current
         env.storage()

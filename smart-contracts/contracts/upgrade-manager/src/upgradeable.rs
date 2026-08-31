@@ -6,7 +6,7 @@
 //! Contracts implementing this trait can integrate with the upgrade manager
 //! to provide version tracking, data migration, and rollback capabilities.
 
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, String, Vec};
 
 /// Standard interface for upgradeable contracts
 pub trait Upgradeable {
@@ -80,7 +80,7 @@ pub struct UpgradeStatus {
 }
 
 /// Errors specific to upgradeable contracts
-#[contracttype]
+#[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum UpgradeableError {
@@ -102,12 +102,6 @@ pub enum UpgradeableError {
     MigrationPlanFailed = 8,
 }
 
-impl From<UpgradeableError> for soroban_sdk::Error {
-    fn from(err: UpgradeableError) -> Self {
-        soroban_sdk::Error::from_contract_error(err as u32)
-    }
-}
-
 /// Utility functions for version comparison and compatibility checking
 pub mod version_utils {
     use soroban_sdk::{Env, String, Vec};
@@ -115,7 +109,7 @@ pub mod version_utils {
 
     /// Simple version comparison for strings (semantic versioning approximation)
     /// In production, you would use proper semver parsing
-    pub fn compare_versions(v1: &str, v2: &str) -> std::cmp::Ordering {
+    pub fn compare_versions(v1: &String, v2: &String) -> core::cmp::Ordering {
         v1.cmp(v2)
     }
 
@@ -125,24 +119,22 @@ pub mod version_utils {
         current: String,
         target: String,
     ) -> Result<VersionCompatibility, UpgradeableError> {
-        let current_str = current.to_string();
-        let target_str = target.to_string();
         
         let mut issues = Vec::new(env);
         let mut is_compatible = true;
         let mut migration_required = false;
         
         // Simple version comparison - in practice would use proper semver
-        match current_str.cmp(&target_str) {
-            std::cmp::Ordering::Less => {
+        match current.cmp(&target) {
+            core::cmp::Ordering::Less => {
                 // Upgrading to newer version - generally compatible
                 migration_required = true;
             }
-            std::cmp::Ordering::Equal => {
+            core::cmp::Ordering::Equal => {
                 // Same version - no migration needed
                 migration_required = false;
             }
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Greater => {
                 // Downgrading - not allowed without explicit rollback
                 is_compatible = false;
                 issues.push_back(String::from_str(env, "Downgrade not allowed"));
@@ -161,16 +153,15 @@ pub mod version_utils {
     /// Generate migration steps based on version difference
     pub fn generate_migration_steps(
         env: &Env,
-        from_version: &str,
-        to_version: &str,
+        from_version: &String,
+        to_version: &String,
     ) -> Result<Vec<String>, UpgradeableError> {
         let mut steps = Vec::new(env);
-        
         // Simple version-based migration planning
         match from_version.cmp(to_version) {
-            std::cmp::Ordering::Less => {
+            core::cmp::Ordering::Less => {
                 // Upgrading
-                if from_version.starts_with("1.") && to_version.starts_with("2.") {
+                if from_version == &String::from_str(env, "1.0.0") && to_version == &String::from_str(env, "2.0.0") {
                     // Major version upgrade
                     steps.push_back(String::from_str(env, "backup_existing_data"));
                     steps.push_back(String::from_str(env, "validate_data_integrity"));
@@ -185,11 +176,11 @@ pub mod version_utils {
                     steps.push_back(String::from_str(env, "refresh_indexes"));
                 }
             }
-            std::cmp::Ordering::Equal => {
+            core::cmp::Ordering::Equal => {
                 // Same version - minimal validation
                 steps.push_back(String::from_str(env, "validate_compatibility"));
             }
-            std::cmp::Ordering::Greater => {
+            core::cmp::Ordering::Greater => {
                 // Downgrade - return error
                 return Err(UpgradeableError::IncompatibleVersion);
             }

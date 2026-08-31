@@ -456,6 +456,8 @@ fn set_gas_config_requires_admin_auth() {
         resolve_error_marginal: 15_000,
         slash_bond: 30_000,
         deregister_with_bond: 40_000,
+        cleanup_error: 5_000,
+        cleanup_error_marginal: 500,
     };
 
     env.mock_auths(&[]);
@@ -805,6 +807,8 @@ fn gas_benchmark_custom_config_used_by_estimate_gas() {
         resolve_error_marginal: 20_000,
         slash_bond: GAS_SLASH_BOND,
         deregister_with_bond: GAS_DEREGISTER_WITH_BOND,
+        cleanup_error: 5_000,
+        cleanup_error_marginal: 500,
     };
     client.set_gas_config(&custom);
 

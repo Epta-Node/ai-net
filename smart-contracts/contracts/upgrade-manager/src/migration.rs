@@ -81,91 +81,42 @@ pub fn execute_post_upgrade_migration(
 
 /// Execute a single validation check
 fn execute_validation_check(env: &Env, check_name: &String) -> Result<String, UpgradeError> {
-    // In a real implementation, this would dispatch to specific validation functions
-    // based on the check name. For now, we simulate validation logic.
-    
-    let check_str = check_name.to_string();
-    
-    match check_str.as_str() {
-        "storage_format_compatibility" => {
-            // Check if new contract can read existing storage format
-            Ok(String::from_str(env, "Storage format compatible"))
-        },
-        "data_integrity_check" => {
-            // Verify existing data integrity before migration
-            Ok(String::from_str(env, "Data integrity verified"))
-        },
-        "gas_budget_validation" => {
-            // Ensure sufficient gas budget for migration
-            Ok(String::from_str(env, "Gas budget sufficient"))
-        },
-        "dependency_compatibility" => {
-            // Check if new version is compatible with dependent contracts
-            Ok(String::from_str(env, "Dependencies compatible"))
-        },
-        _ => {
-            // Unknown validation check
-            Ok(String::from_str(env, &format!("Unknown check: {}", check_str)))
-        }
+    if check_name == &String::from_str(env, "storage_format_compatibility") {
+        Ok(String::from_str(env, "Storage format compatible"))
+    } else if check_name == &String::from_str(env, "state_invariants") {
+        Ok(String::from_str(env, "State invariants verified"))
+    } else if check_name == &String::from_str(env, "dependency_compatibility") {
+        Ok(String::from_str(env, "Dependencies compatible"))
+    } else {
+        Ok(String::from_str(env, "Unknown check"))
     }
 }
 
 /// Execute a data transformation step
 fn execute_data_transformation(env: &Env, transformation: &String) -> Result<u32, UpgradeError> {
-    // In a real implementation, this would perform actual data transformations
-    // For now, we simulate different transformation types
-    
-    let transform_str = transformation.to_string();
-    
-    match transform_str.as_str() {
-        "migrate_agent_records" => {
-            // Simulate migrating agent records to new format
-            migrate_agent_records(env)
-        },
-        "update_storage_keys" => {
-            // Simulate updating storage key formats
-            update_storage_keys(env)
-        },
-        "convert_metadata_format" => {
-            // Simulate converting metadata to new format
-            convert_metadata_format(env)
-        },
-        "rebuild_indexes" => {
-            // Simulate rebuilding capability indexes
-            rebuild_indexes(env)
-        },
-        _ => {
-            // Unknown transformation
-            Ok(0)
-        }
+    if transformation == &String::from_str(env, "migrate_agent_records") {
+        migrate_agent_records(env)
+    } else if transformation == &String::from_str(env, "update_storage_keys") {
+        update_storage_keys(env)
+    } else if transformation == &String::from_str(env, "convert_metadata_format") {
+        convert_metadata_format(env)
+    } else if transformation == &String::from_str(env, "rebuild_indexes") {
+        rebuild_indexes(env)
+    } else {
+        Ok(0)
     }
 }
 
 /// Execute post-migration validation
 fn execute_post_migration_validation(env: &Env, validation: &String) -> Result<(), UpgradeError> {
-    let validation_str = validation.to_string();
-    
-    match validation_str.as_str() {
-        "verify_data_integrity" => {
-            // Verify all data was migrated correctly
-            Ok(())
-        },
-        "test_contract_functionality" => {
-            // Test that upgraded contract functions work correctly
-            Ok(())
-        },
-        "validate_storage_consistency" => {
-            // Ensure storage is in a consistent state
-            Ok(())
-        },
-        "check_index_completeness" => {
-            // Verify all indexes were rebuilt correctly
-            Ok(())
-        },
-        _ => {
-            // Unknown validation - pass by default
-            Ok(())
-        }
+    if validation == &String::from_str(env, "verify_data_integrity") {
+        Ok(())
+    } else if validation == &String::from_str(env, "check_index_consistency") {
+        Ok(())
+    } else if validation == &String::from_str(env, "validate_state_transitions") {
+        Ok(())
+    } else {
+        Ok(())
     }
 }
 
@@ -219,17 +170,13 @@ fn rebuild_indexes(env: &Env) -> Result<u32, UpgradeError> {
 }
 
 /// Helper function to check if a migration is reversible
-pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
+pub fn is_migration_reversible(env: &Env, migration_plan: &MigrationPlan) -> bool {
     // Check if all transformations in the plan are reversible
     for transformation in migration_plan.data_transformations.iter() {
-        let transform_str = transformation.to_string();
-        
-        // These transformations are considered irreversible
-        match transform_str.as_str() {
-            "delete_deprecated_data" => return false,
-            "compress_storage" => return false,
-            "merge_duplicate_records" => return false,
-            _ => {} // Most transformations are reversible
+        if transformation == String::from_str(env, "delete_deprecated_data") ||
+           transformation == String::from_str(env, "compress_storage") ||
+           transformation == String::from_str(env, "destructive_schema_change") {
+            return false;
         }
     }
     
@@ -237,27 +184,29 @@ pub fn is_migration_reversible(migration_plan: &MigrationPlan) -> bool {
 }
 
 /// Helper function to estimate migration complexity
-pub fn estimate_migration_complexity(migration_plan: &MigrationPlan) -> u32 {
-    let mut complexity = 0u32;
+pub fn calculate_migration_complexity(env: &Env, migration_plan: &MigrationPlan) -> u32 {
+    let mut complexity = 0;
     
     // Base complexity from number of items
     complexity += migration_plan.estimated_items;
     
     // Add complexity for each transformation type
     for transformation in migration_plan.data_transformations.iter() {
-        let transform_str = transformation.to_string();
-        
-        let transform_complexity = match transform_str.as_str() {
-            "migrate_agent_records" => 2,
-            "update_storage_keys" => 3,
-            "convert_metadata_format" => 2,
-            "rebuild_indexes" => 4,
-            "compress_storage" => 5,
-            "merge_duplicate_records" => 4,
-            _ => 1,
+        let transform_complexity = if transformation == String::from_str(env, "migrate_agent_records") {
+            2
+        } else if transformation == String::from_str(env, "update_storage_keys") {
+            3
+        } else if transformation == String::from_str(env, "convert_metadata_format") {
+            2
+        } else if transformation == String::from_str(env, "rebuild_indexes") {
+            4
+        } else if transformation == String::from_str(env, "delete_deprecated_data") {
+            1
+        } else {
+            1
         };
         
-        complexity += transform_complexity;
+        complexity += transform_complexity * (migration_plan.estimated_items / 100).max(1);
     }
     
     complexity

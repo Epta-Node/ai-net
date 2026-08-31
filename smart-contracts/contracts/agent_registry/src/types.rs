@@ -6,12 +6,14 @@
 use crate::GasConfig;
 use soroban_sdk::{contracttype, Address, Symbol, Vec};
 
-/// On-chain representation of an agent's SLA terms.
+/// On-chain metrics for an agent, combining SLA terms and analytics.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentSla {
-    /// Agent this SLA belongs to.
+pub struct AgentMetrics {
+    /// Agent this metrics belongs to.
     pub agent_id: Symbol,
+    
+    // -- SLA terms --
     /// Maximum allowed response time in milliseconds.
     pub max_response_time: u32,
     /// Minimum uptime percentage [0, 100].
@@ -19,35 +21,15 @@ pub struct AgentSla {
     /// Minimum quality score [0, 100].
     pub min_quality_score: u32,
     /// Timestamp when SLA was set.
-    pub created_at: u64,
+    pub sla_created_at: u64,
     /// Number of SLA checks performed.
     pub total_checks: u64,
     /// Number of SLA violations detected.
     pub violations: u64,
     /// Timestamp of last SLA check.
     pub last_check_at: u64,
-}
 
-/// SLA violation record.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SlaViolation {
-    /// Agent that violated the SLA.
-    pub agent_id: Symbol,
-    /// Type of violation: 0 = response_time, 1 = uptime, 2 = quality.
-    pub violation_type: u32,
-    /// Timestamp when violation was detected.
-    pub detected_at: u64,
-    /// Whether penalty was applied.
-    pub penalty_applied: bool,
-}
-
-/// On-chain analytics for an agent.
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AgentAnalytics {
-    /// Agent this analytics belongs to.
-    pub agent_id: Symbol,
+    // -- Analytics --
     /// Total tasks attempted.
     pub total_tasks: u64,
     /// Tasks completed successfully.
@@ -60,6 +42,20 @@ pub struct AgentAnalytics {
     pub avg_response_time: u32,
     /// Last updated timestamp.
     pub last_updated: u64,
+}
+
+/// Represents a detected SLA violation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SlaViolation {
+    /// Agent that violated the SLA.
+    pub agent_id: Symbol,
+    /// Type of violation: 0 = response_time, 1 = uptime, 2 = quality.
+    pub violation_type: u32,
+    /// Timestamp when violation was detected.
+    pub detected_at: u64,
+    /// Whether penalty was applied.
+    pub penalty_applied: bool,
 }
 
 /// Daily snapshot of analytics (last 30 days).
