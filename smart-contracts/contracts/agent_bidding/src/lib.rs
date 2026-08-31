@@ -83,6 +83,8 @@
 //! view, which is the same code path the contract verifies against.
 
 mod errors;
+#[cfg(test)]
+mod property_tests;
 mod types;
 
 pub use errors::Error;
