@@ -1,0 +1,324 @@
+/* Status colour tokens used inline */
+:root {
+  --status-amber: var(--status-warning);
+  --status-indigo: var(--accent-secondary);
+  --status-emerald: var(--status-success);
+  --status-rose: var(--status-danger);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 20px;
+  padding: 16px 20px;
+  background: var(--surface-glass);
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  margin-bottom: 20px;
+}
+
+/* ── Search ── */
+.searchGroup {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 180px;
+  flex: 1 1 180px;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 7px 32px 7px 30px;
+  background: var(--surface-glass);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 0.83rem;
+  transition: border-color 0.15s;
+}
+
+.searchInput::placeholder {
+  color: var(--text-secondary);
+}
+
+.searchInput:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--accent-surface-strong);
+}
+
+/* Override global input styling for search */
+input[type='search'].searchInput {
+  font-family: var(--font-sans);
+}
+
+.clearSearch {
+  position: absolute;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 0;
+  box-shadow: none;
+}
+
+.clearSearch:hover {
+  color: var(--text-primary);
+  background: var(--white-alpha-08);
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── Filter groups ── */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.groupLabel {
+  display: flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* ── Status toggle ── */
+.toggle {
+  display: inline-flex;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.toggleButton {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: none;
+  border-radius: 0;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.toggleButton:hover {
+  background: var(--white-alpha-05);
+  color: var(--text-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.toggleButtonActive,
+.toggleButtonActive:hover {
+  background: var(--primary);
+  color: var(--text-inverse);
+}
+
+/* Coloured variants – status active states */
+.toggleButton_amber,
+.toggleButton_amber:hover {
+  background: var(--status-warning-surface-strong);
+  color: var(--status-warning-text);
+}
+
+.toggleButton_indigo,
+.toggleButton_indigo:hover {
+  background: var(--accent-surface-strong);
+  color: var(--accent-text);
+}
+
+.toggleButton_emerald,
+.toggleButton_emerald:hover {
+  background: var(--status-success-surface-strong);
+  color: var(--status-success-text);
+}
+
+.toggleButton_rose,
+.toggleButton_rose:hover {
+  background: var(--status-danger-surface-strong);
+  color: var(--status-danger-text);
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-round);
+  flex-shrink: 0;
+}
+
+/* ── Agent chips ── */
+.capList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.capChip {
+  background: var(--white-alpha-04);
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  padding: 4px 11px;
+  border-radius: var(--radius-pill);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  box-shadow: none;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.capChip:hover {
+  background: var(--accent-surface-muted);
+  color: var(--text-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.capChipActive,
+.capChipActive:hover {
+  background: var(--accent-surface-strong);
+  border-color: var(--primary);
+  color: var(--accent-text);
+}
+
+/* ── Date range ── */
+.dateRange {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dateInput {
+  background: var(--surface-glass);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  padding: 5px 8px;
+  font-family: var(--font-sans);
+  width: 130px;
+  color-scheme: dark;
+  transition: border-color 0.15s;
+}
+
+.dateInput:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.dateSep {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* ── Actions ── */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.count {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.iconAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--white-alpha-04);
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  transition: background 0.15s, color 0.15s;
+}
+
+.iconAction:hover {
+  background: var(--accent-surface-muted);
+  color: var(--text-primary);
+  transform: none;
+  box-shadow: none;
+}
+
+.resetButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text-secondary);
+  padding: 6px 11px;
+  border-radius: var(--radius-lg);
+  font-size: 0.78rem;
+  font-weight: 600;
+  box-shadow: none;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.resetButton:hover {
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-surface-strong);
+  color: var(--status-danger-text);
+  transform: none;
+  box-shadow: none;
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .bar {
+    gap: 14px;
+    padding: 12px 14px;
+  }
+
+  .toggle {
+    flex-wrap: wrap;
+  }
+
+  .dateRange {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dateSep {
+    display: none;
+  }
+
+  .actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

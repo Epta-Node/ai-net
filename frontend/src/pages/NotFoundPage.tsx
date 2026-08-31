@@ -1,7 +1,10 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 
 export const NotFoundPage: React.FC = () => {
+    const { t } = useTranslation();
+
     return (
         <div style={{
             display: 'flex',
@@ -21,7 +24,7 @@ export const NotFoundPage: React.FC = () => {
                 marginBottom: '1rem',
                 color: 'var(--text-primary)'
             }}>
-            404 — Page Not Found
+            {t('page.notFound.title')}
             </h1>
 
             <p style={{
@@ -31,7 +34,7 @@ export const NotFoundPage: React.FC = () => {
                 marginBottom: '2rem',
                 lineHeight: '1.5'
             }}>
-            The page you are looking for does not exist or has been moved.
+            {t('page.notFound.body')}
             </p>
 
             <div style={{
@@ -44,20 +47,20 @@ export const NotFoundPage: React.FC = () => {
                 <Link to="/dashboard" style={{
                 padding: '0.6rem 1.25rem',
                 borderRadius: '6px',
-                backgroundColor: 'var(--accent-color, var(--primary-color, #3b82f6))',
-                color: 'var(--text-primary, #ffffff)',
+                backgroundColor: 'var(--accent-info)',
+                color: 'var(--text-primary, var(--text-inverse))',
                 fontWeight: '500',
                 fontSize: '0.9rem',
                 textDecoration: 'none',
                 display: 'inline-block'
             }}>
-            Go to Dashboard
+            {t('page.notFound.goDashboard')}
             </Link>
 
             <Link to="/" style={{
                 padding: '0.6rem 1.25rem',
                 borderRadius: '6px',
-                border: '1px solid var(--border-color, #374151)',
+                border: '1px solid var(--border-color)',
                 backgroundColor: 'transparent',
                 color: 'var(--text-primary)',
                 fontWeight: '500',
@@ -65,7 +68,7 @@ export const NotFoundPage: React.FC = () => {
                 textDecoration: 'none',
                 display: 'inline-block'
             }}>
-            Go Home
+            {t('page.notFound.goHome')}
             </Link>
         </div>
     </div>

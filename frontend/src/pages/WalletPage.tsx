@@ -1,20 +1,69 @@
 import React, { useMemo } from 'react'
+import { useTranslation, Trans } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
-import { Wallet, Copy, Check, ExternalLink, Download } from 'lucide-react'
+import { Wallet, Copy, ExternalLink, Download } from 'lucide-react'
 import { useWallet } from '../context/WalletContext'
 import { useWalletBalance } from '../hooks/useWalletBalance'
+import { useToast } from '../hooks/useToast'
 import { useTransactionHistory } from '../hooks/useTransactionHistory'
 import { SendXLMForm } from '../components/wallet/SendXLMForm'
+import { PaymentChart } from '../components/wallet/PaymentChart'
 import { TransactionTable } from '../components/wallet/TransactionTable'
+import { WalletWizard } from '../components/wallet/WalletWizard'
+import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonText } from '../components/common/Skeleton'
 import styles from './WalletPage.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 
+/**
+ * Context-aware skeleton that mirrors the connected wallet layout so there is
+ * no layout shift between the loading and loaded states.
+ */
+export function WalletPageSkeleton() {
+  const { t } = useTranslation()
+
+  return (
+    <div className={styles.page} data-testid="wallet-page-skeleton" aria-busy="true" aria-label={t('a11y.loadingWallet')}>
+      <div className={styles.header}>
+        <h1 className={styles.title}>
+          <Wallet size={24} />
+          {t('nav.wallet')}
+        </h1>
+      </div>
+
+      <div className={styles.balanceCardSkeleton}>
+        <div className={styles.balanceSkeletonSection}>
+          <Skeleton width="10rem" height="0.75rem" />
+          <Skeleton width="14rem" height="2rem" />
+        </div>
+        <div className={styles.publicKeySkeleton}>
+          <SkeletonAvatar size={116} data-testid="wallet-qr-skeleton" />
+          <div className={styles.publicKeySkeletonDetails}>
+            <Skeleton width="6rem" height="0.75rem" />
+            <Skeleton width="16rem" height="1.25rem" />
+            <Skeleton variant="pill" width="10rem" height="1.25rem" />
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.contentGrid}>
+        <SkeletonCard className={styles.panelSkeleton}>
+          <SkeletonText lines={4} />
+        </SkeletonCard>
+        <SkeletonCard className={styles.panelSkeleton}>
+          <SkeletonText lines={3} />
+        </SkeletonCard>
+      </div>
+    </div>
+  )
+}
+
 function WalletPage() {
-  const { publicKey, connected, ready, connectionMethod, freighterAvailable, connect, connectFreighter, disconnect } = useWallet()
-  const { balance, loading: balanceLoading, error: balanceError } = useWalletBalance(publicKey)
+  const { t } = useTranslation()
+  const { publicKey, connected, ready, connectionMethod, freighterAvailable, connect, connectFreighter, disconnect, hasCompletedWizard } = useWallet()
+  const { balance, balances, loading: balanceLoading, error: balanceError } = useWalletBalance(publicKey)
+  const { showToast } = useToast()
   const { transactions, loading: txLoading, error: txError } = useTransactionHistory(publicKey)
-  const [copied, setCopied] = React.useState(false)
   const [secretInput, setSecretInput] = React.useState('')
   const [connectError, setConnectError] = React.useState<string | null>(null)
   const [connecting, setConnecting] = React.useState(false)
@@ -22,22 +71,25 @@ function WalletPage() {
   const [freighterError, setFreighterError] = React.useState<string | null>(null)
 
   const handleCopyAddress = async () => {
-    if (publicKey) {
-      try {
-        await navigator.clipboard.writeText(publicKey)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      } catch {
-        const textArea = document.createElement('textarea')
-        textArea.value = publicKey
-        document.body.appendChild(textArea)
-        textArea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textArea)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      }
+    if (!publicKey) return
+    const fallbackCopy = () => {
+      const textArea = document.createElement('textarea')
+      textArea.value = publicKey!
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
     }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(publicKey)
+      } else {
+        fallbackCopy()
+      }
+    } catch {
+      fallbackCopy()
+    }
+    showToast(t('wallet.copyAddress'), 'success')
   }
 
   const handleConnect = async (e: React.FormEvent) => {
@@ -48,7 +100,7 @@ function WalletPage() {
       await connect(secretInput.trim())
       setSecretInput('')
     } catch (err) {
-      setConnectError(err instanceof Error ? err.message : 'Failed to connect')
+      setConnectError(err instanceof Error ? err.message : t('wallet.failedToConnect'))
     } finally {
       setConnecting(false)
     }
@@ -60,13 +112,13 @@ function WalletPage() {
     try {
       await connectFreighter()
     } catch (err) {
-      setFreighterError(err instanceof Error ? err.message : 'Failed to connect with Freighter')
+      setFreighterError(err instanceof Error ? err.message : t('wallet.failedToConnectFreighter'))
     } finally {
       setFreighterConnecting(false)
     }
   }
 
-  const connectionMethodLabel = connectionMethod === 'freighter' ? 'Freighter' : 'Secret Key'
+  const connectionMethodLabel = connectionMethod === 'freighter' ? t('wallet.freighter') : t('wallet.secretKey')
 
   const balanceDisplay = useMemo(() => {
     if (balanceLoading) {
@@ -83,38 +135,80 @@ function WalletPage() {
     )
   }, [balance, balanceLoading, balanceError])
 
+  const balanceChips = useMemo(() => {
+    const tokenBalances = balances.filter((entry) => entry.asset_type !== 'native')
+    if (balanceLoading) {
+      return <div className={styles.balanceChips} aria-busy="true"><Skeleton variant="pill" width="7rem" height="1.75rem" /></div>
+    }
+    const chips = balances.map((entry) => {
+      const code = entry.asset_type === 'native' ? 'XLM' : (entry.asset_code ?? '')
+      return (
+        <span
+          key={code}
+          className={`${styles.balanceChip} ${entry.asset_type === 'native' ? styles.balanceChipNative : ''}`}
+          title={t('a11y.balanceChip', { code })}
+        >
+          <span className={styles.balanceChipAmount} aria-label={`${parseFloat(entry.balance)} ${code}`}>
+            {new Intl.NumberFormat(undefined, { maximumFractionDigits: 7 }).format(parseFloat(entry.balance) || 0)}
+          </span>
+          <span className={styles.balanceChipCode}>{code}</span>
+        </span>
+      )
+    })
+    if (chips.length > 1 && tokenBalances.length > 0) {
+      return (
+        <div className={styles.tokensSection}>
+          <p className={styles.tokensHeading}>{t('wallet.tokens.heading')}</p>
+          <div className={styles.balanceChips}>{chips}</div>
+        </div>
+      )
+    }
+    if (chips.length > 0) {
+      return <div className={styles.balanceChips}>{chips}</div>
+    }
+    return null
+  }, [balances, balanceLoading, t])
+
+  if (!hasCompletedWizard) {
+    return (
+      <div className={styles.page}>
+        <WalletWizard />
+      </div>
+    )
+  }
+
   if (!connected || !publicKey) {
     return (
       <div className={styles.page}>
         <div className={styles.header}>
           <h1 className={styles.title}>
             <Wallet size={24} />
-            Wallet
+            {t('nav.wallet')}
           </h1>
-          <p className={styles.subtitle}>Connect your Stellar wallet to get started.</p>
+          <p className={styles.subtitle}>{t('wallet.connectSubtitle')}</p>
         </div>
 
         {/* Freighter Option (Primary) */}
         <div className={styles.connectCard}>
-          <div className={styles.connectMethodBadge}>Recommended</div>
+          <div className={styles.connectMethodBadge}>{t('common.recommended')}</div>
           <button
             className={styles.freighterButton}
             onClick={handleFreighterConnect}
             disabled={freighterConnecting || !freighterAvailable}
           >
-            {freighterConnecting ? 'Connecting...' : 'Connect with Freighter'}
+            {freighterConnecting ? t('common.connecting') : t('wallet.connectWithFreighter')}
           </button>
           {!freighterAvailable && (
             <p className={styles.helperText}>
               <Download size={12} style={{ marginRight: 4 }} />
-              Freighter extension not detected.{' '}
+              {t('wallet.freighterNotDetected')}{' '}
               <a
                 href="https://freighter.app"
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.link}
               >
-                Install Freighter
+                {t('wallet.installFreighter')}
               </a>
             </p>
           )}
@@ -126,14 +220,14 @@ function WalletPage() {
         </div>
 
         <div className={styles.divider}>
-          <span>or</span>
+          <span>{t('common.or')}</span>
         </div>
 
         {/* Secret Key Option (Fallback) */}
         <div className={styles.connectCard}>
           <form onSubmit={handleConnect}>
             <label className={styles.fieldLabel} htmlFor="secret-key-input">
-              Stellar Secret Key
+              {t('wallet.secretKeyLabel')}
             </label>
             <input
               id="secret-key-input"
@@ -145,7 +239,7 @@ function WalletPage() {
               aria-describedby="connect-error"
             />
             <p className={styles.securityWarning}>
-              Your secret key is never stored in the browser. You will need to re-enter it after refreshing the page.
+              {t('wallet.securityWarning')}
             </p>
             {connectError && (
               <p id="connect-error" className={styles.error} role="alert">
@@ -154,10 +248,11 @@ function WalletPage() {
             )}
             <button
               type="submit"
+              id="btn-connect-secret-key"
               className={styles.connectButton}
               disabled={connecting || !secretInput.trim()}
             >
-              {connecting ? 'Connecting...' : 'Connect with Secret Key'}
+              {connecting ? t('common.connecting') : t('wallet.connectWithSecretKey')}
             </button>
           </form>
         </div>
@@ -173,25 +268,23 @@ function WalletPage() {
         <div className={styles.header}>
           <h1 className={styles.title}>
             <Wallet size={24} />
-            Wallet
+            {t('nav.wallet')}
           </h1>
-          <p className={styles.subtitle}>Re-enter your secret key to resume.</p>
+          <p className={styles.subtitle}>{t('wallet.reconnectSubtitle')}</p>
         </div>
 
         <div className={styles.reconnectCard}>
           <p className={styles.reconnectInfo}>
-            Your wallet was previously connected via{' '}
-            <strong>Secret Key</strong>. Since the key cannot be stored in the
-            browser, please re-enter it to continue.
+            <Trans i18nKey="wallet.reconnectInfo" components={[<strong key="method" />]} />
           </p>
           {publicKey && (
             <p className={styles.reconnectPubkey}>
-              Public Key: <code>{publicKey}</code>
+              {t('wallet.publicKey')}: <code>{publicKey}</code>
             </p>
           )}
           <form onSubmit={handleConnect}>
             <label className={styles.fieldLabel} htmlFor="reconnect-secret-key">
-              Stellar Secret Key
+              {t('wallet.secretKeyLabel')}
             </label>
             <input
               id="reconnect-secret-key"
@@ -213,14 +306,14 @@ function WalletPage() {
                 className={styles.connectButton}
                 disabled={connecting || !secretInput.trim()}
               >
-                {connecting ? 'Connecting...' : 'Reconnect'}
+                {connecting ? t('common.connecting') : t('wallet.reconnect')}
               </button>
               <button
                 type="button"
                 className={styles.disconnectButton}
                 onClick={disconnect}
               >
-                Disconnect
+                {t('wallet.disconnect')}
               </button>
             </div>
           </form>
@@ -229,28 +322,36 @@ function WalletPage() {
     )
   }
 
+  // Initial balance fetch: show the dedicated page skeleton instead of
+  // partially-populated content so there is no layout shift on load.
+  if (balanceLoading) {
+    return <WalletPageSkeleton />
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
         <h1 className={styles.title}>
           <Wallet size={24} />
-          Wallet
+          {t('nav.wallet')}
         </h1>
       </div>
 
       {/* Balance Card */}
       <div className={styles.balanceCard}>
         <div className={styles.balanceSection}>
-          <p className={styles.balanceTitle}>Available Balance</p>
+          <p className={styles.balanceTitle}>{t('wallet.availableBalance')}</p>
           {balanceDisplay}
         </div>
+
+        {balanceChips}
 
         <div className={styles.publicKeySection}>
           <div className={styles.qrCode}>
             <QRCodeSVG value={publicKey} size={100} level="M" />
           </div>
           <div className={styles.addressSection}>
-            <p className={styles.addressLabel}>Public Key</p>
+            <p className={styles.addressLabel}>{t('wallet.publicKey')}</p>
             <div className={styles.addressRow}>
               <code className={styles.address}>
                 {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
@@ -258,29 +359,30 @@ function WalletPage() {
               <button
                 className={styles.iconButton}
                 onClick={handleCopyAddress}
-                title={copied ? 'Copied!' : 'Copy address'}
+                title={t('wallet.copyAddress')}
+                aria-label={t('a11y.copyPublicKey')}
               >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
+                <Copy size={16} />
               </button>
               <a
                 href={`${STELLAR_EXPLORER}/account/${publicKey}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.iconButton}
-                title="View on Stellar Explorer"
+                title={t('a11y.viewOnStellarExplorer')}
               >
                 <ExternalLink size={16} />
               </a>
             </div>
             <span className={styles.connectionBadge}>
-              Connected via {connectionMethodLabel}
+              {t('wallet.connectedVia', { method: connectionMethodLabel })}
             </span>
           </div>
         </div>
 
         <div className={styles.actions}>
           <button className={styles.disconnectButton} onClick={disconnect}>
-            Disconnect
+            {t('wallet.disconnect')}
           </button>
         </div>
       </div>
@@ -291,6 +393,7 @@ function WalletPage() {
           <SendXLMForm />
         </div>
         <div className={styles.historySection}>
+          <PaymentChart transactions={transactions} />
           <TransactionTable
             transactions={transactions}
             loading={txLoading}
@@ -298,7 +401,7 @@ function WalletPage() {
           />
           {txError && (
             <p className={styles.error} role="alert">
-              Failed to load transaction history: {txError}
+              {t('wallet.txHistoryError', { error: txError })}
             </p>
           )}
         </div>

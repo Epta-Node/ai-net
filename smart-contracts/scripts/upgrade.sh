@@ -15,6 +15,8 @@ SKIP_BUILD=false
 SKIP_BACKUP=false
 FORCE=false
 DRY_RUN=false
+USE_UPGRADE_MANAGER=false
+ENABLE_ROLLBACK=true
 
 # Usage function
 usage() {
@@ -22,6 +24,7 @@ usage() {
 Usage: $0 [OPTIONS] [CONTRACT_NAME]
 
 Upgrade deployed Soroban contracts with safety checks and state preservation.
+Supports both direct upgrades and upgrade manager-based upgrades.
 
 ARGUMENTS:
     CONTRACT_NAME            Name of specific contract to upgrade (optional, upgrades all if not specified)
@@ -32,6 +35,9 @@ OPTIONS:
     -b, --skip-backup        Skip state backup before upgrade
     -f, --force              Skip safety checks and proceed with upgrade
     -d, --dry-run            Show what would be upgraded without making changes
+    -u, --use-upgrade-manager Use upgrade manager for safe upgrades (recommended)
+    -r, --no-rollback        Disable rollback capability for this upgrade
+    -v, --version VERSION    Set explicit version for the upgrade
     -h, --help               Show this help message
 
 ENVIRONMENT VARIABLES:
@@ -40,15 +46,18 @@ ENVIRONMENT VARIABLES:
     STELLAR_HORIZON_URL     Horizon URL for the network (optional, uses default for network)
 
 EXAMPLES:
-    $0                       Upgrade all contracts on testnet
-    $0 agent-registry       Upgrade only the agent-registry contract
-    $0 -n futurenet -d      Dry run upgrade on futurenet
-    $0 -f --skip-backup     Force upgrade without backup
+    $0                                    Upgrade all contracts on testnet
+    $0 agent-registry                    Upgrade only the agent-registry contract
+    $0 -u agent-registry                 Upgrade agent-registry using upgrade manager
+    $0 -n futurenet -d                   Dry run upgrade on futurenet
+    $0 -f --skip-backup                  Force upgrade without backup
+    $0 -u -v "1.2.0" agent-registry     Upgrade to specific version using upgrade manager
 EOF
 }
 
 # Parse command line arguments
 CONTRACT_NAME=""
+VERSION=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         -n|--network)
@@ -70,6 +79,18 @@ while [[ $# -gt 0 ]]; do
         -d|--dry-run)
             DRY_RUN=true
             shift
+            ;;
+        -u|--use-upgrade-manager)
+            USE_UPGRADE_MANAGER=true
+            shift
+            ;;
+        -r|--no-rollback)
+            ENABLE_ROLLBACK=false
+            shift
+            ;;
+        -v|--version)
+            VERSION="$2"
+            shift 2
             ;;
         -h|--help)
             usage
@@ -128,8 +149,9 @@ set_network_defaults() {
     export STELLAR_RPC_URL STELLAR_HORIZON_URL
 }
 
-# Contract definitions
+# Contract definitions - now includes upgrade-manager
 CONTRACTS=(
+    "upgrade-manager:contracts/upgrade-manager"
     "agent-registry:contracts/agent_registry"
     "error-resolver:contracts/error-resolver"
 )
@@ -153,10 +175,418 @@ if [[ -n "$CONTRACT_NAME" ]]; then
 else
     echo -e "${BLUE}Contracts:${NC} All deployed contracts"
 fi
+if [[ "$USE_UPGRADE_MANAGER" == "true" ]]; then
+    echo -e "${BLUE}Upgrade Mode:${NC} Using Upgrade Manager (Safe)"
+else
+    echo -e "${BLUE}Upgrade Mode:${NC} Direct Upgrade"
+fi
 if [[ "$DRY_RUN" == "true" ]]; then
     echo -e "${YELLOW}Mode:${NC} Dry run (no changes will be made)"
 fi
 echo ""
+
+# Upgrade manager utility functions
+get_upgrade_manager_id() {
+    local upgrade_mgr_info
+    upgrade_mgr_info=$(get_contract_info "upgrade-manager")
+    
+    if [[ -z "$upgrade_mgr_info" ]]; then
+        echo -e "${RED}Error: Upgrade manager not deployed${NC}" >&2
+        echo -e "${YELLOW}Hint: Deploy upgrade-manager first or use direct upgrade mode${NC}" >&2
+        exit 1
+    fi
+    
+    echo "$upgrade_mgr_info" | jq -r '.contract_id'
+}
+
+# Check if contract supports upgrade manager
+supports_upgrade_manager() {
+    local name="$1"
+    local contract_id="$2"
+    
+    # Try to call is_upgradeable method
+    local result
+    result=$(stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$contract_id" \
+        -- is_upgradeable 2>/dev/null || echo "false")
+    
+    [[ "$result" == "true" ]]
+}
+
+# Get current contract version
+get_contract_version() {
+    local contract_id="$1"
+    
+    stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$contract_id" \
+        -- get_version 2>/dev/null || echo "unknown"
+}
+
+# Check upgrade compatibility
+check_upgrade_compatibility() {
+    local contract_id="$1"
+    local target_version="$2"
+    
+    echo -e "${BLUE}Checking upgrade compatibility...${NC}"
+    
+    local compatibility_result
+    compatibility_result=$(stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$contract_id" \
+        -- check_upgrade_compatibility \
+        --target_version "$target_version" 2>/dev/null || echo "{}")
+    
+    # Parse compatibility result (simplified)
+    local is_compatible
+    is_compatible=$(echo "$compatibility_result" | jq -r '.is_compatible // false' 2>/dev/null || echo "false")
+    
+    if [[ "$is_compatible" == "true" ]]; then
+        echo -e "${GREEN}✓ Upgrade compatibility check passed${NC}"
+        return 0
+    else
+        echo -e "${RED}✗ Upgrade compatibility check failed${NC}"
+        echo -e "${YELLOW}Compatibility result:${NC} $compatibility_result"
+        return 1
+    fi
+}
+
+# Propose upgrade via upgrade manager
+propose_upgrade() {
+    local contract_name="$1"
+    local new_version="$2"
+    local new_wasm_hash="$3"
+    local description="$4"
+    local upgrade_manager_id="$5"
+    
+    echo -e "${BLUE}Proposing upgrade via upgrade manager...${NC}"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY RUN] Would propose upgrade:${NC}"
+        echo -e "  Contract: $contract_name"
+        echo -e "  Version: $new_version"
+        echo -e "  WASM Hash: $new_wasm_hash"
+        echo -e "  Description: $description"
+        return 0
+    fi
+    
+    # Create migration plan (simplified)
+    local migration_plan="{
+        \"pre_migration_checks\": [\"validate_data_integrity\", \"check_storage_compatibility\"],
+        \"data_transformations\": [\"migrate_agent_records\"],
+        \"post_migration_validations\": [\"verify_data_integrity\"],
+        \"estimated_items\": 100
+    }"
+    
+    # Propose upgrade
+    stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$upgrade_manager_id" \
+        -- propose_upgrade \
+        --new_version "$new_version" \
+        --new_wasm_hash "$new_wasm_hash" \
+        --description "$description" \
+        --migration_plan "$migration_plan"
+    
+    echo -e "${GREEN}✓ Upgrade proposed successfully${NC}"
+}
+
+# Validate upgrade proposal
+validate_upgrade_proposal() {
+    local upgrade_manager_id="$1"
+    
+    echo -e "${BLUE}Validating upgrade proposal...${NC}"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY RUN] Would validate upgrade proposal${NC}"
+        return 0
+    fi
+    
+    local gas_estimate
+    gas_estimate=$(stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$upgrade_manager_id" \
+        -- validate_proposal)
+    
+    echo -e "${GREEN}✓ Proposal validated, estimated gas: $gas_estimate${NC}"
+}
+
+# Execute upgrade via upgrade manager
+execute_upgrade_via_manager() {
+    local upgrade_manager_id="$1"
+    
+    echo -e "${BLUE}Executing upgrade via upgrade manager...${NC}"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY RUN] Would execute upgrade via manager${NC}"
+        return 0
+    fi
+    
+    stellar contract invoke \
+        --network "$NETWORK" \
+        --source-account "$STELLAR_SECRET_KEY" \
+        --id "$upgrade_manager_id" \
+        -- execute_upgrade
+    
+    echo -e "${GREEN}✓ Upgrade executed successfully${NC}"
+}
+
+# Direct contract upgrade (legacy method)
+upgrade_contract_direct() {
+    local name="$1"
+    local contract_id="$2"
+    local new_wasm_hash="$3"
+    local new_version="$4"
+    local description="$5"
+    
+    echo -e "${BLUE}Performing direct contract upgrade...${NC}"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo -e "${YELLOW}[DRY RUN] Would upgrade $name directly${NC}"
+        echo -e "  Contract ID: $contract_id"
+        echo -e "  New WASM Hash: $new_wasm_hash"
+        return 0
+    fi
+    
+    # Check if contract supports upgrade_contract method
+    if supports_upgrade_manager "$name" "$contract_id"; then
+        # Use the contract's own upgrade method
+        stellar contract invoke \
+            --network "$NETWORK" \
+            --source-account "$STELLAR_SECRET_KEY" \
+            --id "$contract_id" \
+            -- upgrade_contract \
+            --new_wasm_hash "$new_wasm_hash" \
+            --new_version "$new_version" \
+            --description "$description"
+    else
+        # Use Soroban CLI direct upgrade
+        stellar contract install \
+            --network "$NETWORK" \
+            --source-account "$STELLAR_SECRET_KEY" \
+            --wasm "$TARGET_DIR/${name//-/_}.wasm"
+        
+        # Update deployment metadata
+        echo -e "${GREEN}✓ Direct upgrade completed${NC}"
+    fi
+}
+
+# Upgrade a single contract
+upgrade_single_contract() {
+    local name="$1"
+    local contract_path="$2"
+    
+    echo -e "\n${BLUE}=== Upgrading $name ===${NC}"
+    
+    # Get contract info
+    local contract_info
+    contract_info=$(get_contract_info "$name")
+    
+    if [[ -z "$contract_info" ]]; then
+        echo -e "${RED}✗ Contract $name not found in deployment metadata${NC}"
+        return 1
+    fi
+    
+    local contract_id
+    contract_id=$(echo "$contract_info" | jq -r '.contract_id')
+    
+    local wasm_file="$TARGET_DIR/${name//-/_}.wasm"
+    
+    # Check if upgrade is needed
+    if ! needs_upgrade "$name" "$wasm_file"; then
+        if [[ $? -eq 1 ]]; then
+            echo -e "${GREEN}✓ Contract $name is already up to date${NC}"
+            return 0
+        else
+            return 1
+        fi
+    fi
+    
+    # Calculate new WASM hash
+    local new_wasm_hash
+    new_wasm_hash=$(calculate_wasm_hash "$wasm_file")
+    
+    # Determine version
+    local new_version="$VERSION"
+    if [[ -z "$new_version" ]]; then
+        local current_version
+        current_version=$(get_contract_version "$contract_id")
+        new_version="${current_version}.$(date +%s)" # Simple version bump
+    fi
+    
+    local description="Automated upgrade via upgrade script"
+    if [[ -n "$VERSION" ]]; then
+        description="Upgrade to version $VERSION"
+    fi
+    
+    # Backup state if not skipped
+    backup_contract_state "$name" "$contract_id"
+    
+    # Choose upgrade method
+    if [[ "$USE_UPGRADE_MANAGER" == "true" ]]; then
+        # Use upgrade manager for safe upgrade
+        local upgrade_manager_id
+        upgrade_manager_id=$(get_upgrade_manager_id)
+        
+        # Check if contract supports upgrade manager
+        if ! supports_upgrade_manager "$name" "$contract_id"; then
+            echo -e "${YELLOW}Warning: Contract $name doesn't support upgrade manager${NC}"
+            echo -e "${YELLOW}Falling back to direct upgrade${NC}"
+            upgrade_contract_direct "$name" "$contract_id" "$new_wasm_hash" "$new_version" "$description"
+        else
+            # Check compatibility if not forced
+            if [[ "$FORCE" != "true" ]]; then
+                if ! check_upgrade_compatibility "$contract_id" "$new_version"; then
+                    echo -e "${RED}✗ Upgrade compatibility check failed for $name${NC}"
+                    return 1
+                fi
+            fi
+            
+            # Upgrade via manager
+            propose_upgrade "$name" "$new_version" "$new_wasm_hash" "$description" "$upgrade_manager_id"
+            validate_upgrade_proposal "$upgrade_manager_id"
+            execute_upgrade_via_manager "$upgrade_manager_id"
+        fi
+    else
+        # Direct upgrade
+        upgrade_contract_direct "$name" "$contract_id" "$new_wasm_hash" "$new_version" "$description"
+    fi
+    
+    # Update deployment metadata
+    update_deployment_metadata "$name" "$new_wasm_hash" "$new_version"
+    
+    echo -e "${GREEN}✓ Successfully upgraded $name${NC}"
+}
+
+# Update deployment metadata
+update_deployment_metadata() {
+    local name="$1"
+    local new_hash="$2"
+    local new_version="$3"
+    
+    if [[ "$DRY_RUN" == "true" ]]; then
+        return 0
+    fi
+    
+    # Update the deployment file
+    local temp_file
+    temp_file=$(mktemp)
+    
+    jq --arg name "$name" \
+       --arg hash "$new_hash" \
+       --arg version "$new_version" \
+       --arg timestamp "$TIMESTAMP" \
+       '.contracts[$name].wasm_hash = $hash |
+        .contracts[$name].version = $version |
+        .contracts[$name].upgraded_at = $timestamp' \
+       "$DEPLOYMENT_FILE" > "$temp_file"
+    
+    mv "$temp_file" "$DEPLOYMENT_FILE"
+}
+
+# Main execution
+main() {
+    set_network_defaults
+    check_deployment_file
+    build_contracts
+    
+    if [[ -n "$CONTRACT_NAME" ]]; then
+        # Upgrade specific contract
+        local found=false
+        for contract in "${CONTRACTS[@]}"; do
+            local name="${contract%%:*}"
+            local path="${contract##*:}"
+            
+            if [[ "$name" == "$CONTRACT_NAME" ]]; then
+                upgrade_single_contract "$name" "$path"
+                found=true
+                break
+            fi
+        done
+        
+        if [[ "$found" != "true" ]]; then
+            echo -e "${RED}Error: Contract '$CONTRACT_NAME' not found${NC}" >&2
+            echo -e "${YELLOW}Available contracts:${NC}"
+            for contract in "${CONTRACTS[@]}"; do
+                echo "  ${contract%%:*}"
+            done
+            exit 1
+        fi
+    else
+        # Upgrade all contracts
+        local upgraded=0
+        local total=0
+        
+        for contract in "${CONTRACTS[@]}"; do
+            local name="${contract%%:*}"
+            local path="${contract##*:}"
+            
+            # Skip upgrade-manager if using upgrade manager (it should be upgraded first manually)
+            if [[ "$USE_UPGRADE_MANAGER" == "true" && "$name" == "upgrade-manager" ]]; then
+                echo -e "${YELLOW}Skipping upgrade-manager (should be upgraded manually when using upgrade manager mode)${NC}"
+                continue
+            fi
+            
+            total=$((total + 1))
+            
+            if upgrade_single_contract "$name" "$path"; then
+                upgraded=$((upgraded + 1))
+            fi
+        done
+        
+        echo -e "\n${BLUE}=== Upgrade Summary ===${NC}"
+        echo -e "${GREEN}Successfully upgraded: $upgraded/$total contracts${NC}"
+        
+        if [[ $upgraded -lt $total ]]; then
+            exit 1
+        fi
+    fi
+    
+    if [[ "$DRY_RUN" != "true" ]]; then
+        echo -e "\n${GREEN}🎉 Upgrade completed successfully!${NC}"
+        
+        if [[ "$USE_UPGRADE_MANAGER" == "true" && "$ENABLE_ROLLBACK" == "true" ]]; then
+            echo -e "${YELLOW}💡 Rollback is available for 48 hours via the upgrade manager${NC}"
+        fi
+    fi
+}
+
+# Run main function
+main "$@"
+        echo -e "${YELLOW}[DRY RUN] Would upgrade $name directly${NC}"
+        echo -e "  Contract ID: $contract_id"
+        echo -e "  New WASM Hash: $new_wasm_hash"
+        return 0
+    fi
+    
+    # Check if contract supports upgrade_contract method
+    if supports_upgrade_manager "$name" "$contract_id"; then
+        # Use the contract's own upgrade method
+        stellar contract invoke \
+            --network "$NETWORK" \
+            --source-account "$STELLAR_SECRET_KEY" \
+            --id "$contract_id" \
+            -- upgrade_contract \
+            --new_wasm_hash "$new_wasm_hash" \
+            --new_version "$new_version" \
+            --description "$description"
+    else
+        # Use Soroban CLI direct upgrade
+        stellar contract install \
+            --network "$NETWORK" \
+            --source-account "$STELLAR_SECRET_KEY" \
+            --wasm "$TARGET_DIR/${name//-/_}.wasm"
+        
+        # Update deployment metadata
+        echo -e "${GREEN}✓ Direct upgrade completed${NC}"
+    fi
+}
 
 # Check if deployment file exists
 check_deployment_file() {

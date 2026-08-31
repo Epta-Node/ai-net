@@ -8,6 +8,12 @@ import {
   ComponentNode
 } from '../types/agent';
 
+export interface ExtractedImage {
+  url: string;
+  title?: string;
+  alt?: string;
+}
+
 export function getMarkdown(result: ResearchReportResult | null | undefined): string | null {
   if (!result) return null;
   if (typeof result === 'string') return result;
@@ -51,12 +57,6 @@ export function getRisksList(result: RiskResult | null | undefined): RiskItem[] 
   if (Array.isArray(result)) return result;
   if (result.risks && Array.isArray(result.risks)) return result.risks;
   return null;
-}
-
-export interface ExtractedImage {
-  url: string;
-  title?: string;
-  alt?: string;
 }
 
 export function getDesignDetails(result: DesignResult | null | undefined): {

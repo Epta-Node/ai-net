@@ -73,11 +73,7 @@
                   ]
                 },
                 {
-                  "vec": [
-                    {
-                      "symbol": "Fixed"
-                    }
-                  ]
+                  "u32": 0
                 }
               ]
             }
@@ -106,11 +102,7 @@
                   ]
                 },
                 {
-                  "vec": [
-                    {
-                      "symbol": "Escalated"
-                    }
-                  ]
+                  "u32": 2
                 }
               ]
             }
@@ -170,6 +162,22 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "created_at"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "expires_at"
+                      },
+                      "val": {
+                        "u64": 518400
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "id"
                       },
                       "val": {
@@ -197,11 +205,7 @@
                         "symbol": "resolution"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Fixed"
-                          }
-                        ]
+                        "u32": 0
                       }
                     },
                     {
@@ -260,6 +264,22 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "created_at"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "expires_at"
+                      },
+                      "val": {
+                        "u64": 518400
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "id"
                       },
                       "val": {
@@ -287,11 +307,7 @@
                         "symbol": "resolution"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Fixed"
-                          }
-                        ]
+                        "u32": 0
                       }
                     },
                     {

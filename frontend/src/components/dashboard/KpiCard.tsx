@@ -1,32 +1,83 @@
 // src/components/dashboard/KpiCard.tsx
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { Area, AreaChart, ResponsiveContainer } from 'recharts';
+import { motion } from 'framer-motion';
 import styles from './KpiCard.module.css';
+import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
 
 interface KpiCardProps {
   title: string;
   value: number | string;
-  sparklineData: number[]; // array of values for chart
+  /** 7-day daily series used for the sparkline (preferred) */
+  sparklineData: number[];
   loading?: boolean;
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, loading }) => {
-  const data = sparklineData.map((v, i) => ({ x: i, y: v }));
-  return (
-    <div className={styles.card}>
-      {loading ? (
+  const chartData = sparklineData.map((v, i) => ({ x: i, y: v }));
+
+  // Numeric values animate with spring count-up; strings (e.g. "98.12%") render as-is
+  const numericValue = typeof value === 'number' ? value : null;
+  const displayValue = useAnimatedCounter(numericValue ?? 0);
+
+  const isZero = numericValue !== null && numericValue === 0;
+  const gradientId = `spark-${title.replace(/\s+/g, '-')}`;
+
+  if (loading) {
+    return (
+      <div className={`${styles.card} ${styles.loadingCard}`}>
         <div className={styles.skeleton} />
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      className={styles.card}
+      whileHover={{ y: -3, boxShadow: '0 8px 24px rgba(15, 23, 42, 0.18)' }}
+      transition={{ type: 'spring', stiffness: 300, damping: 22 }}
+    >
+      <div className={styles.title}>{title}</div>
+
+      {isZero ? (
+        <div className={styles.value} role="status" aria-label={`${title}: no data`}>
+          —
+        </div>
+      ) : numericValue !== null ? (
+        <div
+          className={styles.value}
+          role="status"
+          aria-label={`${title}: ${numericValue}`}
+          aria-live="polite"
+        >
+          {displayValue.toLocaleString()}
+        </div>
       ) : (
-        <>
-          <div className={styles.title}>{title}</div>
-          <div className={styles.value}>{value}</div>
-          <ResponsiveContainer width="100%" height={40}>
-            <LineChart data={data} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-              <Line type="monotone" dataKey="y" stroke="#8884d8" dot={false} strokeWidth={2} />
-            </LineChart>
-          </ResponsiveContainer>
-        </>
+        <div className={styles.value}>{value}</div>
       )}
-    </div>
+
+      <div className={styles.sparkline} aria-hidden="true">
+        <ResponsiveContainer width="100%" height={40}>
+          <AreaChart data={chartData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <Area
+              type="monotone"
+              dataKey="y"
+              stroke="var(--color-accent, #8884d8)"
+              fill={`url(#${gradientId})`}
+              strokeWidth={1.5}
+              dot={false}
+              isAnimationActive
+              animationDuration={600}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </motion.div>
   );
 };

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Star } from 'lucide-react'
 import styles from './AgentTable.module.css'
 
@@ -11,8 +12,9 @@ interface ReputationStarsProps {
  * fractional remainder fills the next star proportionally via a clip overlay.
  */
 export function ReputationStars({ value }: ReputationStarsProps) {
+  const { t } = useTranslation()
   const clamped = Math.max(0, Math.min(5, value))
-  const label = `${clamped.toFixed(1)} out of 5`
+  const label = t('a11y.ratingOutOfFive', { value: clamped.toFixed(1) })
 
   return (
     <span

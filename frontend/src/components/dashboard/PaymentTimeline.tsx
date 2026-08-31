@@ -1,12 +1,16 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Coins, Lock, Unlock, ExternalLink } from 'lucide-react';
 import type { PaymentEvent } from '../../types/api';
+import { formatTime } from '../../utils/format';
 
 interface PaymentTimelineProps {
   payments: PaymentEvent[];
 }
 
 export const PaymentTimeline: React.FC<PaymentTimelineProps> = ({ payments }) => {
+  const { t, i18n } = useTranslation();
+
   // Sort payments by timestamp, latest first or oldest first? Generally oldest first (chronological order)
   // is nicer for timelines, but we can do chronological order:
   const sortedPayments = [...payments].sort(
@@ -17,21 +21,21 @@ export const PaymentTimeline: React.FC<PaymentTimelineProps> = ({ payments }) =>
     <div className="glass-panel h-full flex flex-col">
       <div className="flex items-center gap-2 pb-4 border-b border-[var(--panel-border)] mb-4">
         <Coins className="text-amber-400" size={18} />
-        <h3 className="text-md font-semibold text-[var(--text-primary)]">Stellar Escrow Payment Timeline</h3>
+        <h3 className="text-md font-semibold text-[var(--text-primary)]">{t('task.payments.title')}</h3>
       </div>
 
       {sortedPayments.length === 0 ? (
         <div className="flex flex-col items-center justify-center flex-1 py-8 text-slate-500">
           <Coins size={36} className="opacity-20 mb-2" />
-          <p className="text-sm">No payment events recorded yet.</p>
+          <p className="text-sm">{t('task.payments.empty')}</p>
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto pr-1">
           <div className="relative border-l border-slate-700/60 ml-3 pl-6 space-y-6 py-2">
             {sortedPayments.map((payment, index) => {
               const isReleased = !!payment.txHash && payment.txHash !== '';
-              const statusLabel = isReleased ? 'Released' : 'Locked';
-              const dateStr = new Date(payment.timestamp).toLocaleTimeString([], {
+              const statusLabel = isReleased ? t('task.payments.released') : t('task.payments.locked');
+              const dateStr = formatTime(payment.timestamp, i18n.language, {
                 hour: '2-digit',
                 minute: '2-digit',
                 second: '2-digit',
@@ -54,7 +58,7 @@ export const PaymentTimeline: React.FC<PaymentTimelineProps> = ({ payments }) =>
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-bold text-slate-200 capitalize">
-                            {payment.counterparty} Agent
+                            {t('task.agentName', { name: payment.counterparty })}
                           </span>
                           <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
                             isReleased 
@@ -78,7 +82,7 @@ export const PaymentTimeline: React.FC<PaymentTimelineProps> = ({ payments }) =>
                     {isReleased && payment.txHash && (
                       <div className="mt-2.5 pt-2 border-t border-slate-700/30 flex items-center justify-between">
                         <div className="text-[10px] text-slate-500 font-mono truncate max-w-[200px]" title={payment.txHash}>
-                          Tx: {payment.txHash}
+                          {t('task.payments.txHash', { hash: payment.txHash })}
                         </div>
                         <a
                           href={`https://stellar.expert/explorer/testnet/tx/${payment.txHash}`}

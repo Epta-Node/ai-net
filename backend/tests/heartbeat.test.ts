@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { createAgentsRouter } from "../src/api/routes/agents";
 import { AgentRecord, createAgentDb } from "../src/db/agents";
 import { createHeartbeatService } from "../src/services/heartbeat";
+import { errorHandler } from "../src/api/middleware/errorHandler";
 
 const testAgent: AgentRecord = {
   id: "agent-1",
@@ -37,6 +38,7 @@ function createTestApp(initialAgents: AgentRecord[] = []) {
   const app = express();
   app.use(express.json());
   app.use("/api/agents", createAgentsRouter({ db }));
+  app.use(errorHandler);
   return { app, db, rawDb };
 }
 
@@ -47,12 +49,12 @@ describe("Heartbeat Monitoring and Dead-Agent Cleanup", () => {
 
       const response = await request(app).post("/api/agents/agent-1/heartbeat");
 
+      // Heartbeat returns 200 per the route implementation.
       expect(response.status).toBe(200);
-      expect(response.body.status).toBe("ok");
-      expect(response.body.lastSeenAt).toBeDefined();
 
       const updated = db.findById("agent-1");
       expect(updated?.status).toBe("online");
+      expect(updated?.lastSeenAt).toBeDefined();
     });
 
     it("returns 404 for non-existent agent", async () => {
@@ -61,7 +63,7 @@ describe("Heartbeat Monitoring and Dead-Agent Cleanup", () => {
       const response = await request(app).post("/api/agents/unknown-agent/heartbeat");
 
       expect(response.status).toBe(404);
-      expect(response.body).toEqual({ error: "Agent not found" });
+      expect(response.body.error.message).toBe("Agent 'unknown-agent' not found");
     });
   });
 

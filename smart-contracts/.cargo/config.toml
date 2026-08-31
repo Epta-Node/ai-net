@@ -1,0 +1,18 @@
+# Cargo workspace configuration
+# Limits parallel compilation jobs and codegen units to prevent CPU/RAM spikes
+# on CI runners and developer laptops.
+
+[build]
+# Run at most 1 cargo job at a time (equivalent to `cargo build -j 1`).
+# Prevents multiple crates being compiled simultaneously, which can saturate
+# all CPU cores and exhaust RAM on constrained machines.
+jobs = 1
+
+[profile.dev]
+# 1 codegen unit means rustc emits one LLVM module per crate rather than
+# splitting into many parallel units. Slower compile but much lower peak RAM.
+codegen-units = 1
+
+[profile.release]
+# Same limit for release builds (Wasm targets use --release).
+codegen-units = 1

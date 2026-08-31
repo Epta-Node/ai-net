@@ -1,10 +1,31 @@
 # Storage Layout Migration Guide
 
-This document provides guidance on safely migrating Soroban contract storage layouts when upgrading contracts.
+This document provides guidance on safely migrating Soroban contract storage layouts when upgrading contracts using the ai-net upgrade mechanism.
 
 ## Overview
 
 Soroban contracts store data in a key-value store where keys are defined by the contract and values are stored on-chain. When upgrading contracts, it's crucial to maintain compatibility with existing storage layouts to prevent data loss.
+
+The ai-net upgrade mechanism provides safe migration tools including pre-upgrade validation, migration hooks, and rollback capabilities to handle storage layout changes.
+
+## Upgrade Mechanism Integration
+
+### Migration Hooks
+
+The upgrade system provides hooks for safe data migration:
+
+- **Pre-upgrade Hook**: Validates existing data and storage compatibility
+- **Post-upgrade Hook**: Performs data transformations and validation
+- **Rollback Support**: Emergency rollback within 48-hour window
+
+### Migration Planning
+
+Use the `get_migration_plan` function to plan storage migrations:
+
+```rust
+let migration_plan = contract.get_migration_plan("2.0.0")?;
+// Returns: required checks, transformations, validations, estimated items
+```
 
 ## Storage Layout Compatibility
 

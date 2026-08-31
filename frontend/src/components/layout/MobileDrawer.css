@@ -4,36 +4,66 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--surface-black-muted);
   z-index: 1100;
+  -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * A slide-over from the left edge — the same side the sidebar occupies on
+ * desktop, so navigation lives in one place at every width. It was a bottom
+ * sheet, which put the nav somewhere it appears nowhere else in the app.
+ */
 .mobile-drawer {
   position: fixed;
+  top: 0;
   bottom: 0;
   left: 0;
-  right: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(320px, 86vw);
+  padding-left: env(safe-area-inset-left);
   background: var(--bg-primary, #ffffff);
-  border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.2);
+  border-bottom-right-radius: 20px;
+  box-shadow: 8px 0 32px rgba(0, 0, 0, 0.2);
   z-index: 1200;
-  max-height: 70vh;
   overflow: hidden;
+  touch-action: pan-y;
+  will-change: transform;
+  -webkit-overflow-scrolling: touch;
+}
+
+/*
+ * Vertical grab affordance on the trailing edge, matching the horizontal drag
+ * that dismisses the drawer.
+ */
+.drawer-drag-handle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  width: 4px;
+  height: 36px;
+  transform: translateY(-50%);
+  background: var(--border-color, #cbd5e1);
+  border-radius: 2px;
 }
 
 .drawer-header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px 16px;
+  padding: 12px 24px 16px;
+  /* After the shorthand, or it would be overwritten. */
+  padding-top: calc(12px + env(safe-area-inset-top));
   border-bottom: 1px solid var(--border-color, #e2e8f0);
 }
 
 .drawer-header h2 {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text-primary, #1a202c);
+  color: var(--text-primary);
   margin: 0;
 }
 
@@ -43,24 +73,44 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  background: var(--bg-secondary, #f1f5f9);
+  background: var(--bg-secondary);
   border: none;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   cursor: pointer;
-  color: var(--text-secondary, #64748b);
+  color: var(--text-secondary, var(--text-muted));
   font-size: 16px;
   transition: all 0.2s;
 }
 
 .close-btn:hover {
-  background: var(--bg-tertiary, #e2e8f0);
-  color: var(--text-primary, #1a202c);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
 }
 
 .drawer-nav {
+  flex: 1;
   padding: 8px 12px 24px;
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Group headings mirror the desktop sidebar's grouping. */
+.drawer-nav .nav-group + .nav-group {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.drawer-nav .nav-group-label {
+  margin: 0;
+  padding: 4px 16px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-secondary, #64748b);
+  opacity: 0.6;
 }
 
 .drawer-nav ul {
@@ -80,11 +130,11 @@
   padding: 14px 16px;
   background: none;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-xl);
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s;
-  color: var(--text-secondary, #64748b);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  color: var(--text-secondary);
   text-decoration: none;
   font-size: 16px;
   font-weight: 500;
@@ -92,13 +142,17 @@
 }
 
 .drawer-nav .nav-item:hover {
-  background: var(--bg-secondary, #f1f5f9);
-  color: var(--text-primary, #1a202c);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.drawer-nav .nav-item:active {
+  background: var(--surface-elevated);
 }
 
 .drawer-nav .nav-item.active {
-  background: var(--primary-light, rgba(59, 130, 246, 0.1));
-  color: var(--primary, #3b82f6);
+  background: var(--accent-surface);
+  color: var(--primary);
 }
 
 .drawer-nav .nav-icon {
@@ -119,4 +173,19 @@
 
 .drawer-nav .nav-label {
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer-nav .nav-item {
+    transition: none;
+  }
+}
+
+/* Focus trap: prevent focus from escaping the drawer */
+.trap-focus {
+  outline: none;
+}
+
+.trap-focus:focus {
+  outline: none;
 }

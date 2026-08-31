@@ -1,7 +1,11 @@
-import { useEffect } from 'react'
-import { ExternalLink, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { ExternalLink } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import { ReputationStars } from './ReputationStars'
+import { useAgentReputation } from '../../hooks/useAgentReputation'
+import { AgentReputationRadar } from './AgentReputationRadar'
+import { AgentReputationTrend } from './AgentReputationTrend'
+import { Modal } from '../ui'
 import styles from './AgentDetailModal.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
@@ -12,6 +16,11 @@ interface AgentDetailModalProps {
 }
 
 export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
+  const { t } = useTranslation()
+  // Called unconditionally (hook rules) — it no-ops on an empty id, which is
+  // what the closed-modal case passes.
+  const { data: reputationData, loading: reputationLoading } = useAgentReputation(agent?.id ?? '')
+
   useEffect(() => {
     if (!agent) return
     const onKey = (e: KeyboardEvent) => {
@@ -24,63 +33,51 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   if (!agent) return null
 
   return (
-    <div
-      className={styles.overlay}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={`Details for ${agent.name}`}
+    <Modal
+      open={!!agent}
+      onClose={onClose}
+      title={agent ? t('a11y.detailsFor', { name: agent.name }) : ''}
+      data-testid="agent-detail-modal"
     >
-      <div
-        className={styles.modal}
-        onClick={(e) => e.stopPropagation()}
-        data-testid="agent-detail-modal"
-      >
-        <header className={styles.header}>
-          <div>
-            <h2 className={styles.title}>{agent.name}</h2>
-            <code className={styles.id} title={agent.id}>
-              {agent.id}
-            </code>
+      {agent && (
+        <>
+          <div className={styles.header}>
+            <div>
+              <h2 className={styles.title}>{agent.name}</h2>
+              <code className={styles.id} title={agent.id}>
+                {agent.id}
+              </code>
+            </div>
           </div>
-          <button
-            type="button"
-            className={styles.closeButton}
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-        </header>
 
-        <dl className={styles.grid}>
+          <dl className={styles.grid}>
           <div className={styles.field}>
-            <dt>Status</dt>
+            <dt>{t('common.status')}</dt>
             <dd>
               <span
                 className={`${styles.status} ${
                   agent.status === 'active' ? styles.statusActive : styles.statusInactive
                 }`}
               >
-                {agent.status}
+                {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
               </span>
             </dd>
           </div>
 
           <div className={styles.field}>
-            <dt>Price</dt>
+            <dt>{t('common.price')}</dt>
             <dd className={styles.value}>{agent.price.toFixed(2)} XLM</dd>
           </div>
 
           <div className={styles.field}>
-            <dt>Reputation</dt>
+            <dt>{t('common.reputation')}</dt>
             <dd>
               <ReputationStars value={agent.reputation} />
             </dd>
           </div>
 
           <div className={styles.fieldWide}>
-            <dt>Capabilities</dt>
+            <dt>{t('common.capabilities')}</dt>
             <dd className={styles.pills}>
               {agent.capabilities.length === 0 ? (
                 <span className={styles.value}>—</span>
@@ -96,13 +93,13 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
 
           {agent.endpoint && (
             <div className={styles.fieldWide}>
-              <dt>Endpoint</dt>
+              <dt>{t('agent.modal.endpoint')}</dt>
               <dd className={styles.mono}>{agent.endpoint}</dd>
             </div>
           )}
 
           <div className={styles.fieldWide}>
-            <dt>Registration Transaction</dt>
+            <dt>{t('agent.modal.registrationTx')}</dt>
             <dd>
               {agent.registrationTxHash ? (
                 <a
@@ -116,12 +113,29 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
                   <ExternalLink size={14} aria-hidden="true" />
                 </a>
               ) : (
-                <span className={styles.value}>Not available</span>
+                <span className={styles.value}>{t('common.notAvailable')}</span>
               )}
             </dd>
           </div>
-        </dl>
-      </div>
-    </div>
+
+          <div className={styles.fieldWide}>
+            <dt>Reputation Details</dt>
+            <dd>
+              {reputationLoading ? (
+                <div>Loading charts...</div>
+              ) : reputationData ? (
+                <div className={styles.chartsContainer}>
+                  <AgentReputationRadar dimensions={reputationData.dimensions} />
+                  <AgentReputationTrend history={reputationData.history} />
+                </div>
+              ) : (
+                <div>No detailed reputation data available</div>
+              )}
+            </dd>
+          </div>
+          </dl>
+        </>
+      )}
+    </Modal>
   )
 }

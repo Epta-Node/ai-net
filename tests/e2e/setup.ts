@@ -1,4 +1,13 @@
 import { onChainContracts, resetTestDatabase } from "./helpers";
+import { closeAgentDb } from "../../backend/src/db/agents";
+import { closeTaskDb } from "../../backend/src/db/tasks";
+
+// Close better-sqlite3 handles before process exit to prevent
+// `Assertion failed: (env) != nullptr` SIGABRT on Node 24.
+process.on('exit', () => {
+  try { closeAgentDb(); } catch { /* not opened */ }
+  try { closeTaskDb(); } catch { /* not opened */ }
+});
 
 beforeAll(async () => {
   process.env.NODE_ENV = "test";

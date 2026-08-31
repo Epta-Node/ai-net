@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useEffect, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -47,10 +48,12 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   onPinch,
   onPositionChange
 }) => {
+  const { t } = useTranslation();
   const touchDistanceRef = useRef<number | null>(null);
 
   const currentImage = images[currentIndex] || null;
 
+  // Keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
 
@@ -74,6 +77,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose, onPrev, onNext, onZoomIn, onZoomOut, onResetZoom]);
 
+  // Touch Pinch gesture handling
   const handleTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length === 2) {
       const dist = Math.hypot(
@@ -100,6 +104,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
     touchDistanceRef.current = null;
   };
 
+  // Image Download
   const handleDownload = async () => {
     if (!currentImage) return;
     try {
@@ -141,6 +146,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           if (e.target === e.currentTarget) onClose();
         }}
       >
+        {/* Header / Toolbar */}
         <div className={styles.header} data-testid="lightbox-header">
           <div className={styles.titleArea}>
             {images.length > 0 && (
@@ -158,10 +164,9 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           <div className={styles.toolbar}>
             {onZoomOut && (
               <button
-                type="button"
                 className={styles.iconBtn}
                 onClick={onZoomOut}
-                title="Zoom Out (-)"
+                title={t('a11y.zoomOut')}
                 data-testid="zoom-out-btn"
                 disabled={scale <= 1}
               >
@@ -171,10 +176,9 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
 
             {onResetZoom && (
               <button
-                type="button"
                 className={styles.iconBtn}
                 onClick={onResetZoom}
-                title="Reset Zoom (0)"
+                title={t('a11y.resetZoom')}
                 data-testid="zoom-reset-btn"
               >
                 <RotateCcw size={16} style={{ marginRight: 6 }} />
@@ -184,10 +188,9 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
 
             {onZoomIn && (
               <button
-                type="button"
                 className={styles.iconBtn}
                 onClick={onZoomIn}
-                title="Zoom In (+)"
+                title={t('a11y.zoomIn')}
                 data-testid="zoom-in-btn"
               >
                 <ZoomIn size={18} />
@@ -195,20 +198,18 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             )}
 
             <button
-              type="button"
               className={styles.iconBtn}
               onClick={handleDownload}
-              title="Download Image"
+              title={t('a11y.downloadImage')}
               data-testid="download-btn"
             >
               <Download size={18} />
             </button>
 
             <button
-              type="button"
               className={`${styles.iconBtn} ${styles.closeBtn}`}
               onClick={onClose}
-              title="Close Lightbox (Esc)"
+              title={t('a11y.closeLightbox')}
               data-testid="close-btn"
             >
               <X size={20} />
@@ -216,6 +217,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           </div>
         </div>
 
+        {/* Main Viewing Stage */}
         <div
           className={styles.mainStage}
           onWheel={onWheel}
@@ -226,26 +228,27 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             if (e.target === e.currentTarget) onClose();
           }}
         >
+          {/* Navigation Chevron Left */}
           {images.length > 1 && (
             <button
-              type="button"
               className={`${styles.navBtn} ${styles.navBtnLeft}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onPrev();
               }}
-              title="Previous Image (Left Arrow)"
+              title={t('a11y.previousImage')}
               data-testid="prev-btn"
             >
               <ChevronLeft size={24} />
             </button>
           )}
 
+          {/* Draggable & Zoomable Image Wrapper */}
           <div className={styles.imageWrapper}>
             <motion.img
               key={currentImage.url}
               src={currentImage.url}
-              alt={currentImage.alt || currentImage.title || 'Design asset'}
+              alt={currentImage.alt || currentImage.title || t('a11y.designAsset')}
               className={styles.lightboxImage}
               data-testid="lightbox-image"
               drag={scale > 1}
@@ -268,15 +271,15 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             />
           </div>
 
+          {/* Navigation Chevron Right */}
           {images.length > 1 && (
             <button
-              type="button"
               className={`${styles.navBtn} ${styles.navBtnRight}`}
               onClick={(e) => {
                 e.stopPropagation();
                 onNext();
               }}
-              title="Next Image (Right Arrow)"
+              title={t('a11y.nextImage')}
               data-testid="next-btn"
             >
               <ChevronRight size={24} />
@@ -284,6 +287,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           )}
         </div>
 
+        {/* Thumbnails Bar (for multi-image outputs) */}
         {images.length > 1 && (
           <div className={styles.thumbnailsBar} data-testid="thumbnails-bar">
             {images.map((img, idx) => (
@@ -293,7 +297,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 onClick={() => onSelectIndex(idx)}
                 data-testid={`thumb-${idx}`}
               >
-                <img src={img.url} alt={img.title || `Thumb ${idx + 1}`} className={styles.thumbImg} />
+                <img src={img.url} alt={img.title || t('a11y.thumbnail', { index: idx + 1 })} className={styles.thumbImg} />
               </div>
             ))}
           </div>

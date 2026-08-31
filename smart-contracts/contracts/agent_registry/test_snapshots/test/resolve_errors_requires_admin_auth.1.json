@@ -49,11 +49,7 @@
                   ]
                 },
                 {
-                  "vec": [
-                    {
-                      "symbol": "Fixed"
-                    }
-                  ]
+                  "u32": 0
                 }
               ]
             }
@@ -112,6 +108,22 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "created_at"
+                      },
+                      "val": {
+                        "u64": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "expires_at"
+                      },
+                      "val": {
+                        "u64": 518400
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "id"
                       },
                       "val": {
@@ -139,11 +151,7 @@
                         "symbol": "resolution"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Fixed"
-                          }
-                        ]
+                        "u32": 0
                       }
                     },
                     {
@@ -309,5 +317,46 @@
       ]
     ]
   },
-  "events": []
+  "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "registry"
+              },
+              {
+                "symbol": "err_rslvd"
+              }
+            ],
+            "data": {
+              "map": [
+                {
+                  "key": {
+                    "symbol": "error_id"
+                  },
+                  "val": {
+                    "bytes": "2800000000000000000000000000000000000000000000000000000000000000"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "resolution_code"
+                  },
+                  "val": {
+                    "u32": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    }
+  ]
 }

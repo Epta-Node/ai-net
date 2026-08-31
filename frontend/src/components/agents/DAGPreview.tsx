@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactFlow, { Background, Controls, ConnectionLineType, Edge, MarkerType, Node, NodeProps, Position, Handle } from 'reactflow';
 import 'reactflow/dist/style.css';
 import type { DagEdge, DagNode } from '../../services/taskService';
@@ -16,12 +17,14 @@ interface PreviewNodeData {
 }
 
 const PreviewNode = ({ id, data }: NodeProps<PreviewNodeData>) => {
+  const { t } = useTranslation();
+
   return (
     <div id={id} className="dag-node p-3 rounded-xl border border-slate-700 bg-slate-800 text-slate-100 min-w-[140px] text-center font-semibold shadow-md">
-      <Handle type="target" position={Position.Left} style={{ background: '#475569', width: 6, height: 6 }} />
-      <div className="text-[10px] uppercase tracking-wider opacity-65 mb-0.5">Agent Preview</div>
+      <Handle type="target" position={Position.Left} style={{ background: 'var(--border-strong)', width: 6, height: 6 }} />
+      <div className="text-[10px] uppercase tracking-wider opacity-65 mb-0.5">{t('agent.dagPreview')}</div>
       <div className="text-sm font-bold truncate">{data.label}</div>
-      <Handle type="source" position={Position.Right} style={{ background: '#475569', width: 6, height: 6 }} />
+      <Handle type="source" position={Position.Right} style={{ background: 'var(--border-strong)', width: 6, height: 6 }} />
     </div>
   );
 };
@@ -31,6 +34,7 @@ const nodeTypes = {
 };
 
 export function DAGPreview({ dagPreview }: DAGPreviewProps) {
+  const { t } = useTranslation();
   const nodes = dagPreview?.nodes ?? [];
   const edges = dagPreview?.edges ?? [];
 
@@ -52,10 +56,10 @@ export function DAGPreview({ dagPreview }: DAGPreviewProps) {
         source: edge.source,
         target: edge.target,
         animated: true,
-        style: { stroke: '#4b5563', strokeWidth: 2 },
+        style: { stroke: 'var(--text-secondary)', strokeWidth: 2 },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: '#4b5563',
+          color: 'var(--text-secondary)',
         },
       })),
     [edges],
@@ -68,16 +72,16 @@ export function DAGPreview({ dagPreview }: DAGPreviewProps) {
         style={{
           padding: '24px',
           borderRadius: '12px',
-          border: '1px dashed #cbd5e1',
-          color: '#475569',
-          background: '#f8fafc',
+          border: '1px dashed var(--border-strong)',
+          color: 'var(--border-strong)',
+          background: 'var(--surface-primary)',
           minHeight: 180,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
-        No DAG preview available yet.
+        {t('agent.dag.empty')}
       </div>
     );
   }
@@ -93,7 +97,7 @@ export function DAGPreview({ dagPreview }: DAGPreviewProps) {
         attributionPosition="bottom-left"
       >
         <Controls showInteractive={false} />
-        <Background color="#f8fafc" gap={16} />
+        <Background color="var(--surface-primary)" gap={16} />
       </ReactFlow>
     </div>
   );

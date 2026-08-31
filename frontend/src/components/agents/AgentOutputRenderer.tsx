@@ -1,12 +1,6 @@
-import React, { Suspense, useState } from 'react';
-import {
-  Capability,
-  AgentResult,
-  ResearchReportResult,
-  CodingResult,
-  RiskResult,
-  DesignResult
-} from '../../types/agent';
+import React, { Suspense } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
 import DesignRenderer from './DesignRenderer';
 import { Maximize2, Minimize2, Search, Clock, Cpu, Sparkles, X } from 'lucide-react';
@@ -22,48 +16,25 @@ interface Props {
   tokenCount?: number;
 }
 
-const LoadingFallback: React.FC = () => (
-  <div
-    style={{
-      padding: '24px',
-      color: 'var(--text-secondary)',
-      fontStyle: 'italic',
-      fontSize: '0.9rem',
-    }}
-  >
-    Loading renderer...
-  </div>
-);
-
-const getAgentDisplayName = (type: Capability, customName?: string): string => {
-  if (customName) return customName;
-  switch (type) {
-    case 'research':
-    case 'report':
-      return 'Research Agent';
-    case 'coding':
-      return 'Coding Agent';
-    case 'design':
-      return 'Design Agent';
-    case 'risk':
-      return 'Risk Matrix Agent';
-    default:
-      return `${type} Agent`;
-  }
+const LoadingFallback: React.FC = () => {
+  const { t } = useTranslation();
+  return (
+    <div
+      style={{
+        padding: '24px',
+        color: 'var(--text-secondary)',
+        fontStyle: 'italic',
+        fontSize: '0.9rem',
+      }}
+    >
+      {t('agent.output.loadingRenderer')}
+    </div>
+  );
 };
 
-const AgentOutputRenderer: React.FC<Props> = ({
-  agentType,
-  result,
-  agentName,
-  executionTimeMs,
-  tokenCount,
-}) => {
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
-
-  const displayName = getAgentDisplayName(agentType, agentName);
-
+const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
+  const { t } = useTranslation();
+  // All renderers handle null/undefined result with an empty-state placeholder
   if (result === null || result === undefined) {
     return (
       <div
@@ -73,12 +44,12 @@ const AgentOutputRenderer: React.FC<Props> = ({
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
-        No output generated yet.
+        {t('agent.output.empty')}
       </div>
     );
   }

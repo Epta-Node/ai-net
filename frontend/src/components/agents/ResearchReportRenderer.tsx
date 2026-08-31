@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -13,7 +14,8 @@ interface Props {
   searchQuery?: string;
 }
 
-const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
+const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const markdown = getMarkdown(result);
 
   if (!markdown) {
@@ -25,12 +27,12 @@ const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
+          background: 'var(--white-alpha-02)',
           borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
-        No research output available.
+        {t('agent.research.empty')}
       </div>
     );
   }
@@ -63,7 +65,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
       id="research-markdown"
       data-testid="research-markdown"
       style={{
-        color: '#f8fafc',
+        color: 'var(--surface-primary)',
         lineHeight: '1.7',
         fontSize: '1rem',
       }}

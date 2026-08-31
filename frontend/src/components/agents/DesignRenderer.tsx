@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { DesignResult, ComponentNode } from '../../types/agent';
 import { getDesignDetails } from '../../utils/agentUtils';
 import { useLightbox } from '../../hooks/useLightbox';
@@ -33,16 +34,16 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
           padding: '6px 10px',
           borderRadius: '6px',
           cursor: hasChildren ? 'pointer' : 'default',
-          backgroundColor: 'rgba(255, 255, 255, 0.02)',
+          backgroundColor: 'var(--white-alpha-02)',
           transition: 'background-color 0.2s ease',
           fontSize: '0.9rem',
           userSelect: 'none',
         }}
         onMouseEnter={(e) => {
-          if (hasChildren) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
+          if (hasChildren) e.currentTarget.style.backgroundColor = 'var(--white-alpha-05)';
         }}
         onMouseLeave={(e) => {
-          if (hasChildren) e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.02)';
+          if (hasChildren) e.currentTarget.style.backgroundColor = 'var(--white-alpha-02)';
         }}
       >
         {hasChildren ? (
@@ -50,18 +51,18 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
             ▶
           </span>
         ) : (
-          <span style={{ fontSize: '0.75rem', color: 'rgba(255, 255, 255, 0.15)' }}>●</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--white-alpha-15)' }}>●</span>
         )}
-        <span style={{ color: 'rgba(255, 255, 255, 0.3)', fontFamily: 'monospace', fontSize: '0.8rem' }}>&lt;</span>
-        <span style={{ fontWeight: 600, color: hasChildren ? '#38bdf8' : '#e2e8f0' }}>{node.name}</span>
-        <span style={{ color: 'rgba(255, 255, 255, 0.3)', fontFamily: 'monospace', fontSize: '0.8rem' }}>/&gt;</span>
+        <span style={{ color: 'var(--white-alpha-30)', fontFamily: 'monospace', fontSize: '0.8rem' }}>&lt;</span>
+        <span style={{ fontWeight: 600, color: hasChildren ? 'var(--accent-info)' : 'var(--text-primary)' }}>{node.name}</span>
+        <span style={{ color: 'var(--white-alpha-30)', fontFamily: 'monospace', fontSize: '0.8rem' }}>/&gt;</span>
       </div>
 
       {hasChildren && isOpen && (
         <div
           className="tree-node-children"
           style={{
-            borderLeft: '1px solid rgba(255, 255, 255, 0.08)',
+            borderLeft: '1px solid var(--white-alpha-08)',
             marginLeft: '18px',
             paddingLeft: '12px',
           }}
@@ -75,7 +76,8 @@ const TreeNode: React.FC<{ node: ComponentNode; depth: number }> = ({ node, dept
   );
 };
 
-const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
+const DesignRenderer: React.FC<Props> = ({ result }) => {
+  const { t } = useTranslation();
   const details = getDesignDetails(result);
   const [copiedColor, setCopiedColor] = useState<string | null>(null);
   const lightbox = useLightbox();
@@ -89,12 +91,12 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
           padding: '24px',
           textAlign: 'center',
           color: 'var(--text-secondary)',
-          background: 'rgba(255, 255, 255, 0.02)',
-          borderRadius: '8px',
-          border: '1px dashed rgba(255, 255, 255, 0.1)',
+          background: 'var(--white-alpha-02)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px dashed var(--white-alpha-10)',
         }}
       >
-        No design output available.
+        {t('agent.design.empty')}
       </div>
     );
   }
@@ -121,10 +123,10 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   return (
     <div className="design-renderer" id="design-output">
       {/* Design Outputs & Wireframes Gallery */}
-      {filteredImages.length > 0 && (
+      {details.images.length > 0 && (
         <div style={{ marginBottom: '32px' }} data-testid="design-images-gallery">
           <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>
-            Design Outputs & Wireframes ({filteredImages.length})
+            {t('agent.design.outputsTitle', { total: details.images.length })}
           </h4>
           <div
             style={{
@@ -133,15 +135,15 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
               gap: '16px',
             }}
           >
-            {filteredImages.map((img, idx) => (
+            {details.images.map((img, idx) => (
               <div
                 key={`design-img-${idx}`}
-                onClick={() => lightbox.openLightbox(filteredImages, idx)}
+                onClick={() => lightbox.openLightbox(details.images, idx)}
                 style={{
                   position: 'relative',
-                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '10px',
+                  backgroundColor: 'var(--surface-hover-subtle)',
+                  border: '1px solid var(--white-alpha-08)',
+                  borderRadius: 'var(--radius-xl)',
                   overflow: 'hidden',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease',
@@ -150,19 +152,19 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
                 data-testid={`design-image-card-${idx}`}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = 'translateY(-2px)';
-                  e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.4)';
-                  e.currentTarget.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.4)';
+                  e.currentTarget.style.borderColor = 'var(--info-border)';
+                  e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = 'none';
-                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.borderColor = 'var(--white-alpha-08)';
                   e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                <div style={{ position: 'relative', height: '160px', overflow: 'hidden', backgroundColor: '#000' }}>
+                <div style={{ position: 'relative', height: '160px', overflow: 'hidden', backgroundColor: 'var(--surface-black)' }}>
                   <img
                     src={img.url}
-                    alt={img.alt || img.title || `Design output ${idx + 1}`}
+                    alt={img.alt || img.title || t('a11y.designOutput', { index: idx + 1 })}
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                   <div
@@ -170,19 +172,19 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
                       position: 'absolute',
                       top: '8px',
                       right: '8px',
-                      background: 'rgba(0, 0, 0, 0.6)',
+                      background: 'var(--surface-scrim)',
                       backdropFilter: 'blur(4px)',
-                      borderRadius: '6px',
+                      borderRadius: 'var(--radius-md)',
                       padding: '4px 8px',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
-                      color: '#fff',
+                      color: 'var(--text-inverse)',
                       fontSize: '0.75rem',
                     }}
                   >
                     <Maximize2 size={12} />
-                    <span>Expand</span>
+                    <span>{t('common.expand')}</span>
                   </div>
                 </div>
                 {img.title && (
@@ -199,7 +201,7 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
       {/* Color Palette Swatches */}
       {filteredColors.length > 0 && (
         <div style={{ marginBottom: '32px' }}>
-          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>Color Palette Swatches</h4>
+          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('agent.design.colorPalette')}</h4>
           <div
             style={{
               display: 'grid',
@@ -217,9 +219,9 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
                   key={`color-${idx}`}
                   onClick={() => handleCopyColor(hexVal)}
                   style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.05)',
-                    borderRadius: '8px',
+                    backgroundColor: 'var(--surface-hover-subtle)',
+                    border: '1px solid var(--white-alpha-05)',
+                    borderRadius: 'var(--radius-lg)',
                     padding: '8px',
                     cursor: 'pointer',
                     transition: 'all 0.2s ease',
@@ -227,27 +229,27 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
+                    e.currentTarget.style.borderColor = 'var(--white-alpha-15)';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'none';
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+                    e.currentTarget.style.borderColor = 'var(--white-alpha-05)';
                   }}
                 >
                   <div
                     style={{
                       height: '50px',
                       backgroundColor: hexVal,
-                      borderRadius: '6px',
+                      borderRadius: 'var(--radius-md)',
                       marginBottom: '8px',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      border: '1px solid var(--white-alpha-10)',
                     }}
                   />
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', color: '#fff' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', color: 'var(--text-inverse)' }}>
                     {nameVal}
                   </div>
-                  <div style={{ fontSize: '0.7rem', color: isCopied ? '#10b981' : 'var(--text-secondary)', marginTop: '2px', fontFamily: 'monospace' }}>
-                    {isCopied ? 'Copied!' : hexVal}
+                  <div style={{ fontSize: '0.7rem', color: isCopied ? 'var(--status-success)' : 'var(--text-secondary)', marginTop: '2px', fontFamily: 'monospace' }}>
+                    {isCopied ? t('agent.design.copied') : hexVal}
                   </div>
                 </div>
               );
@@ -259,13 +261,13 @@ const DesignRenderer: React.FC<Props> = ({ result, searchQuery }) => {
       {/* Collapsible Component Hierarchy Tree */}
       {details.hierarchy && (
         <div>
-          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>Component Hierarchy Tree</h4>
+          <h4 style={{ marginBottom: '14px', color: 'var(--text-secondary)', fontSize: '0.9rem', fontWeight: 600 }}>{t('agent.design.hierarchy')}</h4>
           <div
             style={{
               padding: '16px',
-              backgroundColor: 'rgba(0, 0, 0, 0.2)',
-              borderRadius: '8px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
+              backgroundColor: 'var(--surface-black-subtle)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid var(--white-alpha-05)',
               overflowX: 'auto',
             }}
           >

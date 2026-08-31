@@ -35,7 +35,7 @@ afterAll(() => {
 });
 
 const app = createApp();
-const WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHN";
+const WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN";
 
 describe("POST /api/tasks", () => {
   it("returns 201 with taskId and DAG with >= 1 node for valid prompt", async () => {
@@ -78,8 +78,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: "", maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Validation failed");
-    expect(res.body.details.prompt).toBeDefined();
+    expect(res.body.error.message).toBe("Validation failed");
+    expect(res.body.error.details.prompt).toBeDefined();
   });
 
   it("returns 400 when prompt exceeds 10 000 characters", async () => {
@@ -90,8 +90,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: oversizedPrompt, maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Validation failed");
-    expect(res.body.details.prompt).toBeDefined();
+    expect(res.body.error.message).toBe("Validation failed");
+    expect(res.body.error.details.prompt).toBeDefined();
   });
 
   it("accepts a prompt of exactly 10 000 characters", async () => {
@@ -155,7 +155,7 @@ describe("GET /api/tasks/:id", () => {
       .get(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Access denied");
+    expect(res.body.error.message).toBe("Access denied");
   });
 
   it("returns 403 when wallet key header is missing", async () => {
@@ -168,15 +168,15 @@ describe("GET /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .get(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Access denied");
+    expect(res.body.error.message).toBe("Access denied");
   });
 });
 
 describe("GET /api/tasks (pagination)", () => {
   it("returns paginated results", async () => {
-    // Create 3 tasks for a fresh wallet
+    // Create 3 tasks for a fresh wallet (must be a valid Stellar public key format)
     const wallet =
-      "GCEZWKCA5PAGINATE000000000000000000000000000000000000000000";
+      "GDPAGINATETEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4H";
     for (let i = 0; i < 3; i++) {
       await request(app.httpServer)
         .post("/api/tasks")
@@ -222,7 +222,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Not authorized to cancel this task");
+    expect(res.body.error.message).toBe("Not authorized to cancel this task");
   });
 
   it("returns 403 when wallet key header is missing on cancel", async () => {
@@ -235,7 +235,7 @@ describe("DELETE /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .delete(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Not authorized to cancel this task");
+    expect(res.body.error.message).toBe("Not authorized to cancel this task");
   });
 
   it("returns 409 when task is not queued (e.g. running)", async () => {
@@ -252,7 +252,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("Cannot cancel task in 'running' status");
+    expect(res.body.error.message).toBe("Cannot cancel task in 'running' status");
   });
 
   it("returns 409 when task is completed", async () => {
@@ -269,7 +269,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("Cannot cancel task in 'completed' status");
+    expect(res.body.error.message).toBe("Cannot cancel task in 'completed' status");
   });
 
   it("returns 404 for unknown task", async () => {
@@ -555,7 +555,7 @@ describe("GET /api/tasks (filtering, sorting, search)", () => {
 
 describe("POST /api/tasks — daily quota enforcement", () => {
   const quotaWallet =
-    "GCEZWKCA5QUOTA000000000000000000000000000000000000000000000";
+    "GQUOTATEST5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HH";
 
   beforeEach(() => {
     // Clean tasks for the quota test wallet before each test

@@ -1,7 +1,9 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, Inbox } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { Inbox } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import type { SortDir, SortKey } from '../../utils/agentRegistry'
 import { ReputationStars } from './ReputationStars'
+import { DataTable, type DataTableColumn } from '../common/DataTable'
 import styles from './AgentTable.module.css'
 
 interface AgentTableProps {
@@ -38,125 +40,60 @@ export function AgentTable({
   onSort,
   onRowClick,
 }: AgentTableProps) {
+  const { t } = useTranslation()
+
+  const columns: DataTableColumn<AgentRecord>[] = [
+    { key: 'id', header: t('agent.table.agentId'), render: (agent) => <span className={styles.mono} title={agent.id}>{truncateId(agent.id)}</span>, sortable: false },
+    { key: 'capabilities', header: t('common.capabilities'), render: (agent) => (
+      <span className={styles.pills}>
+        {agent.capabilities.length === 0 ? <span className={styles.noPill}>—</span> : agent.capabilities.map((cap) => <span key={cap} className={styles.pill}>{cap}</span>)}
+      </span>
+    ) },
+    { key: 'price', header: t('agent.table.price'), sortable: true, render: (agent) => <span className={styles.price}>{agent.price.toFixed(2)}</span> },
+    { key: 'reputation', header: t('common.reputation'), sortable: true, render: (agent) => <ReputationStars value={agent.reputation} /> },
+    { key: 'status', header: t('common.status'), render: (agent) => (
+      <span className={`${styles.status} ${agent.status === 'active' ? styles.statusActive : styles.statusInactive}`}>
+        {t(`agent.status.${agent.status}`, { defaultValue: agent.status })}
+      </span>
+    ) },
+    { key: 'actions', header: t('agent.table.actions'), render: (agent) => (
+      <button type="button" className={styles.detailsButton} onClick={(e) => { e.stopPropagation(); onRowClick(agent) }}>
+        {t('common.details')}
+      </button>
+    ) },
+  ]
+
+  if (loading) {
+    return (
+      <div className={styles.tableWrap}>
+        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
+          <div key={i} className={styles.skeletonRow} data-testid="agent-skeleton-row">
+            {Array.from({ length: 6 }, (_, c) => <span key={c} className={styles.skeletonCell} />)}
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   return (
     <div className={styles.tableWrap}>
-      <table className={styles.table} id="agent-table">
-        <thead>
-          <tr>
-            <th>Agent ID</th>
-            <th>Capabilities</th>
-            <th>
-              <button
-                type="button"
-                className={styles.sortButton}
-                onClick={() => onSort('price')}
-                aria-label="Sort by price"
-              >
-                Price (XLM)
-                <SortIcon active={sortKey === 'price'} dir={sortDir} />
-              </button>
-            </th>
-            <th>
-              <button
-                type="button"
-                className={styles.sortButton}
-                onClick={() => onSort('reputation')}
-                aria-label="Sort by reputation"
-              >
-                Reputation
-                <SortIcon active={sortKey === 'reputation'} dir={sortDir} />
-              </button>
-            </th>
-            <th>Status</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
-            Array.from({ length: SKELETON_ROWS }, (_, i) => (
-              <tr key={i} className={styles.skeletonRow} data-testid="agent-skeleton-row">
-                {Array.from({ length: 6 }, (_, c) => (
-                  <td key={c}>
-                    <span className={styles.skeletonCell} />
-                  </td>
-                ))}
-              </tr>
-            ))
-          ) : agents.length === 0 ? (
-            <tr>
-              <td colSpan={6}>
-                <div className={styles.emptyState} data-testid="agents-empty">
-                  <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
-                  <p className={styles.emptyTitle}>No agents found</p>
-                  <p className={styles.emptySubtext}>
-                    No registered agents match your filters.
-                  </p>
-                </div>
-              </td>
-            </tr>
-          ) : (
-            agents.map((agent) => (
-              <tr
-                key={agent.id}
-                className={styles.row}
-                data-testid={`agent-row-${agent.id}`}
-                onClick={() => onRowClick(agent)}
-                tabIndex={0}
-                role="button"
-                aria-label={`View details for ${agent.name}`}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    onRowClick(agent)
-                  }
-                }}
-              >
-                <td className={styles.mono} title={agent.id}>
-                  {truncateId(agent.id)}
-                </td>
-                <td>
-                  <span className={styles.pills}>
-                    {agent.capabilities.length === 0 ? (
-                      <span className={styles.noPill}>—</span>
-                    ) : (
-                      agent.capabilities.map((cap) => (
-                        <span key={cap} className={styles.pill}>
-                          {cap}
-                        </span>
-                      ))
-                    )}
-                  </span>
-                </td>
-                <td className={styles.price}>{agent.price.toFixed(2)}</td>
-                <td>
-                  <ReputationStars value={agent.reputation} />
-                </td>
-                <td>
-                  <span
-                    className={`${styles.status} ${
-                      agent.status === 'active' ? styles.statusActive : styles.statusInactive
-                    }`}
-                  >
-                    {agent.status}
-                  </span>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={styles.detailsButton}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRowClick(agent)
-                    }}
-                  >
-                    Details
-                  </button>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+      {agents.length === 0 ? (
+        <div className={styles.emptyState} data-testid="agents-empty">
+          <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
+          <p className={styles.emptyTitle}>{t('agent.table.emptyTitle')}</p>
+          <p className={styles.emptySubtext}>{t('agent.table.emptySubtext')}</p>
+        </div>
+      ) : (
+        <DataTable
+          columns={columns}
+          rows={agents}
+          getRowKey={(agent) => agent.id}
+          maxHeight={540}
+          stickyHeader
+          onRowClick={onRowClick}
+          rowClassName={() => styles.row}
+        />
+      )}
     </div>
   )
 }
