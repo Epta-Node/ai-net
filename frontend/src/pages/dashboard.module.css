@@ -9,7 +9,7 @@
   flex-direction: column;
   gap: 0.5rem;
   min-height: 80px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .health {
@@ -27,6 +27,6 @@
 .heading {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--surface-canvas);
   margin: 0;
 }

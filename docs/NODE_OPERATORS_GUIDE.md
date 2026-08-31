@@ -237,6 +237,15 @@ curl "https://horizon-testnet.stellar.org/accounts/${PUBLIC_KEY}" | jq '.balance
 - **Base Reserve**: Keep at least **10 XLM** in the coordinator hot wallet for ledger reserves and network gas.
 - **Escrow Buffer**: Deposit operational funds into the `payment_escrow` contract or keep an automated monitoring alert when the balance drops below **50 XLM**.
 
+### Step 6.4: Payment Lifecycle & Escrow Verification
+
+For a complete architectural visual reference of task funding, sealed bidding, escrow locking/release/refund flows, and juror dispute voting, consult the [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).
+
+Node operators participating as worker nodes or dispute resolution jurors should verify that:
+1. All task escrow allocations are backed by on-chain `EscrowLockedEvent` signatures.
+2. Winning bids are awarded via `ContractAwardedEvent` before commencing off-chain LLM inference.
+3. Juror nodes submit evidence IPFS hashes (`submit_evidence`) within the 3-day evidence window and cast votes (`cast_vote`) prior to the voting deadline.
+
 ---
 
 ## 7. Running the Node

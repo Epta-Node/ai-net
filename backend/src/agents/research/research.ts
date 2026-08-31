@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { VeniceClient, type VeniceClientLike } from '../../services/venice/index.js';
 import type { AgentTask, AgentResult, AgentError, Source } from './types';
+import { getConfig } from '../../config/index.js';
 
 const SourceSchema = z.object({
   url: z.string().url(),
@@ -75,14 +76,7 @@ export class ResearchAgent {
     if (config.veniceClient) {
       this.venice = config.veniceClient;
     } else {
-      const apiKey = process.env['VENICE_API_KEY'];
-      if (!apiKey) {
-        console.warn(
-          '[ResearchAgent] WARNING: VENICE_API_KEY is not set. ' +
-            'Venice calls will fail. Set this env var before running in production.'
-        );
-      }
-      this.venice = new VeniceClient({ apiKey: apiKey ?? '' });
+      this.venice = new VeniceClient({ apiKey: getConfig().VENICE_API_KEY });
     }
     this.apiBaseUrl = config.apiBaseUrl ?? 'http://127.0.0.1:3001';
     this.agentId = config.agentId ?? 'research-agent-1';
@@ -131,7 +125,7 @@ export class ResearchAgent {
       capabilities: ['research'],
       pricingXLM: 0.5,
       endpoint: `${this.apiBaseUrl}/agents/research`,
-      stellarPublicKey: process.env['STELLAR_PUBLIC_KEY'] ?? '',
+      stellarPublicKey: getConfig().STELLAR_PUBLIC_KEY ?? '',
     });
 
     try {

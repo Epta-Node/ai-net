@@ -57,29 +57,81 @@ const envSchema = z.object({
   METRICS_CACHE_TTL_MS: z.coerce.number().int().positive().default(5_000),
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
+
+  // ── Authentication & Session Security ───────────────────────────────────────
+  /** JWT secret key used to sign and verify access tokens. */
+  AUTH_JWT_SECRET: z.string().default("ai-net-default-auth-secret-change-in-production"),
+  /** Access token validity in seconds. Default: 900 (15 min). */
+  AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  /** Refresh token sliding expiry validity in seconds. Default: 604 800 (7 days). */
+  AUTH_REFRESH_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(604_800),
+  /** Max absolute session lifetime in seconds. Default: 2 592 000 (30 days). */
+  AUTH_SESSION_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
 });
 
 let _config: z.infer<typeof envSchema> | null = null;
 
-export function loadConfig(): z.infer<typeof envSchema> {
-  if (_config) return _config;
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const result = envSchema.safeParse(withRuntimeDefaults(env));
 
-  const result = envSchema.safeParse(process.env);
   if (!result.success) {
-    const missing = result.error.issues
-      .map((i) => `${i.path.join(".")}: ${i.message}`)
-      .join("\n  ");
-    console.error(`[config] Environment validation failed:\n  ${missing}`);
-    process.exit(1);
+    throw new ConfigValidationError(result.error.issues);
   }
 
-  _config = result.data;
-  return _config;
+  cachedConfig = {
+    ...result.data,
+    STELLAR_NETWORK_PASSPHRASE: networkPassphrase(result.data.STELLAR_NETWORK),
+  };
+  return cachedConfig;
 }
 
-export function getConfig(): z.infer<typeof envSchema> {
-  if (!_config) throw new Error("Config not loaded. Call loadConfig() first.");
-  return _config;
+export function getConfig(): Config {
+  return cachedConfig ?? loadConfig();
+}
+
+export function resetConfigForTests(): void {
+  cachedConfig = null;
+}
+
+export const config = new Proxy({} as Config, {
+  get(_target, property: keyof Config) {
+    return getConfig()[property];
+  },
+});
+
+export function ttlForRoute(group: "agents" | "stats" | "health"): number {
+  const cfg = getConfig();
+  switch (group) {
+    case "agents":
+      return cfg.CACHE_TTL_AGENTS;
+    case "stats":
+      return cfg.CACHE_TTL_STATS;
+    case "health":
+      return cfg.CACHE_TTL_HEALTH;
+  }
+}
+
+export function allowedOrigins(): string[] {
+  return getConfig()
+    .ALLOWED_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+function redactConfigValue(key: string, value: unknown): unknown {
+  if (/secret|token|api[_-]?key|password|authorization|cookie|private[_-]?key/i.test(key)) {
+    return value ? "[REDACTED]" : value;
+  }
+  if (/address|public[_-]?key|wallet|owner|claimant|destination|source/i.test(key)) {
+    return value ? "[REDACTED_ADDRESS]" : value;
+  }
+  return value;
+}
+
+export function redactedConfigSnapshot(cfg: Config = getConfig()): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(cfg).map(([key, value]) => [key, redactConfigValue(key, value)]),
+  );
 }
 
 export type Config = z.infer<typeof envSchema>;

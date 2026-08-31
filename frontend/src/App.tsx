@@ -1,190 +1,127 @@
-import React, { Suspense, lazy, useEffect } from 'react'
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import React from 'react'
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
-import AppShell from './components/layout/AppShell'
+import { RouteProgressProvider } from './context/RouteProgressContext'
 import { NotFoundPage } from './pages/NotFoundPage'
-import RouteLoader from './components/common/RouteLoader'
-
-// Lazy-loaded pages (route-based code-splitting)
-const LandingPage = lazy(() => import('./pages/LandingPage'))
-const AgentsPage = lazy(() => import('./pages/AgentsPage'))
-const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
-const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
-const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
-const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
-const WalletPage = lazy(() => import('./pages/WalletPage'))
-const DashboardPage = lazy(() => import('./pages/dashboard'))
+import AppShell from './components/layout/AppShell'
+import LandingPage from './pages/LandingPage'
 import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
 import './components/common/Toast.css'
 
+// Lazy-loaded pages
+const DashboardPage = lazy(() => import('./pages/dashboard'))
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const WalletPage = lazy(() => import('./pages/WalletPage'))
+const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
+const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
+const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
+const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
+
+const RouteLoadingFallback: React.FC = () => (
+  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+    {Array.from({ length: 3 }).map((_, i) => (
+      <SkeletonCard key={i} style={{ height: '100px' }} />
+    ))}
+  </div>
+)
+
 /**
- * Everything that needs router context lives here, so `<Router>` (mounted by
- * `App` below) is already in place before `useCommandPalette` calls
- * `useNavigate`.
+ * Everything below the router.
+ *
+ * `/` is the public landing page and renders bare. **Every other route** —
+ * including 404 — renders inside a single `<AppShell>`, so the top nav,
+ * sidebar, drawer, and breadcrumb are assembled once rather than per route.
+ *
+ * The command palette is mounted here, once, outside the route tree: it is
+ * reachable with Ctrl/Cmd+K from any page and must not remount on navigation.
+ * `useCommandPalette` calls `useNavigate`, so this component has to sit inside
+ * `<Router>` rather than beside it.
  */
-const AppContent: React.FC = () => {
-  // Prefetch mapping: path -> dynamic import used to fetch chunk on hover
-  useEffect(() => {
-    const prefetchers: Record<string, () => Promise<any>> = {
-      '/': () => import('./pages/LandingPage'),
-      '/dashboard': () => import('./pages/dashboard'),
-      '/wallet': () => import('./pages/WalletPage'),
-      '/agents': () => import('./pages/AgentsPage'),
-      '/tasks/new': () => import('./pages/tasks/NewTaskPage'),
-      '/tasks/history': () => import('./pages/tasks/TaskHistoryPage'),
-      '/renderer-demo': () => import('./pages/RendererDemoPage'),
-    }
-
-    const onHover = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null
-      if (!target) return
-      const anchor = target.closest('a') as HTMLAnchorElement | null
-      if (!anchor || !anchor.href) return
-      try {
-        const url = new URL(anchor.href)
-        const path = url.pathname
-
-        // Prefetch exact matches
-        const pre = prefetchers[path]
-        if (pre) pre()
-
-        // Prefetch task details page for /tasks/:id pattern
-        if (path.startsWith('/tasks/') && !path.endsWith('/new') && path.split('/').length === 3) {
-          import('./pages/TaskDetailPage')
-        }
-      } catch (_) {
-        // ignore cross-origin or malformed hrefs
-      }
-    }
-
-    document.addEventListener('mouseover', onHover)
-    return () => document.removeEventListener('mouseover', onHover)
-  }, [])
-
-  return (
-    <Router>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={
-            <Suspense fallback={<RouteLoader />}>
-              <LandingPage />
-            </Suspense>
-          } />
-          <Route path="/dashboard" element={
-            <Suspense fallback={<RouteLoader />}>
-              <ProtectedRoute><DashboardPage /></ProtectedRoute>
-            </Suspense>
-          } />
-          <Route path="/wallet" element={
-            <Suspense fallback={<RouteLoader />}>
-              <WalletPage />
-            </Suspense>
-          } />
-          <Route path="/agents" element={
-            <Suspense fallback={<RouteLoader />}>
-              <AgentsPage />
-            </Suspense>
-          } />
-          <Route path="/tasks/new" element={
-            <Suspense fallback={<RouteLoader />}>
-              <ProtectedRoute><NewTaskPage /></ProtectedRoute>
-            </Suspense>
-          } />
-          <Route path="/tasks/:id" element={
-            <Suspense fallback={<RouteLoader />}>
-              <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
-            </Suspense>
-          } />
-          <Route path="/renderer-demo" element={
-            <Suspense fallback={<RouteLoader />}>
-              <RendererDemoPage />
-            </Suspense>
-          } />
-        </Routes>
-      </AppShell>
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
-  )
-}
-
-// Lives INSIDE <Router>: useCommandPalette() calls useNavigate(), which
-// throws the "may be used only in the context of a <Router>" invariant when
-// rendered above it.
 const RoutedContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
+  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
 
   return (
     <>
       <Routes>
-        <Route path="/" element={
-          <Suspense fallback={<RouteLoader />}>
-            <LandingPage />
-          </Suspense>
-        } />
-        <Route path="/*" element={
-          <AppShell>
-            <Routes>
-              <Route path="/dashboard" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><DashboardPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              <Route path="/wallet" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><WalletPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              <Route path="/agents" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><AgentsPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              <Route path="/tasks/new" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><NewTaskPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              <Route path="/tasks/history" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><TaskHistoryPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              <Route path="/tasks/:id" element={
-                <Suspense fallback={<RouteLoader />}>
-                  <ProtectedRoute><TaskDetailPage /></ProtectedRoute>
-                </Suspense>
-              } />
-              {import.meta.env.DEV && (
-                <Route path="/renderer-demo" element={
-                  <Suspense fallback={<RouteLoader />}>
-                    <RendererDemoPage />
-                  </Suspense>
-                } />
-              )}
-              <Route path="*" element={<NotFoundPage />} />
-            </Routes>
-          </AppShell>
-        } />
-        <Route path="*" element={<NotFoundPage />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/*"
+          element={
+            <AppShell>
+              <Routes>
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ProtectedRoute>
+                      <DashboardPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/wallet"
+                  element={
+                    <ProtectedRoute>
+                      <WalletPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/agents"
+                  element={
+                    <ProtectedRoute>
+                      <AgentsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/new"
+                  element={
+                    <ProtectedRoute>
+                      <NewTaskPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/history"
+                  element={
+                    <ProtectedRoute>
+                      <TaskHistoryPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/tasks/:id"
+                  element={
+                    <ProtectedRoute>
+                      <TaskDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+                {import.meta.env.DEV && (
+                  <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                )}
+                <Route path="*" element={<NotFoundPage />} />
+              </Routes>
+            </AppShell>
+          }
+        />
       </Routes>
+
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
         onSearch={search}
         recentSearches={recentSearches}
-        onRecentSearchClick={(query) => {
-          // Trigger search with the recent query
-          search(query)
-        }}
+        onRecentSearchClick={runRecentSearch}
       />
     </>
   )
@@ -197,9 +134,11 @@ const App: React.FC = () => {
         <ThemeProvider>
           <WalletProvider>
             <ToastProvider>
-              <Router>
-                <AppContent />
-              </Router>
+              <NotificationProvider>
+                <Router>
+                  <RoutedContent />
+                </Router>
+              </NotificationProvider>
             </ToastProvider>
           </WalletProvider>
         </ThemeProvider>
