@@ -189,20 +189,8 @@ export function createApp(opts: AppOptions = {}): {
   app.use("/api/agents", agentsRouter);
 
   app.get("/openapi.json", (_req: Request, res: Response) => {
-    res.json(getOpenapiJson());
+    res.json(openapiSpec);
   });
-  app.get("/openapi.yaml", (_req: Request, res: Response) => {
-    res.setHeader("Content-Type", "text/yaml; charset=utf-8");
-    res.send(getOpenapiYaml());
-  });
-  app.get("/docs/swagger.json", (_req: Request, res: Response) => {
-    res.json(getOpenapiJson());
-  });
-  app.get("/docs/swagger.yaml", (_req: Request, res: Response) => {
-    res.setHeader("Content-Type", "text/yaml; charset=utf-8");
-    res.send(getOpenapiYaml());
-  });
-  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, swaggerUiOptions));
 
   // ── Task routes ────────────────────────────────────────────────────────────
   // Authenticated task creation uses the tighter authed limiter.

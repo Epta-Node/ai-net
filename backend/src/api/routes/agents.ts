@@ -19,6 +19,18 @@ export interface AgentsRouterOptions {
   db?: AgentDb;
 }
 
+const STELLAR_PUBLIC_KEY_REGEX = /^G[A-Z2-7]{55}$/;
+
+const RegisterAgentSchema = z.object({
+  agentId: z.string(),
+  capabilities: z.array(z.string()),
+  pricingXLM: z.number().positive("Price must be positive"),
+  endpoint: z.string().url(),
+  stellarPublicKey: z
+    .string()
+    .regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key format"),
+});
+
 const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
 
 // Mirrors the RegisterAgentRequest schema documented in api/docs.ts.
@@ -41,8 +53,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    * @openapi
    * /api/agents:
    *   get:
-   *     summary: List registered AI agents
-   *     description: Retrieves registered agents matching optional capability, minimum reputation, and maximum price filters.
+   *     summary: List registered agents
    *     operationId: listAgents
    *     tags: [Agents]
    *     security: []
@@ -51,47 +62,27 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *         name: capability
    *         schema: { type: string }
    *         description: Filter agents that support this capability
-   *         example: "research"
    *       - in: query
    *         name: minReputation
    *         schema: { type: number }
-   *         description: Minimum reputation score threshold
-   *         example: 80.0
    *       - in: query
    *         name: maxPriceXLM
    *         schema: { type: number }
-   *         description: Maximum price per task execution in XLM
-   *         example: 1.5
    *     responses:
    *       200:
-   *         description: Array of matching registered agents
-   *         headers:
-   *           X-RateLimit-Limit:
-   *             $ref: '#/components/headers/X-RateLimit-Limit'
-   *           X-RateLimit-Remaining:
-   *             $ref: '#/components/headers/X-RateLimit-Remaining'
-   *           X-RateLimit-Reset:
-   *             $ref: '#/components/headers/X-RateLimit-Reset'
+   *         description: List of agents
    *         content:
    *           application/json:
    *             schema:
    *               type: array
    *               items:
    *                 $ref: '#/components/schemas/Agent'
-   *             example:
-   *               - id: "agent_crypto_analyst_01"
-   *                 capabilities: ["research", "report"]
-   *                 pricingXLM: 0.25
-   *                 endpoint: "https://agent-crypto.example.com/api"
-   *                 stellarPublicKey: "GABZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4XYZ"
-   *                 reputationScore: 98.5
-   *                 lastSeenAt: "2026-08-25T17:20:00.000Z"
    *       500:
    *         description: Internal server error
    *         content:
    *           application/json:
    *             schema:
-   *               $ref: '#/components/schemas/InternalServerError'
+   *               $ref: '#/components/schemas/Error'
    */
   // GET /api/agents — supports cursor pagination when ?cursor or ?limit present
   router.get("/", (req: Request, res: Response, next: NextFunction): void => {
@@ -147,6 +138,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     } catch {
       res.status(500).json({ error: "Internal Server Error" });
     }
+    res.json(agent);
   });
 
   router.get("/:id/health", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -157,9 +149,9 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
         return;
       }
 
-      const startedAt = Date.now();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), healthTimeoutMs);
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), healthTimeoutMs);
 
       try {
         const response = await fetch(agent.endpoint, {
@@ -246,6 +238,22 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     } catch (error) {
       next(error);
     }
+    
+    const db = getDb();
+    const agent = {
+      id: data.agentId,
+      capabilities: data.capabilities,
+      pricingXLM: data.pricingXLM,
+      endpoint: data.endpoint,
+      stellarPublicKey: data.stellarPublicKey,
+      reputationScore: 0,
+      lastSeenAt: new Date().toISOString(),
+      status: 'online' as const
+    };
+    
+    db.upsert(agent);
+    
+    res.status(201).json(agent);
   });
 
   router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, (req: Request, res: Response, next: NextFunction): void => {
@@ -266,6 +274,13 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     } catch (error) {
       next(error);
     }
+
+    db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: 'online' });
+    const updated = db.findById(req.params.id);
+    res.status(200).json({
+      status: "ok",
+      lastSeenAt: updated?.lastSeenAt ?? new Date().toISOString(),
+    });
   });
 
   router.delete("/:id", (req: Request, res: Response, next: NextFunction): void => {
@@ -299,6 +314,9 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     } catch (error) {
       next(error);
     }
+    
+    db.delete(req.params.id);
+    res.json({ message: "Agent deleted successfully" });
   });
 
   return router;
