@@ -21,6 +21,15 @@ export interface AgentsRouterOptions {
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
 
+// Mirrors the RegisterAgentRequest schema documented in api/docs.ts.
+const RegisterAgentSchema = z.object({
+  agentId: z.string().min(1),
+  capabilities: z.array(z.string()).min(1),
+  pricingXLM: z.number().min(0.001),
+  endpoint: z.string().url(),
+  stellarPublicKey: z.string().regex(/^G[A-Z2-7]{55}$/),
+});
+
 export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
   const router = Router();
   const config = getConfig();

@@ -97,6 +97,14 @@ export interface AppOptions {
   authService?: AuthService;
   /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
+  /**
+   * How long close() waits for in-flight jobs to finish before closing the
+   * HTTP/WS server anyway. Default: 10000 (10s). A job still running when
+   * this elapses is left in the queue's "active" state — the next worker
+   * start (see JobWorker.start()/recoverIncompleteJobs()) resets it to
+   * "pending" and retries it, rather than losing the work.
+   */
+  jobWorkerStopTimeoutMs?: number;
 }
 
 function tryLoadStellarRelease(): StellarReleasePaymentFn | undefined {
@@ -252,15 +260,21 @@ export function createApp(opts: AppOptions = {}): {
   }));
 
   function close(callback?: () => void): void {
-    jobWorker.stop();
-    heartbeatService.stop();
-    metricsService.setWebSocketProbe(null);
-    detachStream();
-    if (httpServer.listening) {
-      httpServer.close(callback);
-    } else if (callback) {
-      callback();
-    }
+    // Drain first: wait for in-flight jobs to finish (bounded by
+    // jobWorkerStopTimeoutMs) before we stop accepting connections. A job
+    // still active when the drain window elapses is NOT force-failed — it
+    // stays "active" in the store and is picked back up by the next
+    // JobWorker.start() via recoverIncompleteJobs().
+    jobWorker.stop(opts.jobWorkerStopTimeoutMs ?? 10_000).finally(() => {
+      heartbeatService.stop();
+      metricsService.setWebSocketProbe(null);
+      detachStream();
+      if (httpServer.listening) {
+        httpServer.close(callback);
+      } else if (callback) {
+        callback();
+      }
+    });
   }
 
   const routeCount = (app as unknown as { _router?: { stack?: unknown[] } })._router?.stack?.length;

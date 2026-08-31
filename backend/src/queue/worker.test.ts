@@ -368,6 +368,84 @@ describe("Background Job Queue & Worker", () => {
     });
   });
 
+  describe("Restart mid-stream (#349 — in-flight jobs resume, not fail)", () => {
+    it("a job still running when the worker stops is resumed and completed by a fresh worker instance", async () => {
+      // Simulates a graceful shutdown that catches a job mid-execution: the
+      // handler never resolves before stop() gives up waiting, so the job
+      // stays "active" in the store rather than being marked failed — exactly
+      // what api/app.ts's close() -> jobWorker.stop(timeoutMs) produces when
+      // the drain window elapses with work still outstanding.
+      let releaseHandler!: () => void;
+      let resolveHandlerStarted!: () => void;
+      const handlerStarted = new Promise<void>((resolve) => {
+        resolveHandlerStarted = resolve;
+      });
+
+      const firstWorker = new JobWorker({
+        jobStore: store,
+        handler: async () => {
+          resolveHandlerStarted();
+          // Hang until explicitly released — outlives the worker's stop()
+          // timeout, so stop() returns while this job is still "active".
+          await new Promise<void>((releaseResolve) => {
+            releaseHandler = releaseResolve;
+          });
+          return { success: true };
+        },
+        pollIntervalMs: 20,
+        autoStart: false,
+      });
+
+      const queue = new JobQueue(store, firstWorker);
+      const job = queue.enqueue({ taskId: "task_mid_stream" });
+
+      firstWorker.start();
+      await handlerStarted;
+
+      // Job is now actively executing. "Shut down" with a short drain
+      // window — the handler is hung, so stop() times out waiting and
+      // returns with the job still active, exactly like a real deploy that
+      // catches a slow task.
+      await firstWorker.stop(50);
+
+      const midShutdownState = store.findById(job.id);
+      expect(midShutdownState?.status).toBe("active");
+
+      // "Restart": a brand-new JobWorker over the SAME store (in a real
+      // process this is the same jobs.db file reopened) — its start() calls
+      // recoverIncompleteJobs(), which is what actually makes the job
+      // resumable rather than lost.
+      const secondWorker = new JobWorker({
+        jobStore: store,
+        handler: async (_job, updateProgress) => {
+          updateProgress(100);
+          return { success: true, resumed: true };
+        },
+        pollIntervalMs: 20,
+        autoStart: false,
+      });
+
+      const completed = new Promise<void>((resolve) => {
+        secondWorker.onJobCompleted = (completedJob) => {
+          if (completedJob.id === job.id) resolve();
+        };
+      });
+
+      secondWorker.start();
+      await completed;
+      await secondWorker.stop();
+
+      const finalState = store.findById(job.id);
+      expect(finalState?.status).toBe("completed");
+      expect(finalState?.progress).toBe(100);
+      expect(finalState?.completedAt).toBeDefined();
+
+      // Release the first handler's promise so it doesn't leak a dangling
+      // timer/microtask into later tests.
+      releaseHandler();
+    });
+  });
+
   describe("Queue Stats & Admin Operations", () => {
     it("reports accurate stats across pending, active, completed, failed and dead-letter", () => {
       const now = new Date().toISOString();
