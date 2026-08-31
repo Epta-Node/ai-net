@@ -233,3 +233,62 @@ describe("Error hierarchy", () => {
     },
   );
 });
+
+// ── ConflictError (#424) ─────────────────────────────────────────────────────
+
+import { ConflictError } from "./ConflictError";
+import { ProviderError } from "./ProviderError";
+import { ErrorCode, HTTP_STATUS_FOR_CODE, DEFAULT_MESSAGE_FOR_CODE } from "./ErrorCode";
+
+describe("ConflictError", () => {
+  it("uses 409 status and CONFLICT code", () => {
+    const err = new ConflictError("Agent name taken");
+    expect(err.statusCode).toBe(409);
+    expect(err.code).toBe("CONFLICT");
+    expect(err.message).toBe("Agent name taken");
+    expect(err).toBeInstanceOf(AppError);
+  });
+
+  it("has a sensible default message", () => {
+    const err = new ConflictError();
+    expect(err.message).toBeTruthy();
+  });
+});
+
+// ── ProviderError (#424) ─────────────────────────────────────────────────────
+
+describe("ProviderError", () => {
+  it("defaults to 502 PROVIDER_ERROR", () => {
+    const err = new ProviderError();
+    expect(err.statusCode).toBe(502);
+    expect(err.code).toBe("PROVIDER_ERROR");
+  });
+
+  it("uses 504 for PROVIDER_TIMEOUT", () => {
+    const err = new ProviderError("timed out", "PROVIDER_TIMEOUT");
+    expect(err.statusCode).toBe(504);
+    expect(err.code).toBe("PROVIDER_TIMEOUT");
+  });
+
+  it("uses 429 for PROVIDER_RATE_LIMITED", () => {
+    const err = new ProviderError("rate limited", "PROVIDER_RATE_LIMITED");
+    expect(err.statusCode).toBe(429);
+    expect(err.code).toBe("PROVIDER_RATE_LIMITED");
+  });
+});
+
+// ── ErrorCode registry (#424) ─────────────────────────────────────────────────
+
+describe("ErrorCode", () => {
+  it("HTTP_STATUS_FOR_CODE has an entry for every code", () => {
+    for (const code of Object.values(ErrorCode)) {
+      expect(HTTP_STATUS_FOR_CODE[code]).toBeDefined();
+    }
+  });
+
+  it("DEFAULT_MESSAGE_FOR_CODE has a non-empty message for every code", () => {
+    for (const code of Object.values(ErrorCode)) {
+      expect(DEFAULT_MESSAGE_FOR_CODE[code]).toBeTruthy();
+    }
+  });
+});

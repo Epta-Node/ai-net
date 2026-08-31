@@ -4,6 +4,14 @@
   "version": "0.1.0",
   "description": "ai-net — Full Stack AI Agent Network",
   "scripts": {
+    "gate": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage",
+    "check:quality": "npm run gate",
+    "lint": "npm --prefix backend run lint && npm --prefix frontend run lint",
+    "typecheck": "tsc --noEmit && npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "format:fix": "prettier --write \"**/*.{ts,tsx,js,json,md,yml,yaml}\"",
+    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "test:coverage": "npm --prefix backend run test:coverage && npm --prefix frontend run test:coverage",
     "test:e2e": "jest --config tests/e2e/jest.config.js --runInBand",
     "test:e2e:coverage": "jest --config tests/e2e/jest.config.js --runInBand --coverage"
   },
@@ -27,6 +35,7 @@
     "@types/supertest": "^6.0.2",
     "@types/ws": "^8.18.1",
     "jest": "^29.7.0",
+    "prettier": "^3.2.5",
     "supertest": "^7.0.0",
     "ts-jest": "^29.1.4",
     "ts-node": "^10.9.2",
