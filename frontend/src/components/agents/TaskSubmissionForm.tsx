@@ -29,6 +29,9 @@ const makeTaskSchema = (t: TFunction) =>
       .min(1, t('validation.promptRequired'))
       .max(1000, t('validation.promptTooLong')),
     maxBudgetXLM: z.preprocess((value) => {
+      if (value === '' || value === undefined || value === null || (typeof value === 'number' && isNaN(value))) {
+        return 0.1;
+      }
       if (typeof value === 'string') {
         return Number(value)
       }
@@ -64,7 +67,7 @@ export function TaskSubmissionForm() {
     trigger,
     formState: { errors, isSubmitting, isSubmitted, isValid },
   } = useForm<TaskFormValues>({
-    mode: 'onBlur',
+    mode: 'all',
     resolver: zodResolver(taskSchema),
     defaultValues: {
       prompt: '',
@@ -184,12 +187,13 @@ export function TaskSubmissionForm() {
             type="number"
             step="0.1"
             min="0.1"
+            defaultValue={0.1}
             {...register('maxBudgetXLM', { valueAsNumber: true })}
             style={{ width: 180, padding: 'var(--space-3)', borderRadius: 'var(--radius-xl)', border: '1px solid var(--border-color)' }}
             aria-invalid={Boolean(errors.maxBudgetXLM)}
             aria-describedby="budget-error"
           />
-          <p id="budget-error" style={{ color: 'var(--danger)', marginTop: 8 }}>
+          <p id="budget-error" style={{ color: errors.maxBudgetXLM ? 'var(--danger)' : 'var(--text-muted, #64748b)', marginTop: 8 }}>
             {budgetHelperText}
           </p>
         </div>

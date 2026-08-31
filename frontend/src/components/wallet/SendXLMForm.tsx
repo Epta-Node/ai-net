@@ -151,7 +151,7 @@ export function SendXLMForm() {
       const submitData = await submitRes.json()
 
       if (!submitRes.ok) {
-        throw new Error(submitData.extras?.result_codes?.transaction || t('wallet.send.submitFailed'))
+        throw new Error(submitData.extras?.result_codes?.transaction || t('wallet.send.submitFailed', { defaultValue: 'Submit failed' }))
       }
 
       setSuccessTx(submitData.hash)
@@ -170,7 +170,7 @@ export function SendXLMForm() {
         },
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : t('wallet.send.failedToSend')
+      const message = err instanceof Error ? err.message : t('wallet.send.failedToSend', { defaultValue: 'Failed to send payment' })
       setSubmitError(message)
       showToast(message, 'error', {
         duration: 7000,
@@ -190,14 +190,14 @@ export function SendXLMForm() {
   if (!connected) {
     return (
       <div className={styles.container}>
-        <p className={styles.disconnected}>{t('wallet.send.disconnected')}</p>
+        <p className={styles.disconnected}>{t('wallet.send.disconnected', { defaultValue: 'Connect your wallet to send XLM' })}</p>
       </div>
     )
   }
 
   return (
     <div className={styles.container}>
-      <h3 className={styles.heading}>{t('wallet.send.heading')}</h3>
+      <h3 className={styles.heading}>{t('wallet.send.heading', { defaultValue: 'Send XLM' })}</h3>
 
       <form onSubmit={handleSubmit(handleSendClick)} noValidate>
         <FormField
@@ -239,7 +239,7 @@ export function SendXLMForm() {
           id="send-memo"
           label={t('wallet.send.memoLabel')}
           type="text"
-          placeholder={t('wallet.send.memoPlaceholder')}
+          placeholder={t('wallet.send.memoPlaceholder', { defaultValue: 'Payment memo (max 28 chars)' })}
           maxLength={28}
           value={memo}
           onChange={(e) => setMemo(e.target.value)}
@@ -265,7 +265,7 @@ export function SendXLMForm() {
 
       {successTx && (
         <div className={styles.successMessage} role="status">
-          <p>{t('wallet.send.success')}</p>
+          <p>{t('wallet.send.success', { defaultValue: 'Transaction sent successfully!' })}</p>
           <p className={styles.txHash}>
             <Trans i18nKey="wallet.send.txHash" values={{ hash: successTx }} components={[<code key="hash" />]} />
           </p>
@@ -286,20 +286,20 @@ export function SendXLMForm() {
             aria-labelledby="confirm-title"
           >
             <h3 id="confirm-title" className={styles.modalTitle}>
-              {t('wallet.send.confirmTitle')}
+              {t('wallet.send.confirmTitle', { defaultValue: 'Confirm Payment' })}
             </h3>
             <div className={styles.modalBody}>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>{t('wallet.send.to')}</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.to', { defaultValue: 'To' })}</span>
                 <span className={styles.confirmValue}>{confirmation.destination}</span>
               </div>
               <div className={styles.confirmRow}>
-                <span className={styles.confirmLabel}>{t('wallet.send.amount')}</span>
+                <span className={styles.confirmLabel}>{t('wallet.send.amount', { defaultValue: 'Amount' })}</span>
                 <span className={styles.confirmValue}>{confirmation.amount} XLM</span>
               </div>
               {confirmation.memo && (
                 <div className={styles.confirmRow}>
-                  <span className={styles.confirmLabel}>{t('wallet.send.memo')}</span>
+                  <span className={styles.confirmLabel}>{t('wallet.send.memo', { defaultValue: 'Memo' })}</span>
                   <span className={styles.confirmValue}>{confirmation.memo}</span>
                 </div>
               )}
@@ -307,23 +307,25 @@ export function SendXLMForm() {
             <div className={styles.modalActions}>
               <button
                 id="btn-cancel-payment"
+                type="button"
                 className={styles.cancelButton}
                 onClick={handleCancelConfirm}
                 disabled={submitting}
               >
-                {t('common.cancel')}
+                {t('common.cancel', { defaultValue: 'Cancel' })}
               </button>
               <button
                 id="btn-confirm-payment"
+                type="button"
                 className={styles.confirmButton}
                 onClick={handleConfirm}
                 disabled={submitting}
               >
                 {submitting
                   ? connectionMethod === 'freighter'
-                    ? t('wallet.send.signingFreighter')
-                    : t('wallet.send.signingSending')
-                  : t('wallet.send.confirmSend')}
+                    ? t('wallet.send.signingFreighter', { defaultValue: 'Signing with Freighter...' })
+                    : t('wallet.send.signingSending', { defaultValue: 'Sending...' })
+                  : t('wallet.send.confirmSend', { defaultValue: 'Confirm & Send' })}
               </button>
             </div>
           </div>

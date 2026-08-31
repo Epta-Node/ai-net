@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCheck, Inbox, Filter } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
 import NotificationItem from './NotificationItem';
+import { EmptyState } from '../common/EmptyState';
 import './NotificationCenter.css';
 
 interface NotificationCenterProps {
