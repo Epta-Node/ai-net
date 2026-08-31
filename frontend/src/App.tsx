@@ -124,9 +124,11 @@ const App: React.FC = () => {
           <WalletProvider>
             <ToastProvider>
               <NotificationProvider>
-                <Router>
-                  <RoutedContent />
-                </Router>
+                <RouteProgressProvider>
+                  <Router>
+                    <RoutedContent />
+                  </Router>
+                </RouteProgressProvider>
               </NotificationProvider>
             </ToastProvider>
           </WalletProvider>

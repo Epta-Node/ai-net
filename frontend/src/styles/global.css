@@ -1,9 +1,9 @@
+@import './animations.css';
+@import './micro-interactions.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import './animations.css';
-@import './micro-interactions.css';
 
 :root {
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;

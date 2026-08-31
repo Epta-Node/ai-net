@@ -4,9 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search, ExternalLink, Copy, Wallet, Menu, X, Command,
-  LayoutDashboard, ClipboardList, Bot, Hammer, UserPlus, CreditCard, Settings,
+  LayoutDashboard, ClipboardList, Bot, CreditCard,
 } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
+
+const DOCS_URL = 'https://docs.google.com/document/d/1yGcTxu5hSBiaxoAWKKxC-TdH3OdKgRYL/edit?usp=sharing&ouid=107270187144083702546&rtpof=true&sd=true'
+const GITHUB_URL = 'https://github.com/Epta-Node/ai-net'
 
 const Navbar: React.FC = () => {
   const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
@@ -48,58 +51,95 @@ const Navbar: React.FC = () => {
     if (publicKey) navigator.clipboard.writeText(publicKey)
   }
 
-  const handleNavClick = (route: string) => {
-    if (route === '#') return
+  const handleNavClick = (item: { route: string; external?: boolean }) => {
+    if (item.route === '#') return
     setMobileMenuOpen(false)
-    navigate(route)
+    if (item.external) {
+      window.open(item.route, '_blank', 'noopener,noreferrer')
+    } else {
+      navigate(item.route)
+    }
   }
 
   const navItems = [
     { label: t('nav.dashboard'), icon: <LayoutDashboard size={16} />, route: '/dashboard' },
     { label: t('nav.tasks'), icon: <ClipboardList size={16} />, route: '/tasks/new' },
     { label: t('nav.agents'), icon: <Bot size={16} />, route: '/agents' },
-    { label: t('nav.builder'), icon: <Hammer size={16} />, route: '#' },
-    { label: t('nav.register'), icon: <UserPlus size={16} />, route: '#' },
+    { label: t('landing.navbar.docs'), icon: <ExternalLink size={16} />, route: DOCS_URL, external: true },
+    { label: t('landing.navbar.github'), icon: <ExternalLink size={16} />, route: GITHUB_URL, external: true },
     { label: t('nav.payments'), icon: <CreditCard size={16} />, route: '/wallet' },
-    { label: t('nav.settings'), icon: <Settings size={16} />, route: '#' },
+  ]
+
+  const marketingLinks = [
+    { label: t('landing.navbar.agents'), route: '/agents', external: false },
+    { label: t('landing.navbar.tasks'), route: '/tasks/new', external: false },
+    { label: t('landing.navbar.docs'), route: DOCS_URL, external: true },
+    { label: t('landing.navbar.github'), route: GITHUB_URL, external: true },
   ]
 
   return (
     <>
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 sm:px-8 h-[60px] bg-background-primary/75 backdrop-blur-2xl border-b border-border-subtle/80 shadow-[0_1px_0_rgba(255,255,255,0.02)]">
-        {/* Left: Hamburger + Logo */}
-        <div className="flex items-center gap-1.5">
-          <motion.button
-            whileTap={{ scale: 0.9 }}
-            className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary/60 hover:text-text-primary hover:bg-background-surface/80 transition-colors"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            aria-label={t('a11y.toggleMobileMenu')}
-          >
-            <motion.div
-              animate={{ rotate: mobileMenuOpen ? 90 : 0 }}
-              transition={{ duration: 0.2 }}
+        {/* Left: Hamburger + Logo + Marketing Links */}
+        <div className="flex items-center gap-6">
+          <div className="flex items-center gap-1.5">
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              className="lg:hidden flex items-center justify-center w-8 h-8 rounded-lg text-text-secondary/60 hover:text-text-primary hover:bg-background-surface/80 transition-colors"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={t('a11y.toggleMobileMenu')}
             >
-              {mobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
-            </motion.div>
-          </motion.button>
+              <motion.div
+                animate={{ rotate: mobileMenuOpen ? 90 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                {mobileMenuOpen ? <X size={16} /> : <Menu size={16} />}
+              </motion.div>
+            </motion.button>
 
-          <motion.div
-            className="flex items-center gap-2 cursor-pointer"
-            onClick={() => navigate('/')}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
-              a
-            </div>
-            <span className="font-semibold text-[14px] text-text-primary tracking-wide hidden sm:inline">
-              ai-net
-            </span>
-          </motion.div>
+            <motion.div
+              className="flex items-center gap-2 cursor-pointer"
+              onClick={() => navigate('/')}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <div className="w-[26px] h-[26px] rounded-[6px] bg-gradient-primary flex items-center justify-center font-bold text-white text-[13px] shadow-[0_0_12px_rgba(56,189,248,0.35)]">
+                a
+              </div>
+              <span className="font-semibold text-[14px] text-text-primary tracking-wide">
+                ai-net
+              </span>
+            </motion.div>
+          </div>
+
+          {/* Desktop Marketing Nav Links */}
+          <nav className="hidden md:flex items-center gap-1">
+            {marketingLinks.map((link) => (
+              link.external ? (
+                <a
+                  key={link.label}
+                  href={link.route}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-md text-[13px] font-medium text-text-secondary/70 hover:text-text-primary hover:bg-background-surface/50 transition-all"
+                >
+                  {link.label}
+                </a>
+              ) : (
+                <button
+                  key={link.label}
+                  onClick={() => navigate(link.route)}
+                  className="px-3 py-1.5 rounded-md text-[13px] font-medium text-text-secondary/70 hover:text-text-primary hover:bg-background-surface/50 transition-all"
+                >
+                  {link.label}
+                </button>
+              )
+            ))}
+          </nav>
         </div>
 
         {/* Center: Global Search (Desktop) */}
-        <div className="flex-1 max-w-[320px] mx-auto sm:mx-0 sm:flex-none sm:w-[260px] hidden sm:block">
+        <div className="flex-1 max-w-[280px] mx-4 hidden lg:block">
           <div className="flex items-center w-full h-[32px] rounded-lg border border-border-subtle/60 bg-background-surface/40 hover:bg-background-surface/70 transition-all group focus-within:border-accent-cyan/30 focus-within:bg-background-surface/80 focus-within:shadow-[0_0_10px_rgba(56,189,248,0.05)]">
             <div className="flex items-center gap-1.5 pl-2.5 pr-1 pointer-events-none">
               <Search size={13} className="text-text-secondary/30 group-focus-within:text-accent-cyan/60 transition-colors" />
@@ -275,7 +315,7 @@ const Navbar: React.FC = () => {
                       ? 'text-text-secondary/25 cursor-not-allowed'
                       : 'text-text-secondary/70 hover:text-text-primary hover:bg-background-surface/80 active:bg-background-surface'
                   }`}
-                  onClick={() => handleNavClick(item.route)}
+                  onClick={() => handleNavClick(item)}
                 >
                   <span className={`${item.route === '#' ? 'opacity-30' : 'opacity-60'}`}>
                     {item.icon}

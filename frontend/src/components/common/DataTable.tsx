@@ -28,6 +28,8 @@ export interface DataTableProps<T> {
   onRowSelect?: (row: T) => void;
   onRowClick?: (row: T) => void;
   rowClassName?: (row: T) => string;
+  getRowTestId?: (row: T) => string;
+  onSort?: (key: any) => void;
 }
 
 function getCellValue<T>(row: T, key: string): string | number | boolean | null {
@@ -73,6 +75,8 @@ export function DataTable<T>({
   onRowSelect,
   onRowClick,
   rowClassName,
+  getRowTestId,
+  onSort,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
@@ -89,7 +93,7 @@ export function DataTable<T>({
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
 
-  const handleSelect = (key: string | number, row: T) => {
+  const handleSelect = (_key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 
@@ -104,6 +108,7 @@ export function DataTable<T>({
 
     setSortKey(nextKey);
     setSortDirection(nextDirection);
+    onSort?.(nextKey);
   };
 
   if (rows.length === 0) {
@@ -159,6 +164,7 @@ export function DataTable<T>({
               return (
                 <tr
                   key={rowKey}
+                  data-testid={getRowTestId ? getRowTestId(row) : `agent-row-${String(rowKey)}`}
                   className={classes.join(' ')}
                   onClick={() => onRowClick?.(row)}
                   tabIndex={onRowClick ? 0 : undefined}

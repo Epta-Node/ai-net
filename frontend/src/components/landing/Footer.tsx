@@ -6,6 +6,9 @@ import { Github, Twitter, MessageCircle, Heart } from 'lucide-react'
 const GITHUB_URL = 'https://github.com/Epta-Node/ai-net'
 const TWITTER_URL = 'https://x.com/GuildNet_'
 const DOCS_URL = 'https://docs.google.com/document/d/1yGcTxu5hSBiaxoAWKKxC-TdH3OdKgRYL/edit?usp=sharing&ouid=107270187144083702546&rtpof=true&sd=true'
+const CONTRACTS_URL = 'https://github.com/Epta-Node/ai-net/tree/main/smart-contracts'
+const STELLAR_EXPLORER_URL = 'https://stellar.expert/explorer/testnet'
+const DISCORD_URL = 'https://discord.gg/stellar'
 
 const Footer: React.FC = () => {
   const { t } = useTranslation()
@@ -20,7 +23,7 @@ const Footer: React.FC = () => {
         { id: 'dashboard', label: t('nav.dashboard'), to: '/dashboard', external: false },
         { id: 'agents', label: t('nav.agents'), to: '/agents', external: false },
         { id: 'tasks', label: t('nav.tasks'), to: '/tasks/new', external: false },
-        { id: 'builder', label: t('nav.builder'), to: '#', external: false },
+        { id: 'wallet', label: t('footer.wallet'), to: '/wallet', external: false },
       ],
     },
     {
@@ -28,9 +31,9 @@ const Footer: React.FC = () => {
       label: t('footer.resources'),
       links: [
         { id: 'documentation', label: t('footer.documentation'), to: DOCS_URL, external: true },
-        { id: 'api-reference', label: t('footer.apiReference'), to: '#', external: false },
-        { id: 'status', label: t('footer.status'), to: '#', external: false },
-        { id: 'changelog', label: t('footer.changelog'), to: '#', external: false },
+        { id: 'smart-contracts', label: t('footer.smartContracts'), to: CONTRACTS_URL, external: true },
+        { id: 'stellar-explorer', label: t('footer.stellarExplorer'), to: STELLAR_EXPLORER_URL, external: true },
+        { id: 'api-reference', label: t('footer.apiReference'), to: `${GITHUB_URL}#readme`, external: true },
       ],
     },
     {
@@ -38,9 +41,9 @@ const Footer: React.FC = () => {
       label: t('footer.community'),
       links: [
         { id: 'github', label: 'GitHub', to: GITHUB_URL, external: true },
-        { id: 'twitter', label: 'Twitter', to: TWITTER_URL, external: true },
-        { id: 'discord', label: 'Discord', to: '#', external: false },
-        { id: 'blog', label: t('footer.blog'), to: '#', external: false },
+        { id: 'twitter', label: 'Twitter / X', to: TWITTER_URL, external: true },
+        { id: 'discord', label: 'Discord', to: DISCORD_URL, external: true },
+        { id: 'blog', label: t('footer.blog'), to: TWITTER_URL, external: true },
       ],
     },
   ]
@@ -127,7 +130,7 @@ const Footer: React.FC = () => {
             <a href={TWITTER_URL} target="_blank" rel="noopener noreferrer" aria-label="Twitter" className="text-text-secondary/40 hover:text-text-primary transition-colors">
               <Twitter size={16} />
             </a>
-            <a href="#" aria-label="Discord" className="text-text-secondary/40 hover:text-text-primary transition-colors">
+            <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer" aria-label="Discord" className="text-text-secondary/40 hover:text-text-primary transition-colors">
               <MessageCircle size={16} />
             </a>
           </div>

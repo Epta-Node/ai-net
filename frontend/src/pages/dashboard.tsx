@@ -11,7 +11,7 @@ import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
 import { RecentTasksTable } from '../components/dashboard/RecentTasksTable';
 import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonTable } from '../components/common/Skeleton';
 import styles from './dashboard.module.css';
-import type { TimePoint } from '../types/api';
+import type { TimePoint, NetworkStats } from '../types/api';
 
 // Extract y-values from a TimePoint[] series.
 const toSeries = (points: TimePoint[] | undefined): number[] => {
@@ -88,7 +88,7 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  const kpiData = data || {
+  const kpiData: NetworkStats = data || {
     totalAgents: 0,
     totalTasks: 0,
     totalXLMTransacted: 0,

@@ -8,8 +8,7 @@ import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import MobileDrawer from './MobileDrawer'
 import Breadcrumb from './Breadcrumb'
-import RouteProgressBar from './RouteProgressBar'
-import { useRouteProgress } from '../../hooks/useRouteProgress'
+import Footer from '../landing/Footer'
 import './AppShell.css'
 
 interface AppShellProps {
@@ -166,7 +165,10 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
         tabIndex={-1}
       >
         <Breadcrumb />
-        {children}
+        <div className="main-content-body">
+          {children}
+        </div>
+        <Footer />
       </main>
     </div>
   )

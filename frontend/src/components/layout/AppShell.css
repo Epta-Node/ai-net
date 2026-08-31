@@ -38,10 +38,17 @@
 .main-content {
   margin-left: var(--sidebar-width);
   margin-top: var(--topnav-height);
-  padding: 24px;
+  padding: 24px 24px 0 24px;
   overflow-y: auto;
   transition: margin-left 0.3s ease;
   min-height: calc(100vh - var(--topnav-height));
+  display: flex;
+  flex-direction: column;
+}
+
+.main-content-body {
+  flex: 1;
+  margin-bottom: 32px;
 }
 
 .main-content.sidebar-collapsed {
