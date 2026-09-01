@@ -87,6 +87,11 @@
   color: var(--text-primary);
 }
 
+.close-btn:active {
+  background: var(--bg-secondary, #f1f5f9);
+  transform: scale(0.92);
+}
+
 .drawer-nav {
   flex: 1;
   padding: 8px 12px 24px;

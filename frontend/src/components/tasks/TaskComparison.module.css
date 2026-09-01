@@ -126,6 +126,16 @@
   box-shadow: none;
 }
 
+.exportBtn:active {
+  background: rgba(139, 92, 246, 0.4);
+  transform: scale(0.96);
+}
+
+.exportBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .closeBtn {
   display: flex;
   align-items: center;
@@ -142,11 +152,21 @@
 }
 
 .closeBtn:hover {
-  background: var(--status-danger-surface);
-  border-color: var(--status-danger-surface-strong);
-  color: var(--status-danger-text);
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #FCA5A5;
   transform: none;
   box-shadow: none;
+}
+
+.closeBtn:active {
+  background: rgba(239, 68, 68, 0.2);
+  transform: scale(0.92);
+}
+
+.closeBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ─── Split view ─────────────────────────────────────────────────── */

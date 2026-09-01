@@ -73,6 +73,17 @@
   background: var(--info-surface);
 }
 
+.mark-all-read-btn:active {
+  color: var(--accent-cyan, #38bdf8);
+  background: rgba(56, 189, 248, 0.16);
+  transform: scale(0.96);
+}
+
+.mark-all-read-btn:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+}
+
 /* Body / List */
 .notification-panel-body {
   max-height: 420px;
@@ -135,6 +146,20 @@
   border-color: var(--info-border);
 }
 
+.notification-item:active {
+  background: rgba(255, 255, 255, 0.08);
+  transform: scale(0.99);
+}
+
+.notification-item.unread:active {
+  background: rgba(56, 189, 248, 0.14);
+}
+
+.notification-item:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: -2px;
+}
+
 .notification-item.read {
   opacity: 0.78;
 }
@@ -163,9 +188,9 @@
 }
 
 .notification-icon-wrapper.payment {
-  background: var(--status-warning-surface-muted);
-  border-color: var(--status-warning-border);
-  color: var(--status-warning);
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.3);
+  color: #fcd34d;
 }
 
 .notification-icon-wrapper.agent {

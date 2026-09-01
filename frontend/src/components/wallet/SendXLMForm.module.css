@@ -92,6 +92,16 @@
   background: var(--accent-secondary-hover);
 }
 
+.sendButton:active:not(:disabled) {
+  background: #4338ca;
+  transform: scale(0.97);
+}
+
+.sendButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+}
+
 .sendButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -128,6 +138,21 @@
   border-radius: var(--radius-md);
   font-size: 0.8125rem;
   cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.dismissButton:hover {
+  background: #15803d;
+}
+
+.dismissButton:active {
+  background: #166534;
+  transform: scale(0.96);
+}
+
+.dismissButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .overlay {
@@ -209,6 +234,16 @@
   background: var(--border-color);
 }
 
+.cancelButton:active:not(:disabled) {
+  background: var(--bg-surface-alt, #161b24);
+  transform: scale(0.96);
+}
+
+.cancelButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+}
+
 .confirmButton {
   padding: 8px 16px;
   background: var(--accent-secondary);
@@ -223,6 +258,16 @@
 
 .confirmButton:hover:not(:disabled) {
   background: var(--accent-secondary-hover);
+}
+
+.confirmButton:active:not(:disabled) {
+  background: #4338ca;
+  transform: scale(0.97);
+}
+
+.confirmButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .confirmButton:disabled,

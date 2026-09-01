@@ -62,11 +62,26 @@
   box-shadow: none;
 }
 
+.capChip:active {
+  background: rgba(99, 102, 241, 0.2);
+  transform: scale(0.95);
+}
+
+.capChip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .capChipActive,
 .capChipActive:hover {
   background: var(--accent-surface-strong);
   border-color: var(--primary);
-  color: var(--accent-text);
+  color: #C7D2FE;
+}
+
+.capChipActive:active {
+  background: rgba(99, 102, 241, 0.35);
+  transform: scale(0.95);
 }
 
 /* Price slider */
@@ -107,10 +122,25 @@
   box-shadow: none;
 }
 
+.toggleButton:active {
+  background: rgba(255, 255, 255, 0.09);
+  transform: scale(0.95);
+}
+
+.toggleButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .toggleButtonActive,
 .toggleButtonActive:hover {
   background: var(--primary);
   color: var(--text-inverse);
+}
+
+.toggleButtonActive:active {
+  background: var(--primary-hover, #7c3aed);
+  transform: scale(0.95);
 }
 
 /* Actions */
@@ -141,6 +171,16 @@
   box-shadow: none;
 }
 
+.iconAction:active {
+  background: rgba(99, 102, 241, 0.25);
+  transform: scale(0.92);
+}
+
+.iconAction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .resetButton {
   display: inline-flex;
   align-items: center;
@@ -153,6 +193,16 @@
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
+}
+
+.resetButton:active {
+  background: rgba(239, 68, 68, 0.18);
+  transform: scale(0.96);
+}
+
+.resetButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .resetButton:hover {

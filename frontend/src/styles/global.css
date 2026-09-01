@@ -16,7 +16,9 @@
   --border-color: #2A3040;
   --border-subtle: #1F2630;
   --text-primary: #F5F7FA;
-  --text-secondary: #8A93A3;
+  /* WCAG AA on --bg-primary/#0A0E14 and --bg-surface/#11151D (>= 7:1). The
+     previous #8A93A3 fell below 4.5:1 on surface backgrounds. */
+  --text-secondary: #A5AEBD;
   --accent-cyan: #38BDF8;
   --accent-purple: #8B5CF6;
   --accent-green: #34D399;
@@ -25,11 +27,18 @@
   --panel-border: var(--border-subtle);
   --primary: var(--accent-purple);
   --primary-hover: #7c3aed;
+  --primary-active: #6d28d9;
   --success: var(--accent-green);
   --danger: #ef4444;
   --accent: var(--accent-cyan);
   --skeleton-base: #1a1f2e;
   --skeleton-shine: #2a3040;
+  /* Shared press/elevation tokens (issue #380). */
+  --press-scale: 0.97;
+  --press-brightness: 0.92;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -83,9 +92,10 @@ html, body {
 }
 
 .chip {
-  background: color-mix(in srgb, var(--accent-secondary) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-secondary) 30%, transparent);
-  color: var(--accent-info);
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  /* #C7D2FE meets AA on the chip's indigo-tinted dark background. */
+  color: #C7D2FE;
   padding: 6px 12px;
   border-radius: var(--radius-pill);
   font-size: 0.85rem;
@@ -177,8 +187,26 @@ input:focus, textarea:focus {
 .dag-node.completed {
   background: var(--status-success-surface);
   border-color: var(--success);
-  color: var(--status-success-text);
-  box-shadow: var(--glow-success);
+  color: #A7F3D0;
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.dag-node.pending {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #FCD34D;
+}
+
+.dag-node.failed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #FCA5A5;
+}
+
+.dag-node.running {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #C7D2FE;
 }
 
 .dag-arrow {
@@ -277,3 +305,26 @@ td,
 .chip {
   transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
 }
+
+/* Light theme overrides */
+.theme-light {
+  --bg-primary: #FFFFFF;
+  --bg-surface: #F8FAFC;
+  --bg-surface-alt: #F1F5F9;
+  --bg-secondary: #F3F4F6;
+  --border-color: #E6E9EE;
+  --border-subtle: #E9EEF4;
+  --text-primary: #0A0E14;
+  /* WCAG AA on white/#F8FAFC (>= 7:1). */
+  --text-secondary: #475569;
+  --accent-cyan: #0EA5E9;
+  --accent-purple: #7C3AED;
+  --accent-green: #059669;
+  --panel-bg: var(--bg-surface);
+  --panel-border: var(--border-color);
+  --primary: var(--accent-purple);
+  --primary-hover: #6d28d9;
+  --primary-active: #5b21b6;
+  --accent: var(--accent-cyan);
+}
+

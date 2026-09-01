@@ -45,6 +45,15 @@
   color: var(--text-primary);
 }
 
+.sortButton:active {
+  transform: scale(0.95);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .row {
   cursor: pointer;
   transition: background 0.15s ease;
@@ -52,6 +61,10 @@
 
 .row:hover td {
   background: var(--surface-hover-subtle);
+}
+
+.row:active td {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .row:focus-visible {
@@ -77,9 +90,9 @@
 }
 
 .pill {
-  background: var(--accent-surface);
-  border: 1px solid var(--accent-border);
-  color: var(--accent-text-soft);
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #C7D2FE;
   padding: 3px 10px;
   border-radius: var(--radius-pill);
   font-size: 0.72rem;
@@ -119,8 +132,8 @@
 }
 
 .starFg {
-  color: var(--status-warning);
-  fill: var(--status-warning);
+  color: #FCD34D;
+  fill: #fbbf24;
 }
 
 .starValue {
@@ -141,15 +154,15 @@
 }
 
 .statusActive {
-  background: var(--status-success-surface);
-  border: 1px solid var(--status-success-border);
-  color: var(--status-success-text-strong);
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6EE7B7;
 }
 
 .statusInactive {
-  background: var(--status-danger-surface);
-  border: 1px solid var(--status-danger-surface-strong);
-  color: var(--status-danger-text);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #FCA5A5;
 }
 
 .detailsButton {
@@ -168,6 +181,15 @@
   border-color: var(--accent-border-strong);
   transform: none;
   box-shadow: none;
+}
+
+.detailsButton:active {
+  transform: scale(0.95);
+}
+
+.detailsButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Skeleton */

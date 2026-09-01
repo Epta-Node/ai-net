@@ -78,9 +78,9 @@
 }
 
 .dotPending {
-  background: var(--status-warning-surface-muted);
-  border-color: var(--status-warning-border-strong);
-  color: var(--status-warning);
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #FCD34D;
 }
 
 .dotRunning {
@@ -188,6 +188,16 @@
   box-shadow: none;
 }
 
+.selectBtn:active {
+  background: rgba(139, 92, 246, 0.22);
+  transform: scale(0.9);
+}
+
+.selectBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .selectBtnActive {
   border-color: var(--primary);
   background: var(--accent-border);
@@ -246,9 +256,9 @@
 }
 
 .badgePending {
-  background: var(--status-warning-surface-muted);
-  border: 1px solid var(--status-warning-border);
-  color: var(--status-warning);
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #FCD34D;
 }
 
 .badgeRunning {
@@ -307,33 +317,14 @@
   box-shadow: none;
 }
 
-/* ─── Row actions (on hover) ────────────────────────────────────── */
-
-.rowActions {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+.detailBtn:active {
+  background: rgba(56, 189, 248, 0.18);
+  transform: scale(0.9);
 }
 
-.actionBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: transparent;
-  border: 1px solid var(--panel-border);
-  border-radius: 6px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  padding: 0;
-}
-
-.actionBtn:hover {
-  background: rgba(56, 189, 248, 0.1);
-  color: var(--accent);
-  border-color: rgba(56, 189, 248, 0.3);
+.detailBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ─── Execution bar ─────────────────────────────────────────────── */
@@ -424,9 +415,18 @@
 }
 
 .errorToggle:hover {
-  color: var(--status-danger-text);
+  color: #FCA5A5;
   transform: none;
   box-shadow: none;
+}
+
+.errorToggle:active {
+  color: #FECACA;
+}
+
+.errorToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .errorIcon {

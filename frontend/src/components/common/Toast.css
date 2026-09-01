@@ -97,6 +97,51 @@
   opacity: 1;
 }
 
+.toast button:active {
+  opacity: 0.5;
+  transform: scale(0.92);
+}
+
+.toast-success {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.toast-success button {
+  color: #166534;
+}
+
+.toast-error {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+}
+
+.toast-error button {
+  color: #991b1b;
+}
+
+.toast-warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.toast-warning button {
+  color: #92400e;
+}
+
+.toast-info {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+}
+
+.toast-info button {
+  color: #1e40af;
+}
+
 @keyframes toast-slide-in {
   from {
     opacity: 0;

@@ -41,7 +41,17 @@
   text-decoration: underline;
 }
 
-.pending { color: var(--status-warning-strong); }
-.completed { color: var(--status-success); }
-.failed { color: var(--status-danger); }
-.default { color: var(--text-muted); }
+.viewLink:active {
+  opacity: 0.7;
+}
+
+.viewLink:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.pending { color: #FCD34D; }
+.completed { color: #34D399; }
+.failed { color: #F87171; }
+.default { color: var(--text-secondary); }

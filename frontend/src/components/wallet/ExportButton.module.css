@@ -16,6 +16,8 @@
 }
 
 .trigger:hover:not(:disabled) { background: var(--bg-surface-alt); }
+.trigger:active:not(:disabled) { transform: scale(0.96); }
+.trigger:focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: 2px; }
 .trigger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .menu {
@@ -47,6 +49,8 @@
 }
 
 .menuItem:hover:not(:disabled) { background: var(--bg-secondary); }
+.menuItem:active:not(:disabled) { background: var(--bg-surface-alt, #161b24); transform: scale(0.97); }
+.menuItem:focus-visible { outline: 2px solid var(--accent, #38bdf8); outline-offset: -2px; }
 .menuItem:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .error {

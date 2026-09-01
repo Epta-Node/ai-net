@@ -46,8 +46,8 @@ const RouteLoadingFallback: React.FC = () => (
  * `useCommandPalette` calls `useNavigate`, so this component has to sit inside
  * `<Router>` rather than beside it.
  */
-const RoutedContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
+const AppContent: React.FC = () => {
+  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
 
   return (
     <>
@@ -135,11 +135,9 @@ const App: React.FC = () => {
           <WalletProvider>
             <ToastProvider>
               <NotificationProvider>
-                <RouteProgressProvider>
-                  <Router>
-                    <RoutedContent />
-                  </Router>
-                </RouteProgressProvider>
+                <Router>
+                  <AppContent />
+                </Router>
               </NotificationProvider>
             </ToastProvider>
           </WalletProvider>

@@ -1,13 +1,12 @@
-import { useState, useCallback } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { useForm } from 'react-hook-form'
-import type { Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Memo, Horizon, Transaction } from '@stellar/stellar-sdk'
 import { useWallet } from '../../context/WalletContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { signTransactionWithFreighter } from '../../services/freighter'
-import { useToast } from '../../context/ToastContext'
+import { walletTransferSchema, type WalletTransferValues } from '../../schemas/wallet'
 import styles from './SendXLMForm.module.css'
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org'
@@ -43,45 +42,33 @@ export function SendXLMForm() {
   const [successTx, setSuccessTx] = useState<string | null>(null)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  /**
-   * The zod schema validates shape; the available balance is runtime state it
-   * cannot see, so the insufficient-funds check is layered on after it. Doing
-   * it here rather than inside the schema keeps the schema reusable and the
-   * error attached to the `amount` field where the user is looking.
-   */
-  const resolver = useCallback<Resolver<WalletTransferValues>>(
-    async (values, context, options) => {
-      const result = await zodResolver(walletTransferSchema)(values, context, options)
-
-      const amount = Number(values.amount)
-      const available = parseFloat(balance)
-      const hasSchemaAmountError = 'amount' in result.errors
-      if (!hasSchemaAmountError && Number.isFinite(amount) && amount > available) {
-        return {
-          values: {},
-          errors: {
-            ...result.errors,
-            amount: { type: 'insufficientBalance', message: t('validation.insufficientBalance') },
-          },
-        }
-      }
-
-      return result
-    },
-    [balance, t],
-  )
+  // Extend the base schema with a balance check that depends on the live
+  // wallet balance, so it stays fresh whenever the account changes.
+  const schemaWithBalance = useMemo(() => {
+    return walletTransferSchema.extend({
+      amount: walletTransferSchema.shape.amount.refine(
+        (val) => val <= parseFloat(balance),
+        t('validation.insufficientBalance')
+      )
+    })
+  }, [balance, t])
 
   const {
     register,
     handleSubmit,
     reset,
-    formState: { errors, touchedFields },
+    formState: { errors },
   } = useForm<WalletTransferValues>({
-    resolver,
     mode: 'onBlur',
-    defaultValues: { destination: '', amount: 0, memo: '' },
+    resolver: zodResolver(schemaWithBalance),
+    defaultValues: {
+      destination: '',
+      amount: undefined,
+      memo: '',
+    },
   })
 
+  const handleSendClick = (data: WalletTransferValues) => {
     setConfirmation({
       destination: destination.trim(),
       amount,
@@ -200,52 +187,68 @@ export function SendXLMForm() {
       <h3 className={styles.heading}>{t('wallet.send.heading', { defaultValue: 'Send XLM' })}</h3>
 
       <form onSubmit={handleSubmit(handleSendClick)} noValidate>
-        <FormField
-          id="send-destination"
-          label={t('wallet.send.destinationLabel')}
-          placeholder="GABCD...1234"
-          value={destination}
-          onChange={(e) => setDestination(e.target.value)}
-          onBlur={handleDestinationBlur}
-          disabled={Boolean(successTx) || submitting}
-          aria-invalid={Boolean(errors.destination && touched.destination)}
-          aria-describedby={errors.destination ? 'destination-error' : undefined}
-        />
-        {errors.destination && touched.destination && (
-          <p id="destination-error" className={styles.error} role="alert">
-            {errors.destination}
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-destination">
+            {t('wallet.send.destinationLabel')}
+          </label>
+          <input
+            id="send-destination"
+            className={`${styles.input} ${errors.destination ? styles.inputError : ''}`}
+            type="text"
+            placeholder="GABCD...1234"
+            disabled={Boolean(successTx) || submitting}
+            {...register('destination')}
+          />
+          {errors.destination && (
+            <p id="destination-error" className={styles.error} role="alert">
+              {errors.destination.message}
+            </p>
+          )}
+        </div>
+
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-amount">
+            {t('wallet.send.amountLabel')}
+          </label>
+          <input
+            id="send-amount"
+            className={`${styles.input} ${errors.amount ? styles.inputError : ''}`}
+            type="number"
+            step="0.0000001"
+            min="0"
+            placeholder="0.0"
+            disabled={Boolean(successTx) || submitting}
+            {...register('amount')}
+          />
+          <p className={styles.helper}>
+            {t('wallet.send.availableBalance', { balance: parseFloat(balance).toFixed(7) })}
           </p>
-        )}
-      </div>
+          {errors.amount && (
+            <p id="amount-error" className={styles.error} role="alert">
+              {errors.amount.message}
+            </p>
+          )}
+        </div>
 
-        <FormField
-          id="send-amount"
-          label={t('wallet.send.amountLabel')}
-          type="number"
-          step="0.0000001"
-          min="0"
-          placeholder="0.0"
-          error={errors.amount?.message}
-          isTouched={touchedFields.amount}
-          helperText={t('wallet.send.availableBalance', {
-            balance: parseFloat(balance).toFixed(7),
-          })}
-          disabled={Boolean(successTx) || submitting}
-          aria-invalid={Boolean(errors.amount && touched.amount)}
-          aria-describedby={errors.amount ? 'amount-error' : undefined}
-        />
-
-        <FormField
-          id="send-memo"
-          label={t('wallet.send.memoLabel')}
-          type="text"
-          placeholder={t('wallet.send.memoPlaceholder', { defaultValue: 'Payment memo (max 28 chars)' })}
-          maxLength={28}
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          disabled={Boolean(successTx) || submitting}
-        />
-      </div>
+        <div className={styles.field}>
+          <label className={styles.label} htmlFor="send-memo">
+            {t('wallet.send.memoLabel')}
+          </label>
+          <input
+            id="send-memo"
+            className={`${styles.input} ${errors.memo ? styles.inputError : ''}`}
+            type="text"
+            placeholder={t('wallet.send.memoPlaceholder')}
+            maxLength={28}
+            disabled={Boolean(successTx) || submitting}
+            {...register('memo')}
+          />
+          {errors.memo && (
+            <p id="memo-error" className={styles.error} role="alert">
+              {errors.memo.message}
+            </p>
+          )}
+        </div>
 
         <button
           id="btn-send-xlm"

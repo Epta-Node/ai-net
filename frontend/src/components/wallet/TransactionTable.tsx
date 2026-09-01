@@ -11,7 +11,6 @@ import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { useSelectTypeahead } from '../../hooks/useSelectTypeahead'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
-const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
 
 interface TransactionTableProps {
   transactions: TransactionEvent[]
@@ -47,7 +46,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [pageSize, setPageSize] = useState<number>(25)
+  const [pageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
   const pageSizeOptions = useMemo(
     () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
@@ -248,56 +247,20 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
         />
       )}
 
-      {filtered.length > 0 && (
-        <div className={styles.footer}>
-          <div className={styles.pagination}>
-            <label className={styles.pageSizeLabel}>
-              {t('wallet.tx.perPage')}
-              <select
-                className={styles.pageSizeSelect}
-                value={pageSize}
-                onKeyDown={handlePageSizeTypeahead}
-                onChange={(e) => {
-                  selectPageSize(Number(e.target.value))
-                }}
-              >
-                {PAGE_SIZE_OPTIONS.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className={styles.pageControls}>
-              <button
-                type="button"
-                className={styles.pageButton}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage <= 1}
-              >
-                {t('wallet.tx.prev')}
-              </button>
-              <span className={styles.pageIndicator}>
-                {t('wallet.tx.pageIndicator', { current: currentPage, total: totalPages })}
-              </span>
-              <button
-                type="button"
-                className={styles.pageButton}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage >= totalPages}
-              >
-                {t('wallet.tx.next')}
-              </button>
-            </div>
-          </div>
-          <div className={styles.runningTotal}>
-            {t('wallet.tx.runningTotal')}:{' '}
-            <span className={runningTotal >= 0 ? styles.amountIn : styles.amountOut}>
-              {runningTotal >= 0 ? '+' : ''}{runningTotal.toFixed(7)} XLM
-            </span>
-          </div>
-        </div>
-      )}
+      <div className={styles.pagination}>
+        <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
+          Previous
+        </button>
+        <span>
+          Page {currentPage} of {totalPages}
+        </span>
+        <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
+          Next
+        </button>
+      </div>
+      <div className={styles.runningTotal}>
+        {t('wallet.tx.total')} {runningTotal > 0 ? '+' : ''}{runningTotal.toFixed(7)} XLM
+      </div>
     </div>
   )
 }

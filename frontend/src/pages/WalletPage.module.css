@@ -77,6 +77,16 @@
   background: var(--accent-secondary-hover);
 }
 
+.connectButton:active:not(:disabled) {
+  background: #4338ca;
+  transform: scale(0.98);
+}
+
+.connectButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+}
+
 .connectButton:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -98,6 +108,16 @@
 
 .freighterButton:hover:not(:disabled) {
   background: var(--surface-elevated);
+}
+
+.freighterButton:active:not(:disabled) {
+  background: #334155;
+  transform: scale(0.98);
+}
+
+.freighterButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .freighterButton:disabled {
@@ -154,6 +174,16 @@
 
 .link:hover {
   text-decoration: underline;
+}
+
+.link:active {
+  color: #4f46e5;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* Security warning */
@@ -349,6 +379,16 @@
   background: var(--white-alpha-25);
 }
 
+.iconButton:active {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0.92);
+}
+
+.iconButton:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
 .actions {
   margin-top: 16px;
   padding-top: 16px;
@@ -368,6 +408,16 @@
 
 .disconnectButton:hover {
   background: var(--white-alpha-25);
+}
+
+.disconnectButton:active {
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0.96);
+}
+
+.disconnectButton:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
 }
 
 /* Content grid */
