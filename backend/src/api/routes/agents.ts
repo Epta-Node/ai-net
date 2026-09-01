@@ -170,6 +170,26 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     }
   });
 
+  /**
+   * @openapi
+   * /api/agents/{id}/health:
+   *   get:
+   *     summary: Check an agent's live health/reachability
+   *     tags: [Agents]
+   *     security: []
+   *     operationId: checkAgentHealth
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *         example: "agent_crypto_analyst_01"
+   *     responses:
+   *       200:
+   *         description: Health check result
+   *       404:
+   *         description: Agent not found
+   */
   // GET /api/agents/:id/health
   router.get("/:id/health", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -205,6 +225,28 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     }
   });
 
+  /**
+   * @openapi
+   * /api/agents/register:
+   *   post:
+   *     summary: Register a new specialized agent
+   *     tags: [Agents]
+   *     security: []
+   *     operationId: registerAgent
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/RegisterAgentRequest'
+   *     responses:
+   *       201:
+   *         description: Agent registered successfully
+   *       400:
+   *         description: Validation error or Stellar account verification failure
+   *       429:
+   *         description: Registration rate limit exceeded
+   */
   // POST /api/agents/register
   router.post("/register", async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -283,10 +325,25 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *     responses:
    *       200:
    *         description: Heartbeat recorded
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/AgentHeartbeatResponse'
+   *             example:
+   *               status: "ok"
+   *               lastSeenAt: "2026-08-25T17:30:00.000Z"
    *       404:
    *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/NotFoundError'
    *       429:
    *         description: Heartbeat rate limit exceeded
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/RateLimitError'
    */
   // POST /api/agents/:id/heartbeat
   router.post("/:id/heartbeat", heartbeatRateLimitMiddleware, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -346,10 +403,26 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
    *     responses:
    *       200:
    *         description: Agent deleted successfully
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 message: { type: string, example: "Agent deleted successfully" }
    *       401:
    *         description: Missing or invalid signature/challenge
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
+   *             example:
+   *               error: "Invalid signature"
    *       404:
    *         description: Agent not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/NotFoundError'
    */
   // DELETE /api/agents/:id
   router.delete("/:id", async (req: Request, res: Response, next: NextFunction): Promise<void> => {

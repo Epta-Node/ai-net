@@ -36,6 +36,7 @@ import type {
   MetricsSources,
   PaymentAmount,
   PaymentMetrics,
+  RegistryCacheMetrics,
   PrometheusHistogram,
   RegistryCacheMetrics,
   RequestMetrics,
