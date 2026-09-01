@@ -22,6 +22,7 @@ import { PerformanceObserver } from "perf_hooks";
 
 import { getConfig } from "../config";
 import { createLogger } from "../utils/logger";
+import { getCacheMetrics } from "../cache/metrics";
 import type {
   AgentMetrics,
   CpuMetrics,
@@ -36,6 +37,7 @@ import type {
   PaymentAmount,
   PaymentMetrics,
   PrometheusHistogram,
+  RegistryCacheMetrics,
   RequestMetrics,
   RequestSample,
   ScrapeHealth,
@@ -805,6 +807,7 @@ export class MetricsService {
       agents,
       tasks,
       payments,
+      registryCache: getCacheMetrics() as RegistryCacheMetrics,
     };
   }
 }

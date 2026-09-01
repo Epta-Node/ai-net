@@ -1,9 +1,13 @@
+/* ─── Canvas wrapper ──────────────────────────────────────────────────────── */
+
 .container {
+  position: relative;
   width: 100%;
-  min-height: 240px;
-  border-radius: var(--radius-xl);
+  min-height: 260px;
+  border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--text-primary);
+  border: 1px solid #1e293b;
+  background: #0a0e14;
 }
 
 @media (min-width: 768px) {
@@ -14,6 +18,259 @@
 
 @media (min-width: 1024px) {
   .container {
-    min-height: 400px;
+    min-height: 380px;
   }
+}
+
+/* ─── Empty state ─────────────────────────────────────────────────────────── */
+
+.empty {
+  padding: 32px 24px;
+  border-radius: 12px;
+  border: 1px dashed #334155;
+  color: #64748b;
+  background: #0f172a;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+/* ─── Custom node ─────────────────────────────────────────────────────────── */
+
+.node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 14px 8px;
+  min-width: 130px;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.08);
+  background: rgba(30, 41, 59, 0.85);
+  color: #e2e8f0;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
+}
+
+.node:hover {
+  border-color: var(--node-accent, #8b5cf6);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--node-accent, #8b5cf6) 45%, transparent);
+  transform: translateY(-1px);
+}
+
+.nodeSelected {
+  border-color: var(--node-accent, #8b5cf6) !important;
+  box-shadow: 0 0 18px color-mix(in srgb, var(--node-accent, #8b5cf6) 60%, transparent) !important;
+}
+
+/* Capability badge (two-letter monogram) */
+.nodeCapBadge {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.6rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.nodeLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Status pill */
+.nodeStatus {
+  font-size: 0.55rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ─── Status colour overrides ─────────────────────────────────────────────── */
+
+.status_pending  { color: #94a3b8; }
+.status_running  { color: #818cf8; }
+.status_completed { color: #34d399; }
+.status_failed   { color: #f87171; }
+
+/* ─── ReactFlow handle dots ───────────────────────────────────────────────── */
+
+.handle {
+  width: 6px !important;
+  height: 6px !important;
+  background: #475569 !important;
+  border: none !important;
+}
+
+/* ─── Capability tooltip ──────────────────────────────────────────────────── */
+
+.tooltip {
+  position: absolute;
+  /* Appear above the node */
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+
+  min-width: 160px;
+  border-radius: 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 0;
+  overflow: hidden;
+
+  /* Prevent tooltip from triggering node leave */
+  pointer-events: none;
+
+  /* Fade-in */
+  animation: tooltipFadeIn 0.15s ease forwards;
+}
+
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.tooltipHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 2px solid;
+}
+
+.tooltipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tooltipTitle {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+}
+
+.tooltipBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 6px 0;
+}
+
+.tooltipRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+}
+
+.tooltipRow dt {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.tooltipRow dd {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  text-align: right;
+}
+
+.tooltipMono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.6rem !important;
+  color: #94a3b8 !important;
+  max-width: 100px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Minimap ─────────────────────────────────────────────────────────────── */
+
+.minimap {
+  border-radius: 8px !important;
+  border: 1px solid #1e293b !important;
+  background: #0a0e14 !important;
+  overflow: hidden;
+}
+
+/* ─── Fit-view custom button ──────────────────────────────────────────────── */
+
+.fitViewBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.fitViewBtn:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.fitViewBtn:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* ─── Hint line ───────────────────────────────────────────────────────────── */
+
+.hint {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.6rem;
+  color: #475569;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* On very small canvases, hide the hint to avoid overlap */
+@media (max-width: 400px) {
+  .hint { display: none; }
 }
