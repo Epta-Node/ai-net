@@ -10,6 +10,7 @@
  *   WebSocket) and read domain counters out of SQLite.
  * • Serve the assembled snapshot from a short-lived cache so that a scraping
  *   dashboard cannot turn `/health/dashboard` into a load generator.
+ * • Export Prometheus metrics and track agent quality and reputation telemetry.
  *
  * The heavy lifting lives in exported pure functions (`calculateRequestMetrics`,
  * `summarizePayments`, …) so that every metric calculation is unit-testable
@@ -36,8 +37,10 @@ import type {
   PaymentAmount,
   PaymentMetrics,
   RegistryCacheMetrics,
+  PrometheusHistogram,
   RequestMetrics,
   RequestSample,
+  ScrapeHealth,
   SystemMetrics,
   TaskMetrics,
 } from "./metrics.types";
@@ -383,6 +386,122 @@ export function deriveDashboardStatus(dependencies: DependencyMetrics): Dashboar
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Prometheus metrics rendering pure functions (Issue #499)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_TASK_DURATION_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300];
+export const DEFAULT_VENICE_LATENCY_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30];
+
+export function createEmptyHistogram(bucketBounds: number[]): PrometheusHistogram {
+  const buckets: Record<number, number> = {};
+  for (const b of bucketBounds) {
+    buckets[b] = 0;
+  }
+  return { buckets, sum: 0, count: 0 };
+}
+
+export function observeHistogram(histogram: PrometheusHistogram, value: number): void {
+  histogram.count += 1;
+  histogram.sum = round(histogram.sum + Math.max(0, value), 4);
+  const bounds = Object.keys(histogram.buckets).map(Number).sort((a, b) => a - b);
+  for (const bound of bounds) {
+    if (value <= bound) {
+      histogram.buckets[bound] = (histogram.buckets[bound] ?? 0) + 1;
+    }
+  }
+}
+
+export function renderHistogram(name: string, help: string, histogram: PrometheusHistogram): string {
+  const lines: string[] = [];
+  lines.push(`# HELP ${name} ${help}`);
+  lines.push(`# TYPE ${name} histogram`);
+  const bounds = Object.keys(histogram.buckets).map(Number).sort((a, b) => a - b);
+  let cumulative = 0;
+  for (const bound of bounds) {
+    cumulative = histogram.buckets[bound] ?? 0;
+    lines.push(`${name}_bucket{le="${bound}"} ${cumulative}`);
+  }
+  lines.push(`${name}_bucket{le="+Inf"} ${histogram.count}`);
+  lines.push(`${name}_sum ${histogram.sum}`);
+  lines.push(`${name}_count ${histogram.count}`);
+  return lines.join("\n");
+}
+
+export function formatPrometheusMetrics(params: {
+  tasks: TaskMetrics;
+  agents: AgentMetrics;
+  payments: PaymentMetrics;
+  taskDurationHistogram: PrometheusHistogram;
+  veniceRequests: Map<string, number>;
+  veniceLatencyHistogram: PrometheusHistogram;
+  veniceCircuitBreakerState: number;
+  totalXlmTransacted?: number;
+}): string {
+  const lines: string[] = [];
+
+  // 1. ainet_tasks_total{status} — counter of tasks by final status
+  lines.push("# HELP ainet_tasks_total Counter of tasks by final status");
+  lines.push("# TYPE ainet_tasks_total counter");
+  lines.push(`ainet_tasks_total{status="completed"} ${params.tasks.completed}`);
+  lines.push(`ainet_tasks_total{status="failed"} ${params.tasks.failed}`);
+  lines.push(`ainet_tasks_total{status="cancelled"} ${params.tasks.cancelled}`);
+  lines.push(`ainet_tasks_total{status="active"} ${params.tasks.active}`);
+  lines.push(`ainet_tasks_total{status="queued"} ${params.tasks.queued}`);
+
+  // 2. ainet_tasks_duration_seconds — histogram of task execution time
+  lines.push("");
+  lines.push(renderHistogram("ainet_tasks_duration_seconds", "Histogram of task execution time", params.taskDurationHistogram));
+
+  // 3. ainet_agents_total — gauge of registered agents
+  lines.push("");
+  lines.push("# HELP ainet_agents_total Gauge of registered agents");
+  lines.push("# TYPE ainet_agents_total gauge");
+  lines.push(`ainet_agents_total ${params.agents.total}`);
+
+  // 4. ainet_payments_total{status,currency} — counter of payments by status
+  lines.push("");
+  lines.push("# HELP ainet_payments_total Counter of payments by status");
+  lines.push("# TYPE ainet_payments_total counter");
+  lines.push(`ainet_payments_total{currency="XLM",status="locked"} ${params.payments.locked.count}`);
+  lines.push(`ainet_payments_total{currency="XLM",status="released"} ${params.payments.released.count}`);
+  lines.push(`ainet_payments_total{currency="XLM",status="refunded"} ${params.payments.refunded.count}`);
+
+  // 5. ainet_payment_amount_xlm_total — gauge/counter of total XLM transacted
+  lines.push("");
+  lines.push("# HELP ainet_payment_amount_xlm_total Total XLM transacted through payment escrows");
+  lines.push("# TYPE ainet_payment_amount_xlm_total gauge");
+  const xlmTotal = params.totalXlmTransacted !== undefined
+    ? params.totalXlmTransacted
+    : round(params.payments.locked.xlm + params.payments.released.xlm + params.payments.refunded.xlm, 4);
+  lines.push(`ainet_payment_amount_xlm_total ${xlmTotal}`);
+
+  // 6. ainet_venice_requests_total{model,status} — counter of Venice calls
+  lines.push("");
+  lines.push("# HELP ainet_venice_requests_total Counter of Venice calls");
+  lines.push("# TYPE ainet_venice_requests_total counter");
+  if (params.veniceRequests.size === 0) {
+    lines.push(`ainet_venice_requests_total{model="default",status="success"} 0`);
+  } else {
+    for (const [key, count] of params.veniceRequests.entries()) {
+      const [model, status] = key.split("::");
+      lines.push(`ainet_venice_requests_total{model="${model || "default"}",status="${status || "success"}"} ${count}`);
+    }
+  }
+
+  // 7. ainet_venice_latency_seconds — histogram of Venice call latency
+  lines.push("");
+  lines.push(renderHistogram("ainet_venice_latency_seconds", "Histogram of Venice call latency", params.veniceLatencyHistogram));
+
+  // 8. ainet_venice_circuit_breaker_state — gauge (0 closed, 1 open, 2 half-open)
+  lines.push("");
+  lines.push("# HELP ainet_venice_circuit_breaker_state Gauge (0 closed, 1 open, 2 half-open)");
+  lines.push("# TYPE ainet_venice_circuit_breaker_state gauge");
+  lines.push(`ainet_venice_circuit_breaker_state ${params.veniceCircuitBreakerState}`);
+
+  return lines.join("\n") + "\n";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Metrics service
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -439,6 +558,7 @@ export class MetricsService {
     this.startedAtMs = this.clock();
     this.lastCpuUsage = process.cpuUsage();
     this.lastCpuSampleAtMs = Date.now();
+    this.lastScrapeTimestamp = new Date(this.startedAtMs).toISOString();
   }
 
   /** Record one completed HTTP response. */
@@ -563,6 +683,97 @@ export class MetricsService {
   /** Discard every recorded request sample. */
   resetSamples(): void {
     this.samples = [];
+  }
+
+  // ── Prometheus Metric Families (Issue #499) ────────────────────────────────
+
+  private taskDurationHistogram = createEmptyHistogram(DEFAULT_TASK_DURATION_BUCKETS);
+  private veniceRequests = new Map<string, number>();
+  private veniceLatencyHistogram = createEmptyHistogram(DEFAULT_VENICE_LATENCY_BUCKETS);
+  private veniceCircuitBreakerState = 0; // 0=closed, 1=open, 2=half-open
+  private registeredOnce = true;
+  private lastScrapeTimestamp: string;
+
+  /** Record completed task duration in seconds. */
+  recordTaskCompletion(durationSeconds: number, _status: string = "completed"): void {
+    observeHistogram(this.taskDurationHistogram, Math.max(0, durationSeconds));
+  }
+
+  /** Task duration histogram getter. */
+  getTaskDurationHistogram(): PrometheusHistogram {
+    return this.taskDurationHistogram;
+  }
+
+  /** Record outbound Venice AI request latency and status. */
+  recordVeniceCall(model: string, status: string, latencySeconds: number): void {
+    const key = `${model || "default"}::${status || "success"}`;
+    this.veniceRequests.set(key, (this.veniceRequests.get(key) || 0) + 1);
+    observeHistogram(this.veniceLatencyHistogram, Math.max(0, latencySeconds));
+  }
+
+  /** Venice latency histogram getter. */
+  getVeniceLatencyHistogram(): PrometheusHistogram {
+    return this.veniceLatencyHistogram;
+  }
+
+  /** Set Venice AI circuit breaker state (0 closed, 1 open, 2 half-open). */
+  setVeniceCircuitBreakerState(state: number | "closed" | "open" | "half-open"): void {
+    if (typeof state === "number") {
+      this.veniceCircuitBreakerState = Math.max(0, Math.min(2, Math.floor(state)));
+    } else if (state === "closed") {
+      this.veniceCircuitBreakerState = 0;
+    } else if (state === "open") {
+      this.veniceCircuitBreakerState = 1;
+    } else if (state === "half-open") {
+      this.veniceCircuitBreakerState = 2;
+    }
+  }
+
+  /** Get current Venice AI circuit breaker state code. */
+  getVeniceCircuitBreakerState(): number {
+    return this.veniceCircuitBreakerState;
+  }
+
+  /**
+   * Render all metric families in Prometheus text format.
+   */
+  async exportPrometheusMetrics(): Promise<string> {
+    const dashboard = await this.getDashboard();
+    this.lastScrapeTimestamp = new Date(this.clock()).toISOString();
+    return formatPrometheusMetrics({
+      tasks: dashboard.tasks,
+      agents: dashboard.agents,
+      payments: dashboard.payments,
+      taskDurationHistogram: this.taskDurationHistogram,
+      veniceRequests: this.veniceRequests,
+      veniceLatencyHistogram: this.veniceLatencyHistogram,
+      veniceCircuitBreakerState: this.veniceCircuitBreakerState,
+    });
+  }
+
+  /**
+   * Scrape reliability endpoint payload.
+   */
+  getScrapeHealth(): ScrapeHealth {
+    return {
+      status: "ok",
+      uptimeSeconds: Math.max(0, Math.floor((this.clock() - this.startedAtMs) / 1000)),
+      lastScrapeTimestamp: this.lastScrapeTimestamp,
+      metricFamiliesCount: 8,
+      registeredOnce: this.registeredOnce,
+    };
+  }
+
+  /**
+   * Reset Prometheus metrics safely without duplicate registration crash.
+   */
+  resetPrometheusMetrics(): void {
+    this.taskDurationHistogram = createEmptyHistogram(DEFAULT_TASK_DURATION_BUCKETS);
+    this.veniceRequests.clear();
+    this.veniceLatencyHistogram = createEmptyHistogram(DEFAULT_VENICE_LATENCY_BUCKETS);
+    this.veniceCircuitBreakerState = 0;
+    this.registeredOnce = true;
+    this.resetCache();
   }
 
   /** Collect every metric family in parallel and assemble the snapshot. */

@@ -125,8 +125,8 @@ export function SendXLMForm() {
       if (!keypair) return
     }
 
-    setSubmitError(null)
     setSubmitting(true)
+    setSubmitError(null)
 
     try {
       const transaction = await buildTransaction()

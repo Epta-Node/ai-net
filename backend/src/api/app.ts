@@ -38,6 +38,7 @@ import {
 } from "../payment";
 import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
+import { metricsRouter } from "./routes/metrics";
 import { createStatsRouter } from "./routes/stats";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
 import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
@@ -136,6 +137,7 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestId);
   app.use(requestLogger);
   app.use(metricsMiddleware);
+  app.use(globalRateLimitMiddleware);
   app.use(versioningMiddleware);
   app.use(
     readOnlyMiddleware({
@@ -174,6 +176,10 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", publicLimiter.middleware, healthRouter);
+
+  // ── Metrics routes (Issue #499) ───────────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+  app.use("/api/metrics", metricsRouter);
 
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", publicLimiter.middleware, createStatsRouter(getTaskDb()));

@@ -2538,3 +2538,5 @@ mod bridge_tests;
 mod test;
 #[cfg(test)]
 mod test_multisig;
+#[cfg(test)]
+mod property_tests;

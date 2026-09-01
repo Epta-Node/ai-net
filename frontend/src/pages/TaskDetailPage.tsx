@@ -1,10 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
 import { useParams } from 'react-router-dom';
-import ReactFlow, { Background, Controls, Handle, Position, MarkerType, Node, Edge } from 'reactflow';
-import 'reactflow/dist/style.css';
+
 import { useTaskMonitor } from '../hooks/useTaskMonitor';
-import { AgentOutputPanel } from '../components/dashboard/AgentOutputPanel';
+import { TaskDetailTimeline } from '../components/dashboard/TaskDetailTimeline';
 import { PaymentTimeline } from '../components/dashboard/PaymentTimeline';
 import { Skeleton, SkeletonText } from '../components/common/Skeleton';
 import { AlertCircle, CheckCircle2, Play, RefreshCw } from 'lucide-react';
@@ -29,9 +28,6 @@ const CustomNode: React.FC<{ id: string; data: { label: string; status: string }
   );
 };
 
-const nodeTypes = {
-  custom: CustomNode,
-};
 
 /**
  * Context-aware skeleton that mirrors the task detail layout (header, DAG
@@ -58,12 +54,14 @@ export const TaskDetailSkeleton: React.FC = () => {
         </div>
       </div>
 
-      {/* DAG Graph Panel */}
+      {/* Timeline Panel */}
       <div className="glass-panel relative flex flex-col">
-        <div className="flex items-center gap-2 mb-3">
-          <Skeleton width="12rem" height="1rem" />
+        <Skeleton width="12rem" height="1.5rem" className="mb-4" />
+        <div className="space-y-4">
+          <Skeleton height="80px" />
+          <Skeleton height="80px" />
+          <Skeleton height="80px" />
         </div>
-        <Skeleton variant="rectangular" width="100%" height="280px" className="rounded-xl" />
       </div>
 
       {/* Combined Panels */}
@@ -83,7 +81,6 @@ const TaskDetailPage: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const { task, loading, error, wsStatus, nodes, payments, outputs, refetch } = useTaskMonitor(id);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   // Check if any node is failed
   const failedNode = useMemo(() => {
@@ -354,12 +351,7 @@ const TaskDetailPage: React.FC = () => {
       {/* Combined Panels */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3">
-          <AgentOutputPanel
-            outputs={outputs}
-            nodes={nodes}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-          />
+          <TaskDetailTimeline nodes={nodes} outputs={outputs} />
         </div>
         <div className="lg:col-span-2">
           <PaymentTimeline payments={payments} />

@@ -140,7 +140,13 @@ export class VeniceClient implements VeniceClientLike {
 
   private resolveConfig(): CacheEnvConfig {
     try {
-      return getConfig() as unknown as CacheEnvConfig;
+      const config = getConfig() as any;
+      return {
+        VENICE_MODEL_VERSION: config?.VENICE_MODEL_VERSION ?? CONFIG_FALLBACK.VENICE_MODEL_VERSION,
+        VENICE_CACHE_TTL_MS: config?.VENICE_CACHE_TTL_MS ?? CONFIG_FALLBACK.VENICE_CACHE_TTL_MS,
+        VENICE_CACHE_CODING_TTL_MS: config?.VENICE_CACHE_CODING_TTL_MS ?? CONFIG_FALLBACK.VENICE_CACHE_CODING_TTL_MS,
+        VENICE_CACHE_SIMILARITY_THRESHOLD: config?.VENICE_CACHE_SIMILARITY_THRESHOLD ?? CONFIG_FALLBACK.VENICE_CACHE_SIMILARITY_THRESHOLD,
+      };
     } catch {
       return CONFIG_FALLBACK;
     }

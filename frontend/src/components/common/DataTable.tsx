@@ -222,7 +222,7 @@ export function DataTable<T>({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => handleSelect(rowKey, row)}
+                        onChange={() => handleSelect(row)}
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Select row ${String(rowKey)}`}
                       />
