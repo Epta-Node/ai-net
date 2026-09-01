@@ -6,16 +6,29 @@ const pkg = require("../../package.json");
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  LOG_LEVEL: z
+    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
+    .default("info"),
 
   STELLAR_NETWORK: z.enum(["testnet", "mainnet", "local", "futurenet"]).default("testnet"),
   STELLAR_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
+  STELLAR_HORIZON: z.string().url().optional(),
+  STELLAR_PUBLIC_KEY: z.string().optional(),
+  SKIP_STELLAR_ACCOUNT_VERIFY: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .default("false"),
+  SOROBAN_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
+  REGISTRY_CONTRACT_ID: z.string().optional(),
   VENICE_API_KEY: z.string().min(1, "VENICE_API_KEY is required"),
+  VENICE_BASE_URL: z.string().url().default("https://api.venice.ai/api/v1"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default("./data/ai-net.db"),
   STELLAR_COORDINATOR_SECRET: z.string().optional(),
   STELLAR_TEST_SECRET: z.string().optional(),
   ALLOWED_ORIGINS: z.string().default("http://localhost:3000"),
   NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? "0.1.0"),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
+  HEALTH_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
   CACHE_DRIVER: z.enum(["lru", "redis"]).default("lru"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
@@ -49,6 +62,21 @@ const envSchema = z.object({
   API_V1_SUNSET_DATE: z.string().optional(),
 
   ADMIN_API_KEY: z.string().min(1).optional(),
+  API_KEYS: z.string().optional(),
+
+  DB_POOL_MIN: z.coerce.number().int().positive().default(2),
+  DB_POOL_MAX: z.coerce.number().int().positive().default(10),
+  DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+  DB_POOL_HEALTH_CHECK: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .default("true"),
+  DB_BACKUP_DIR: z.string().default("./data/backups"),
+  DB_BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(5),
+  DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().int().nonnegative().default(100),
+  ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  ERROR_REGISTRY_CAP_PER_AGENT: z.coerce.number().int().positive().default(100),
 
   WS_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(5),
   WS_MAX_MESSAGES_PER_MINUTE: z.coerce.number().int().positive().default(100),
@@ -71,7 +99,59 @@ const envSchema = z.object({
   AUTH_SESSION_MAX_TTL_SECONDS: z.coerce.number().int().positive().default(2_592_000),
 });
 
-let _config: z.infer<typeof envSchema> | null = null;
+export type RawConfig = z.infer<typeof envSchema>;
+export type Config = RawConfig & {
+  STELLAR_NETWORK_PASSPHRASE: string;
+};
+
+export class ConfigValidationError extends Error {
+  constructor(readonly issues: z.ZodIssue[]) {
+    super(
+      `[config] Invalid environment variables:\n${issues
+        .map((issue) => `  ${issue.path.join(".") || "ENV"}: ${issue.message}`)
+        .join("\n")}`,
+    );
+    this.name = "ConfigValidationError";
+  }
+}
+
+let cachedConfig: Config | null = null;
+
+function emptyToUndefined(value: unknown): unknown {
+  return typeof value === "string" && value.trim() === "" ? undefined : value;
+}
+
+function withRuntimeDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const nodeEnv = env.NODE_ENV ?? "development";
+  const testDefaults =
+    nodeEnv === "test"
+      ? {
+          DATABASE_URL: ":memory:",
+          VENICE_API_KEY: "test-venice-key",
+          LOG_LEVEL: "silent",
+        }
+      : {};
+
+  return {
+    ...testDefaults,
+    ...env,
+    STELLAR_HORIZON_URL: env.STELLAR_HORIZON_URL ?? env.STELLAR_HORIZON,
+  };
+}
+
+function networkPassphrase(network: RawConfig["STELLAR_NETWORK"]): string {
+  switch (network) {
+    case "mainnet":
+      return "Public Global Stellar Network ; September 2015";
+    case "local":
+      return "Standalone Network ; February 2017";
+    case "futurenet":
+      return "Test SDF Future Network ; October 2022";
+    case "testnet":
+    default:
+      return "Test SDF Network ; September 2015";
+  }
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const result = envSchema.safeParse(withRuntimeDefaults(env));
@@ -135,21 +215,3 @@ export function redactedConfigSnapshot(cfg: Config = getConfig()): Record<string
     Object.entries(cfg).map(([key, value]) => [key, redactConfigValue(key, value)]),
   );
 }
-
-export type Config = z.infer<typeof envSchema>;
-
-export const config = loadConfig();
-
-export function ttlForRoute(group: "agents" | "stats" | "health"): number {
-  switch (group) {
-    case "agents":
-      return config.CACHE_TTL_AGENTS;
-    case "stats":
-      return config.CACHE_TTL_STATS;
-    case "health":
-      return config.CACHE_TTL_HEALTH;
-    default:
-      return config.CACHE_TTL_HEALTH;
-  }
-}
-

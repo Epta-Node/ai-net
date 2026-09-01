@@ -1,6 +1,10 @@
 import Database from "better-sqlite3";
 import path from "path";
 import { migrateToLatest } from "./migrator";
+import type { ReputationBreakdown } from "../services/qualityScorer.types";
+import { createPool, type SqlitePool } from "./pool";
+import { decodeCursor, encodeCursor, type CursorPage } from "./cursor";
+import { createErrorRegistryStore, getErrorDb } from "./errorRegistry";
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "agents");
 
@@ -31,7 +35,7 @@ export interface AgentCursorOptions {
   status?: string;
 }
 
-let _agentDb: Database.Database | null = null;
+let _agentPool: SqlitePool | null = null;
 
 export function ensureAgentTable(db: Database.Database): void {
   db.exec(`
@@ -66,11 +70,19 @@ export function ensureAgentTable(db: Database.Database): void {
   }
 }
 
-export function getAgentDb(dbPath?: string): Database.Database {
-  if (!_agentDb) {
+/** Lazily open (or reopen) the pooled agent database. */
+export function getAgentPool(dbPath?: string): SqlitePool {
+  if (!_agentPool || _agentPool.closed) {
     const filePath = dbPath ?? path.join(process.cwd(), "agents.db");
-    _agentDb = new Database(filePath);
-    migrateToLatest(_agentDb, MIGRATIONS_DIR);
+    _agentPool = createPool({
+      filePath,
+      min: 1,
+      max: 4,
+      acquireTimeoutMs: 5_000,
+      onCreate: (db) => {
+        migrateToLatest(db, MIGRATIONS_DIR);
+      },
+    });
   }
   return _agentPool;
 }

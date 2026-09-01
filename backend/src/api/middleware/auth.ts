@@ -1,5 +1,15 @@
 import type { Request, Response, NextFunction } from 'express';
-import { UnauthorizedError } from '../../errors';
+import { getConfig } from '../../config/index';
+import { getAuthService } from '../../services/auth';
+import type { AccessTokenPayload } from '../../services/auth/tokenService';
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AccessTokenPayload;
+    }
+  }
+}
 
 function loadKeys(): Set<string> | null {
   const raw = getConfig().API_KEYS;
@@ -37,22 +47,6 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction):
   if (!keys) {
     next();
     return;
-  }
-
-  const auth = req.headers['authorization'] ?? '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token || !keys.has(token)) {
-    next(new UnauthorizedError());
-    return;
-  }
-
-  try {
-    const payload = getAuthService().verifyAccessToken(token);
-    req.user = payload;
-    next();
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Invalid or expired authentication token";
-    res.status(401).json({ error: "Unauthorized", message });
   }
 }
 

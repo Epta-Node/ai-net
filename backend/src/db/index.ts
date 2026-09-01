@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import { createLogger } from "../utils/logger";
 import { migrateToLatest } from "./migrator";
+import { createPool, type SqlitePool } from "./pool";
 
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "payments");
 
@@ -45,17 +46,23 @@ function applyPaymentSchema(db: Database.Database): void {
 export function getPaymentPool(dbPath?: string): SqlitePool {
   if (!_pool || _pool.closed) {
     const filePath = dbPath ?? path.join(process.cwd(), "payments.db");
-    _db = new Database(filePath as unknown as string);
-    _db.pragma("busy_timeout = 5000");
-    _db.pragma("journal_mode = WAL");
-    logger.info({ dbPath: filePath }, "payment database opened");
-    (_db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
-      "error",
-      (error: Error) => {
-        logger.error({ err: error }, "payment database error");
+    _pool = createPool({
+      filePath,
+      min: 1,
+      max: 4,
+      acquireTimeoutMs: 5_000,
+      onCreate: (db) => {
+        (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
+          "error",
+          (error: Error) => {
+            logger.error({ err: error }, "payment database error");
+          },
+        );
+        applyPaymentSchema(db);
+        migrateToLatest(db, MIGRATIONS_DIR);
       },
-    );
-    migrateToLatest(_db, MIGRATIONS_DIR);
+    });
+    logger.info({ dbPath: filePath }, "payment database opened");
   }
   return _pool;
 }

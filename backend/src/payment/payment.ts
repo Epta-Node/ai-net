@@ -15,6 +15,7 @@ import {
   stroopsToXlm,
 } from "./utils";
 import { tracingService } from "../services/tracing";
+import { currentTraceId } from "../services/traceContext";
 import { getConfig } from "../config";
 
 const MAX_RETRIES = 5;
@@ -88,8 +89,9 @@ export class PaymentService {
     amountXLM: number,
     correlationId?: string
   ): Promise<string> {
-    const span = correlationId
-      ? tracingService.startSpan(correlationId, 'payment', 'lock', { taskId, nodeId, amountXLM })
+    const traceId = correlationId ?? currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'payment', 'lock', { taskId, nodeId, amountXLM })
       : null;
 
     try {
@@ -155,8 +157,9 @@ export class PaymentService {
       return record.txHash;
     }
 
-    const span = correlationId
-      ? tracingService.startSpan(correlationId, 'payment', 'release', { taskId, nodeId })
+    const traceId = correlationId ?? currentTraceId();
+    const span = traceId
+      ? tracingService.startSpan(traceId, 'payment', 'release', { taskId, nodeId })
       : null;
 
     try {

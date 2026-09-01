@@ -69,8 +69,6 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   constructor(config: VeniceClientConfig) {
-    this.apiKey = config.apiKey;
-    this.baseUrl = config.baseUrl ?? getConfig().VENICE_BASE_URL;
     this.breaker = config.circuitBreaker ?? new CircuitBreaker();
 
     const env = this.resolveConfig() as any;
@@ -83,7 +81,7 @@ export class VeniceClient implements VeniceClientLike {
     if (config.providers && config.providers.length > 0) {
       this.providers = config.providers.map((p) => ({
         apiKey: p.apiKey,
-        baseUrl: p.baseUrl ?? 'https://api.venice.ai/api/v1',
+        baseUrl: p.baseUrl ?? this.resolveBaseUrl(),
         name: p.name,
       }));
     } else {
@@ -105,7 +103,7 @@ export class VeniceClient implements VeniceClientLike {
   private buildProvidersFromEnv(config: VeniceClientConfig): VeniceProviderConfig[] {
     const primary: VeniceProviderConfig = {
       apiKey: config.apiKey,
-      baseUrl: config.baseUrl ?? 'https://api.venice.ai/api/v1',
+      baseUrl: config.baseUrl ?? this.resolveBaseUrl(),
       name: 'primary',
     };
     const providers: VeniceProviderConfig[] = [primary];
@@ -146,9 +144,19 @@ export class VeniceClient implements VeniceClientLike {
         VENICE_CACHE_TTL_MS: config?.VENICE_CACHE_TTL_MS ?? CONFIG_FALLBACK.VENICE_CACHE_TTL_MS,
         VENICE_CACHE_CODING_TTL_MS: config?.VENICE_CACHE_CODING_TTL_MS ?? CONFIG_FALLBACK.VENICE_CACHE_CODING_TTL_MS,
         VENICE_CACHE_SIMILARITY_THRESHOLD: config?.VENICE_CACHE_SIMILARITY_THRESHOLD ?? CONFIG_FALLBACK.VENICE_CACHE_SIMILARITY_THRESHOLD,
+        VENICE_REQUEST_TIMEOUT_MS: config?.VENICE_REQUEST_TIMEOUT_MS ?? CONFIG_FALLBACK.VENICE_REQUEST_TIMEOUT_MS,
+        VENICE_PROVIDER_MAX_RETRIES: config?.VENICE_PROVIDER_MAX_RETRIES ?? CONFIG_FALLBACK.VENICE_PROVIDER_MAX_RETRIES,
       };
     } catch {
       return CONFIG_FALLBACK;
+    }
+  }
+
+  private resolveBaseUrl(): string {
+    try {
+      return getConfig().VENICE_BASE_URL;
+    } catch {
+      return 'https://api.venice.ai/api/v1';
     }
   }
 

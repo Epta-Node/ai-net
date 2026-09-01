@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'http';
 import type { Socket } from 'net';
 import type { IncomingMessage } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { randomUUID } from 'crypto';
 
 import { eventBus as defaultEventBus } from '../../coordinator/eventBus';
 import { getTask as defaultGetTask } from '../../coordinator/taskStore';
@@ -9,27 +10,12 @@ import type { EventStore, StoredEvent } from '../../events/eventStore';
 import type { Task } from '../../types/task';
 import { WS_CLOSE } from '../../types/stream';
 import { createLogger } from '../../utils/logger';
+import { runWithTraceContext } from '../../services/traceContext';
 import { getConfig } from '../../config';
 
 const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;
 
 const logger = createLogger({ module: 'ws-stream' });
-
-/**
- * Every WebSocketServer created by attachTaskStream(), tracked so
- * getStreamConnectionCount() can report a live total across all of them
- * (normally just one, per HTTP server) for the health/metrics dashboard.
- */
-const activeStreamServers = new Set<WebSocketServer>();
-
-/** Total connected WebSocket clients across every attached stream server. */
-export function getStreamConnectionCount(): number {
-  let count = 0;
-  for (const wss of activeStreamServers) {
-    count += wss.clients.size;
-  }
-  return count;
-}
 
 // ---------------------------------------------------------------------------
 // Wire-format normalisation
@@ -39,11 +25,12 @@ export function getStreamConnectionCount(): number {
  * Convert a stored event to the wire shape expected by WebSocket clients:
  *  • `type` is in snake_case  (the coordinator's original DAGEventType)
  *  • `seq`  is the per-task cursor (mapped from `taskSeq`)
+ *  • `traceId` is included for trace correlation
  *
  * Clients use `event.type === 'task_completed'` / `event.seq` as a resume
  * cursor, so this mapping must be stable.
  */
-function toWireEvent(event: StoredEvent): Record<string, unknown> {
+function toWireEvent(event: StoredEvent, traceId?: string): Record<string, unknown> {
   const snakeType = event.type
     // PascalCase → snake_case: "NodeStarted" → "node_started"
     .replace(/([A-Z])/g, (_match, _p1, offset: number) =>
@@ -62,6 +49,7 @@ function toWireEvent(event: StoredEvent): Record<string, unknown> {
     type: snakeType,
     seq: taskSeq,
     timestamp: occurredAt,
+    ...(traceId ? { traceId } : {}),
   };
 }
 
@@ -77,6 +65,23 @@ function parseLastEventId(url: string): number | undefined {
   if (raw === null) return undefined;
   const n = Number(raw);
   return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * Parse the optional `?traceId=<id>` query param or `X-Correlation-ID` /
+ * `traceparent` header from a stream upgrade request. Returns the traceId or
+ * undefined when absent.
+ */
+function extractTraceId(req: IncomingMessage): string | undefined {
+  const url = req.url ?? '';
+  const qIndex = url.indexOf('?');
+  if (qIndex !== -1) {
+    const queryTraceId = new URLSearchParams(url.slice(qIndex + 1)).get('traceId');
+    if (queryTraceId && queryTraceId.length > 0) return queryTraceId;
+  }
+  const header = req.headers['x-correlation-id'];
+  if (typeof header === 'string' && header.length > 0) return header;
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +304,9 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       return;
     }
 
+    // Resolve traceId from upgrade request query param or generate fresh
+    const traceId = extractTraceId(_req) || randomUUID();
+
     let authed = false;
     // Cursor for the next flush: events with seq > lastSentSeq are replayed.
     // With ?lastEventId=N we resume after seq N; without it we fall back to -1
@@ -355,7 +363,7 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       for (const event of events) {
         // Normalise to the wire format (snake_case type, seq cursor) before
         // sending so clients see the same shape regardless of internal storage.
-        send(toWireEvent(event));
+        send(toWireEvent(event, traceId));
         lastSentSeq = event.taskSeq;
       }
     };
@@ -394,11 +402,16 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       // Subscribe before the initial replay so any event emitted during replay
       // is captured; flush() dedupes via lastSentSeq, so order is preserved
       // and nothing is delivered twice.
+      // The subscribe/flush run inside the WS trace context so any logging
+      // during delivery carries the same traceId.
       unsubLive = eventBus.subscribe(taskId, () => flush());
       flush();
       startHeartbeat();
 
-      logger.info({ taskId, clientIp }, 'WebSocket client authenticated');
+      runWithTraceContext(
+        { traceId, spanId: randomUUID(), taskId },
+        () => logger.info({ taskId, clientIp }, 'WebSocket client authenticated'),
+      );
     };
 
     ws.on('message', raw => {

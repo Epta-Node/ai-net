@@ -68,7 +68,7 @@ export interface ErrorRegistryStore {
 
 let _db: Database.Database | null = null;
 
-function getErrorDb(dbPath?: string): Database.Database {
+export function getErrorDb(dbPath?: string): Database.Database {
   if (!_db) {
     const filePath = dbPath ?? path.join(process.cwd(), "errors.db");
     _db = new Database(filePath as unknown as string);

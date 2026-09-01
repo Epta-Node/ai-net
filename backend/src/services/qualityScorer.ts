@@ -23,6 +23,9 @@ import type {
   QualityTrend,
   ReputationBreakdown,
   ReputationEvaluationInput,
+  ValidationEntry,
+  ValidationReport,
+  ValidationResult,
 } from './qualityScorer.types';
 import { ResearchOutputSchema } from '../agents/research/research';
 import { CodingOutputSchema } from '../agents/coding/coding';
