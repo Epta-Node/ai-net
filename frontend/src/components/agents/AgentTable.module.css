@@ -60,7 +60,7 @@
 }
 
 .row:hover td {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-hover-subtle);
 }
 
 .row:active td {
@@ -94,7 +94,7 @@
   border: 1px solid rgba(99, 102, 241, 0.3);
   color: #C7D2FE;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.72rem;
   font-weight: 600;
   white-space: nowrap;
@@ -119,7 +119,7 @@
 }
 
 .starBg {
-  color: #475569;
+  color: var(--border-strong);
 }
 
 .starFill {
@@ -147,7 +147,7 @@
 .status {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -170,15 +170,15 @@
   border: 1px solid var(--panel-border);
   color: var(--text-primary);
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
 }
 
 .detailsButton:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
+  background: var(--accent-surface);
+  border-color: var(--accent-border-strong);
   transform: none;
   box-shadow: none;
 }
@@ -201,8 +201,8 @@
   display: block;
   height: 14px;
   width: 80%;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--white-alpha-08);
   animation: agentPulse 1.5s ease-in-out infinite;
 }
 

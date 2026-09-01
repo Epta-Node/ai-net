@@ -6,7 +6,7 @@
 
 .hover-lift:hover {
   transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
 }
 
 .hover-glow {
@@ -76,6 +76,29 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .btn-ripple::before {
+    display: none;
+  }
+
+  .btn-ripple:active::before {
+    animation: none;
+  }
+
+  .card-interactive,
+  .nav-link::after,
+  .btn-primary {
+    transition: none !important;
+  }
+
+  .card-interactive:hover,
+  .card-interactive:focus-within {
+    transform: none;
+  }
+
+  .btn-primary:active {
+    transform: none;
+  }
+
   .hover-lift,
   .hover-glow,
   .hover-scale,

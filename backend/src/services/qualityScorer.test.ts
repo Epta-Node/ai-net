@@ -4,16 +4,25 @@
 
 import {
   QualityScorer,
+  applyInactivityDecay,
+  calculateReputationBreakdown,
   computeAgentQualityMetrics,
+  computeReputationDelta,
   computeTotalScore,
   computeTrend,
   extractSignificantTokens,
+  loadScorerConfig,
+  percentileNormalize,
   reputationDeltaForScore,
+  runValidationSet,
   scoreCompleteness,
   scoreFormat,
   scoreRelevance,
+  DEFAULT_REPUTATION,
+  MAX_REPUTATION,
+  MIN_REPUTATION,
 } from './qualityScorer';
-import type { QualityScoringRules } from './qualityScorer.types';
+import type { QualityScorerConfig, QualityScoringRules, ValidationEntry } from './qualityScorer.types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -325,3 +334,145 @@ describe('computeTrend', () => {
     expect(computeTrend([75, 76, 74, 75])).toBe('stable');
   });
 });
+
+// ─── Agent Reputation & Sybil Resistance (Issue #497) ─────────────────────────
+
+describe('Agent Reputation Scoring (Issue #497)', () => {
+  describe('computeReputationDelta', () => {
+    it('increases reputation on task success and decreases on failure', () => {
+      const successDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 90,
+        currentReputation: 2.5,
+      });
+      const failureDelta = computeReputationDelta({
+        outcome: 'failure',
+        currentReputation: 2.5,
+      });
+
+      expect(successDelta).toBeGreaterThan(0);
+      expect(failureDelta).toBeLessThan(0);
+      expect(failureDelta).toBe(-0.20);
+    });
+
+    it('incorporates output quality score into delta', () => {
+      const highQualityDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 100,
+        latencyMs: 1500,
+        bondAmountXLM: 0,
+      });
+      const lowQualityDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 40,
+        latencyMs: 1500,
+        bondAmountXLM: 0,
+      });
+
+      expect(highQualityDelta).toBeGreaterThan(lowQualityDelta);
+    });
+
+    it('awards a bounded latency bonus for fast execution', () => {
+      const fastDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        latencyMs: 100,
+        bondAmountXLM: 0,
+      });
+      const slowDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        latencyMs: 2000,
+        bondAmountXLM: 0,
+      });
+
+      expect(fastDelta).toBeGreaterThan(slowDelta);
+    });
+
+    it('applies a bounded staking/bond weight multiplier', () => {
+      const unbondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 0,
+      });
+      const bondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 500,
+      });
+      const maxBondedDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 80,
+        bondAmountXLM: 50000,
+      });
+
+      expect(bondedDelta).toBeGreaterThan(unbondedDelta);
+      // Bond multiplier capped at 1.5x
+      expect(maxBondedDelta).toBeLessThanOrEqual(unbondedDelta * 1.6);
+    });
+
+    it('strictly clamps reputation so no agent can exceed 5.0 or drop below 0.0', () => {
+      const atMaxDelta = computeReputationDelta({
+        outcome: 'success',
+        qualityScore: 100,
+        currentReputation: 5.0,
+      });
+      const atMinDelta = computeReputationDelta({
+        outcome: 'failure',
+        currentReputation: 0.0,
+      });
+
+      expect(atMaxDelta).toBe(0);
+      expect(atMinDelta).toBe(0);
+    });
+  });
+
+  describe('applyInactivityDecay', () => {
+    it('decays inactive reputation by 0.1 per month of inactivity', () => {
+      const now = new Date('2026-06-01T00:00:00Z').getTime();
+      const twoMonthsAgo = new Date('2026-04-02T00:00:00Z').getTime(); // ~60 days
+
+      const { decayedReputation, decayApplied } = applyInactivityDecay(4.0, twoMonthsAgo, now);
+
+      expect(decayApplied).toBe(0.2);
+      expect(decayedReputation).toBe(3.8);
+    });
+
+    it('does not decay if recently active', () => {
+      const now = Date.now();
+      const { decayedReputation, decayApplied } = applyInactivityDecay(4.5, now - 1000, now);
+
+      expect(decayApplied).toBe(0);
+      expect(decayedReputation).toBe(4.5);
+    });
+
+    it('never decays below 0.0', () => {
+      const now = new Date('2026-06-01T00:00:00Z').getTime();
+      const fiveYearsAgo = new Date('2021-06-01T00:00:00Z').getTime();
+
+      const { decayedReputation } = applyInactivityDecay(0.5, fiveYearsAgo, now);
+      expect(decayedReputation).toBe(0.0);
+    });
+  });
+
+  describe('calculateReputationBreakdown', () => {
+    it('returns structured breakdown with all components', () => {
+      const breakdown = calculateReputationBreakdown({
+        reputationScore: 4.2,
+        tasksCompleted: 18,
+        tasksFailed: 2,
+        avgQualityScore: 92,
+        avgLatencyMs: 350,
+        bondAmountXLM: 200,
+      });
+
+      expect(breakdown.overallScore).toBe(4.2);
+      expect(breakdown.taskSuccessScore).toBe(4.5); // 18/20 * 5.0
+      expect(breakdown.qualityScore).toBe(4.6); // 92/100 * 5.0
+      expect(breakdown.bondWeightMultiplier).toBe(1.2); // 1.0 + 200/1000
+      expect(breakdown.tasksCompleted).toBe(18);
+      expect(breakdown.tasksFailed).toBe(2);
+    });
+  });
+});
+

@@ -47,11 +47,11 @@
 
 .entry[aria-selected='true'] .card {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.18);
+  box-shadow: 0 0 0 2px var(--accent-surface);
 }
 
 .entryFailed .card {
-  border-color: rgba(239, 68, 68, 0.3);
+  border-color: var(--status-danger-surface-strong);
 }
 
 /* ─── Connector (dot + line) ──────────────────────────────────────  */
@@ -67,7 +67,7 @@
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,27 +84,27 @@
 }
 
 .dotRunning {
-  background: rgba(99, 102, 241, 0.18);
-  border-color: rgba(99, 102, 241, 0.6);
-  color: #818cf8;
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.35);
+  background: var(--accent-surface-strong);
+  border-color: var(--accent-border-strong);
+  color: var(--accent-text-muted);
+  box-shadow: var(--info-glow);
   animation: pulse 2s ease-in-out infinite;
 }
 
 .dotCompleted {
-  background: rgba(16, 185, 129, 0.12);
-  border-color: rgba(16, 185, 129, 0.4);
-  color: #34d399;
+  background: var(--status-success-surface-muted);
+  border-color: var(--status-success-border-strong);
+  color: var(--status-success);
 }
 
 .dotFailed {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.4);
-  color: #f87171;
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-border-strong);
+  color: var(--status-danger);
 }
 
 .dotSkeleton {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-alpha-05);
   border-color: var(--panel-border);
 }
 
@@ -126,7 +126,7 @@
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 14px 16px;
   transition: border-color 0.15s, box-shadow 0.15s;
   cursor: default;
@@ -134,7 +134,7 @@
 }
 
 .card:hover {
-  border-color: rgba(139, 92, 246, 0.25);
+  border-color: var(--accent-surface-strong);
 }
 
 /* ─── Card header ───────────────────────────────────────────────── */
@@ -168,9 +168,9 @@
   flex-shrink: 0;
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   border: 2px solid var(--panel-border);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-hover-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -183,7 +183,7 @@
 
 .selectBtn:hover {
   border-color: var(--primary);
-  background: rgba(139, 92, 246, 0.12);
+  background: var(--accent-surface-muted);
   transform: none;
   box-shadow: none;
 }
@@ -200,13 +200,13 @@
 
 .selectBtnActive {
   border-color: var(--primary);
-  background: rgba(139, 92, 246, 0.3);
+  background: var(--accent-border);
 }
 
 .selectIndex {
   font-size: 0.7rem;
   font-weight: 800;
-  color: #c7d2fe;
+  color: var(--accent-text);
 }
 
 .selectEmpty {
@@ -251,7 +251,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 3px 9px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
 }
 
@@ -262,21 +262,21 @@
 }
 
 .badgeRunning {
-  background: rgba(99, 102, 241, 0.15);
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  color: #818cf8;
+  background: var(--accent-surface);
+  border: 1px solid var(--accent-border-strong);
+  color: var(--accent-text-muted);
 }
 
 .badgeCompleted {
-  background: rgba(16, 185, 129, 0.12);
-  border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #34d399;
+  background: var(--status-success-surface-muted);
+  border: 1px solid var(--status-success-border);
+  color: var(--status-success);
 }
 
 .badgeFailed {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background: var(--status-danger-surface);
+  border: 1px solid var(--status-danger-surface-strong);
+  color: var(--status-danger);
 }
 
 /* ─── Date / time labels ────────────────────────────────────────── */
@@ -302,7 +302,7 @@
   height: 26px;
   background: transparent;
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   box-shadow: none;
   transition: color 0.15s, background 0.15s;
@@ -310,9 +310,9 @@
 }
 
 .detailBtn:hover {
-  background: rgba(56, 189, 248, 0.1);
+  background: var(--info-surface);
   color: var(--accent);
-  border-color: rgba(56, 189, 248, 0.3);
+  border-color: var(--info-border);
   transform: none;
   box-shadow: none;
 }
@@ -332,7 +332,7 @@
 .execBar {
   display: flex;
   height: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   margin: 10px 0 8px;
   background: var(--panel-border);
@@ -345,13 +345,13 @@
   transition: opacity 0.2s;
 }
 
-.execSegmentPending { background: rgba(245, 158, 11, 0.35); }
+.execSegmentPending { background: var(--status-warning-surface-strong); }
 .execSegmentRunning {
-  background: #6366f1;
+  background: var(--accent-secondary);
   animation: shimmer 1.5s ease-in-out infinite;
 }
-.execSegmentCompleted { background: #10b981; }
-.execSegmentFailed { background: #ef4444; }
+.execSegmentCompleted { background: var(--status-success); }
+.execSegmentFailed { background: var(--status-danger); }
 
 /* ─── Meta row ──────────────────────────────────────────────────── */
 
@@ -373,7 +373,7 @@
   font-size: 0.62rem;
   font-weight: 800;
   padding: 2px 7px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-family: ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
@@ -397,7 +397,7 @@
 .errorSection {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid rgba(239, 68, 68, 0.2);
+  border-top: 1px solid var(--status-danger-surface-strong);
 }
 
 .errorToggle {
@@ -406,7 +406,7 @@
   gap: 5px;
   background: transparent;
   border: none;
-  color: #f87171;
+  color: var(--status-danger);
   font-size: 0.75rem;
   font-weight: 600;
   padding: 0;
@@ -430,7 +430,7 @@
 }
 
 .errorIcon {
-  color: #ef4444;
+  color: var(--status-danger);
 }
 
 .errorDetails {
@@ -444,23 +444,23 @@
   display: flex;
   gap: 8px;
   font-size: 0.75rem;
-  background: rgba(239, 68, 68, 0.06);
-  border: 1px solid rgba(239, 68, 68, 0.15);
-  border-radius: 8px;
+  background: var(--status-danger-surface-muted);
+  border: 1px solid var(--status-danger-surface);
+  border-radius: var(--radius-lg);
   padding: 8px 10px;
 }
 
 .errorNodeId {
   font-weight: 700;
   font-family: monospace;
-  color: #fca5a5;
+  color: var(--status-danger-text);
   white-space: nowrap;
   text-transform: capitalize;
   flex-shrink: 0;
 }
 
 .errorMsg {
-  color: #fecaca;
+  color: var(--status-danger-text);
   word-break: break-word;
 }
 
@@ -501,16 +501,16 @@
 
 .skeletonLine {
   height: 12px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-md);
+  background: var(--white-alpha-06);
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
 /* ─── Animations ────────────────────────────────────────────────── */
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(99, 102, 241, 0.3); }
-  50%       { box-shadow: 0 0 16px rgba(99, 102, 241, 0.6); }
+  0%, 100% { box-shadow: 0 0 8px var(--accent-border); }
+  50%       { box-shadow: var(--info-glow-strong); }
 }
 
 @keyframes shimmer {

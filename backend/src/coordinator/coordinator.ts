@@ -1,4 +1,5 @@
 import type pino from 'pino';
+import { randomUUID } from 'crypto';
 import type { AgentRegistration, AgentRegistry } from '../types/agent';
 import type { PaymentService } from '../types/payment';
 import { eventBus } from './eventBus';
@@ -15,6 +16,12 @@ import { createLogger } from '../utils/logger';
 import { tracingService } from '../services/tracing';
 import type { Job } from '../queue/jobStore';
 import { selectFallbackAgent } from './dispatch';
+import {
+  currentTraceId,
+  currentSpanId,
+  runWithTraceContext,
+  childSpanContext,
+} from '../services/traceContext';
 
 const DEFAULT_CONCURRENCY = 3;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -81,6 +88,18 @@ function now(): string {
   return new Date().toISOString();
 }
 
+/** W3C traceparent traceId must be exactly 32 lowercase hex chars (16 bytes). */
+function padTraceId(traceId: string): string {
+  const hex = traceId.replace(/-/g, '').toLowerCase();
+  return hex.length >= 32 ? hex.slice(0, 32) : hex.padStart(32, '0');
+}
+
+/** W3C spanId must be exactly 16 lowercase hex chars (8 bytes). */
+function dehyphenate(uuid: string): string {
+  const hex = uuid.replace(/-/g, '');
+  return hex.length >= 16 ? hex.slice(0, 16) : hex.padStart(16, '0');
+}
+
 function asErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'unknown';
 }
@@ -103,7 +122,7 @@ export class Coordinator {
   private readonly paymentService: PaymentService;
   private readonly qualityScorer: QualityScorer;
   private readonly log: pino.Logger;
-  private readonly correlationId: string;
+  private correlationId: string;
 
   constructor(options: CoordinatorOptions = {}) {
     this.bus = options.eventBus ?? eventBus;
@@ -115,7 +134,8 @@ export class Coordinator {
     this.paymentService = options.paymentService ?? { release: async () => 'mock-hash' };
     this.qualityScorer = options.qualityScorer ?? new QualityScorer();
     this.log = options.logger ?? createLogger();
-    this.correlationId = options.correlationId ?? '';
+    // Resolve correlationId: explicit option > AsyncLocalStorage > empty string
+    this.correlationId = options.correlationId ?? currentTraceId() ?? '';
   }
 
   async executeDAG(
@@ -123,6 +143,30 @@ export class Coordinator {
     dag: DAGNode[],
     onProgress?: (percentage: number) => void
   ): Promise<void> {
+    // Establish an AsyncLocalStorage trace context (if not already present)
+    // so downstream logging, span creation, and agent dispatch all share the
+    // same traceId — regardless of whether we're invoked from an HTTP request
+    // (context already set) or the background job worker (no context).
+    const existing = currentTraceId();
+    if (existing) {
+      await this.executeDAGInContext(taskId, dag, onProgress);
+      return;
+    }
+    const child = childSpanContext();
+    const context = child ?? { traceId: this.correlationId || randomUUID(), spanId: randomUUID(), taskId };
+    await runWithTraceContext(context, () => this.executeDAGInContext(taskId, dag, onProgress));
+  }
+
+  private async executeDAGInContext(
+    taskId: string,
+    dag: DAGNode[],
+    onProgress?: (percentage: number) => void
+  ): Promise<void> {
+    // Re-resolve correlationId from AsyncLocalStorage in case it was not
+    // available when the coordinator was constructed (e.g. job-worker path).
+    if (!this.correlationId) {
+      this.correlationId = currentTraceId() ?? '';
+    }
     const completed = new Set<string>();
     const failed = new Set<string>();
     const scheduled = new Set<string>();
@@ -284,10 +328,15 @@ export class Coordinator {
     this.log.debug({ nodeId: node.nodeId, agentId: target.id, agentType: node.type }, 'dispatching node to agent');
 
     // Build request headers, propagating the correlation ID so the receiving
-    // agent can continue the same trace.
+    // agent can continue the same trace. Also emit a W3C-style traceparent
+    // header for standards-compliant downstream tracing.
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.correlationId) {
       headers['X-Correlation-ID'] = this.correlationId;
+      const currentSpan = currentSpanId();
+      if (currentSpan) {
+        headers['traceparent'] = `00-${padTraceId(this.correlationId)}-${dehyphenate(currentSpan)}-01`;
+      }
     }
 
     try {
@@ -580,6 +629,7 @@ export async function executeDAG(
     dispatch,
     paymentService: { release: releasePayment },
     logger: log,
+    correlationId: task.traceId,
   });
 
   await coordinator.executeDAG(task.id, task.dag, onProgress);

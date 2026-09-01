@@ -1,27 +1,3 @@
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.7);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  z-index: 1000;
-}
-
-.modal {
-  width: 100%;
-  max-width: 560px;
-  max-height: 85vh;
-  overflow-y: auto;
-  background: #0f172a;
-  border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
-  padding: 24px;
-}
-
 .header {
   display: flex;
   align-items: flex-start;
@@ -118,7 +94,7 @@
 .status {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -147,7 +123,7 @@
   border: 1px solid rgba(99, 102, 241, 0.3);
   color: #C7D2FE;
   padding: 4px 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -157,7 +133,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #818cf8;
+  color: var(--accent-text-muted);
   text-decoration: none;
 }
 

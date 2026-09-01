@@ -5,9 +5,9 @@
   gap: 24px;
   padding: 16px;
   margin-bottom: 16px;
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--surface-glass-subtle);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
 }
 
 .group {
@@ -44,11 +44,11 @@
 }
 
 .capChip {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-alpha-04);
   border: 1px solid var(--panel-border);
   color: var(--text-secondary);
   padding: 5px 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.78rem;
   font-weight: 600;
   box-shadow: none;
@@ -56,7 +56,7 @@
 }
 
 .capChip:hover {
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--accent-surface-muted);
   color: var(--text-primary);
   transform: none;
   box-shadow: none;
@@ -74,7 +74,7 @@
 
 .capChipActive,
 .capChipActive:hover {
-  background: rgba(99, 102, 241, 0.25);
+  background: var(--accent-surface-strong);
   border-color: var(--primary);
   color: #C7D2FE;
 }
@@ -100,7 +100,7 @@
 .toggle {
   display: inline-flex;
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
@@ -116,7 +116,7 @@
 }
 
 .toggleButton:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--white-alpha-05);
   color: var(--text-primary);
   transform: none;
   box-shadow: none;
@@ -135,7 +135,7 @@
 .toggleButtonActive,
 .toggleButtonActive:hover {
   background: var(--primary);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .toggleButtonActive:active {
@@ -157,15 +157,15 @@
   justify-content: center;
   width: 34px;
   height: 34px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--white-alpha-04);
   border: 1px solid var(--panel-border);
   color: var(--text-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   box-shadow: none;
 }
 
 .iconAction:hover {
-  background: rgba(99, 102, 241, 0.15);
+  background: var(--accent-surface);
   color: var(--text-primary);
   transform: none;
   box-shadow: none;
@@ -189,7 +189,7 @@
   border: 1px solid var(--panel-border);
   color: var(--text-secondary);
   padding: 7px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
@@ -206,9 +206,9 @@
 }
 
 .resetButton:hover {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-surface-strong);
+  color: var(--status-danger-text);
   transform: none;
   box-shadow: none;
 }

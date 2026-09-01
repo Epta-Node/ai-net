@@ -4,10 +4,10 @@
   z-index: 9999;
   display: flex;
   flex-direction: column;
-  background: rgba(10, 14, 20, 0.88);
+  background: var(--surface-overlay);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  color: var(--text-primary, #F5F7FA);
+  color: var(--text-primary, var(--text-primary));
   user-select: none;
   overflow: hidden;
 }
@@ -17,8 +17,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 24px;
-  background: rgba(17, 21, 29, 0.6);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-glass);
+  border-bottom: 1px solid var(--white-alpha-08);
   z-index: 10;
 }
 
@@ -29,11 +29,11 @@
 }
 
 .counterBadge {
-  background: rgba(56, 189, 248, 0.15);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  color: #38bdf8;
+  background: var(--info-surface);
+  border: 1px solid var(--info-border);
+  color: var(--accent-info);
   padding: 4px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.85rem;
   font-weight: 600;
   font-family: monospace;
@@ -42,7 +42,7 @@
 .imageTitle {
   font-size: 0.95rem;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--text-primary);
   max-width: 400px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -59,10 +59,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #f5f7fa;
-  border-radius: 8px;
+  background: var(--white-alpha-05);
+  border: 1px solid var(--white-alpha-10);
+  color: var(--text-primary);
+  border-radius: var(--radius-lg);
   padding: 8px 12px;
   font-size: 0.85rem;
   cursor: pointer;
@@ -71,9 +71,9 @@
 }
 
 .iconBtn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: #ffffff;
+  background: var(--white-alpha-12);
+  border-color: var(--white-alpha-25);
+  color: var(--text-inverse);
 }
 
 .iconBtn:active {
@@ -86,15 +86,15 @@
 }
 
 .closeBtn {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #f87171;
+  background: var(--status-danger-surface);
+  border-color: var(--status-danger-surface-strong);
+  color: var(--status-danger);
 }
 
 .closeBtn:hover {
-  background: rgba(239, 68, 68, 0.3);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #ffffff;
+  background: var(--status-danger-surface-strong);
+  border-color: var(--status-danger-border-strong);
+  color: var(--text-inverse);
 }
 
 .closeBtn:active {
@@ -128,8 +128,8 @@
   max-width: 85vw;
   max-height: 75vh;
   object-fit: contain;
-  border-radius: 8px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
   pointer-events: auto;
 }
 
@@ -138,10 +138,10 @@
   top: 50%;
   transform: translateY(-50%);
   z-index: 10;
-  background: rgba(17, 21, 29, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: #ffffff;
-  border-radius: 50%;
+  background: var(--surface-panel-translucent);
+  border: 1px solid var(--white-alpha-15);
+  color: var(--text-inverse);
+  border-radius: var(--radius-round);
   width: 44px;
   height: 44px;
   display: flex;
@@ -153,8 +153,8 @@
 }
 
 .navBtn:hover {
-  background: rgba(56, 189, 248, 0.3);
-  border-color: #38bdf8;
+  background: var(--info-border);
+  border-color: var(--accent-info);
   transform: translateY(-50%) scale(1.08);
 }
 
@@ -176,8 +176,8 @@
   justify-content: center;
   gap: 10px;
   padding: 12px 24px;
-  background: rgba(17, 21, 29, 0.6);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-glass);
+  border-top: 1px solid var(--white-alpha-08);
   overflow-x: auto;
   z-index: 10;
 }
@@ -185,7 +185,7 @@
 .thumbItem {
   width: 48px;
   height: 48px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   border: 2px solid transparent;
   cursor: pointer;
@@ -196,7 +196,7 @@
 
 .thumbItem:hover {
   opacity: 0.9;
-  border-color: rgba(255, 255, 255, 0.4);
+  border-color: var(--border-strong);
 }
 
 .thumbItem:active {
@@ -206,8 +206,8 @@
 
 .thumbActive {
   opacity: 1;
-  border-color: #38bdf8;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+  border-color: var(--accent-info);
+  box-shadow: 0 0 10px var(--info-border);
 }
 
 .thumbImg {
