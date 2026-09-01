@@ -9,6 +9,9 @@ target/
 
 coverage/
 .DS_Store
+
+# Rust build artifacts
+**/target/
 playwright-report/
 test-results/
 
