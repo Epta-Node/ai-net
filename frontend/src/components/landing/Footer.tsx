@@ -83,7 +83,7 @@ const Footer: React.FC = () => {
           {/* Brand */}
           <div className="col-span-2 md:col-span-1">
             <Link to="/" className="flex items-center gap-2.5 mb-3">
-              <div className="w-[28px] h-[28px] rounded-[7px] bg-gradient-primary flex items-center justify-center font-bold text-white text-sm shadow-[0_0_12px_rgba(56,189,248,0.3)]">
+              <div className="w-[28px] h-[28px] rounded-[7px] bg-gradient-primary flex items-center justify-center font-bold text-white text-sm shadow-info-glow">
                 a
               </div>
               <span className="font-bold text-[15px] text-text-primary tracking-wide">ai-net</span>

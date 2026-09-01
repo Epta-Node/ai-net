@@ -1,5 +1,3 @@
-#![no_std]
-
 //! # Agent Registry Upgrade Extension
 //!
 //! Extends the agent_registry contract with upgrade functionality using the upgrade manager.
@@ -33,7 +31,10 @@ pub enum UpgradeDataKey {
 #[contractimpl]
 impl Upgradeable for AgentRegistryContract {
     fn get_version(env: Env) -> String {
-        String::from_str(&env, CURRENT_VERSION)
+        env.storage()
+            .instance()
+            .get(&DataKey::Agent(Symbol::new(&env, "version")))
+            .unwrap_or_else(|| String::from_str(&env, CURRENT_VERSION))
     }
 
     fn get_wasm_hash(env: Env) -> BytesN<32> {
@@ -71,7 +72,7 @@ impl Upgradeable for AgentRegistryContract {
             UpgradeManagerSetEvent {
                 contract: env.current_contract_address(),
                 upgrade_manager: upgrade_manager.clone(),
-                admin: require_admin(&env).unwrap(),
+                admin,
             },
         );
 
@@ -81,7 +82,7 @@ impl Upgradeable for AgentRegistryContract {
     fn pre_upgrade_hook(
         env: Env,
         new_version: String,
-        new_wasm_hash: BytesN<32>,
+        _new_wasm_hash: BytesN<32>,
     ) -> Result<Vec<String>, UpgradeableError> {
         let mut results = Vec::new(&env);
 
@@ -138,11 +139,8 @@ impl Upgradeable for AgentRegistryContract {
         let mut migration_results = Vec::new(&env);
 
         // Execute data migrations based on version change
-        let migration_steps = version_utils::generate_migration_steps(
-            &env,
-            &old_version.to_string(),
-            &new_version.to_string(),
-        )?;
+        let migration_steps =
+            version_utils::generate_migration_steps(&env, &old_version, &new_version)?;
 
         for step in migration_steps.iter() {
             let result = execute_migration_step(&env, &step)?;
@@ -197,11 +195,8 @@ impl Upgradeable for AgentRegistryContract {
         required_checks.push_back(String::from_str(&env, "check_storage_compatibility"));
         required_checks.push_back(String::from_str(&env, "verify_admin_access"));
 
-        let migration_steps = version_utils::generate_migration_steps(
-            &env,
-            &current_version.to_string(),
-            &target_version.to_string(),
-        )?;
+        let migration_steps =
+            version_utils::generate_migration_steps(&env, &current_version, &target_version)?;
 
         let mut validation_steps = Vec::new(&env);
         validation_steps.push_back(String::from_str(&env, "verify_agent_records"));
@@ -227,10 +222,10 @@ impl Upgradeable for AgentRegistryContract {
         env: Env,
         new_version: String,
         new_wasm_hash: BytesN<32>,
-        description: String,
+        _description: String,
     ) -> Result<(), UpgradeableError> {
         // Only admin can initiate upgrade
-        require_admin(&env).map_err(|_| UpgradeableError::Unauthorized)?;
+        let admin = require_admin(&env).map_err(|_| UpgradeableError::Unauthorized)?;
 
         let upgrade_manager =
             Self::get_upgrade_manager(env.clone()).ok_or(UpgradeableError::NoUpgradeManager)?;
@@ -239,7 +234,7 @@ impl Upgradeable for AgentRegistryContract {
         let migration_plan = Self::get_migration_plan(env.clone(), new_version.clone())?;
 
         // Convert to upgrade manager's MigrationPlan format
-        let upgrade_migration_plan = upgrade_manager::MigrationPlan {
+        let _upgrade_migration_plan = upgrade_manager::MigrationPlan {
             pre_migration_checks: migration_plan.required_checks,
             data_transformations: migration_plan.data_transformations,
             post_migration_validations: migration_plan.validation_steps,
@@ -256,7 +251,7 @@ impl Upgradeable for AgentRegistryContract {
                 from_version: migration_plan.from_version,
                 to_version: new_version,
                 wasm_hash: new_wasm_hash,
-                initiator: require_admin(&env).unwrap(),
+                initiator: admin,
             },
         );
 
@@ -295,25 +290,65 @@ impl AgentRegistryContract {
         }
     }
 
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        <Self as Upgradeable>::get_version(env)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "version")), &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Agent(Symbol::new(&env, "last_upgrade")), &env.ledger().sequence());
+
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("upgraded")),
+            crate::events::ContractUpgradedEvent {
+                old_version,
+                new_version,
+                wasm_hash: new_wasm_hash,
+                admin,
+                upgrade_ledger: env.ledger().sequence(),
+            },
+        );
+
+        Ok(())
+    }
+
     /// Upgrade the contract with new WASM hash (admin only)
     pub fn upgrade_contract(
         env: Env,
         new_wasm_hash: BytesN<32>,
         new_version: String,
-        description: String,
+        _description: String,
     ) -> Result<(), Error> {
         let admin = require_admin(&env)?;
 
         // Execute pre-upgrade hook
-        let pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
+        let _pre_hook_results = <Self as Upgradeable>::pre_upgrade_hook(
             env.clone(),
             new_version.clone(),
-            new_wasm_hash,
+            new_wasm_hash.clone(),
         )
         .map_err(|_| Error::NotAdmin)?; // Convert upgrade error to contract error
 
         // Update the contract WASM
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
 
         // Execute post-upgrade hook
         let old_version = String::from_str(&env, CURRENT_VERSION);
@@ -330,7 +365,7 @@ impl AgentRegistryContract {
             crate::events::ContractUpgradedEvent {
                 old_version,
                 new_version,
-                wasm_hash: new_wasm_hash,
+                wasm_hash: new_wasm_hash.clone(),
                 admin,
                 upgrade_ledger: env.ledger().sequence(),
             },
@@ -411,7 +446,7 @@ fn validate_storage_compatibility(
     let version_str = new_version.to_string();
 
     // Simple compatibility check based on version
-    if version_str.starts_with("1.") {
+    if starts_with(new_version, "1.") {
         Ok(String::from_str(env, "Storage format compatible"))
     } else {
         Ok(String::from_str(env, "Storage migration required"))
@@ -475,7 +510,7 @@ fn validate_post_migration_state(env: &Env) -> Result<String, UpgradeableError> 
     Ok(String::from_str(env, "Post-migration state validated"))
 }
 
-fn estimate_data_items(env: &Env) -> u32 {
+fn estimate_data_items(_env: &Env) -> u32 {
     // Estimate the number of data items that need to be migrated
     // This is a simplified estimation - in practice would count actual records
 

@@ -23,7 +23,8 @@ function parseTraceparent(header: string): { traceId: string; parentSpanId: stri
 
 /**
  * Express middleware that ensures every request carries both an X-Request-Id
- * and a trace identifier (via X-Correlation-ID or W3C traceparent).
+ * and a trace identifier (via X-Trace-Id, X-Correlation-ID, or W3C
+ * traceparent).
  *
  * ### X-Request-Id (unchanged behaviour)
  * - If the client sends an `X-Request-Id` header, that value is reused.
@@ -34,8 +35,14 @@ function parseTraceparent(header: string): { traceId: string; parentSpanId: stri
  * ### Trace identity (extended for Issue #407)
  * The trace ID (correlationId) is resolved from, in priority order:
  *   1. W3C `traceparent` header — parsed for the traceId field
- *   2. `X-Correlation-ID` header — used as-is
- *   3. Auto-generated UUID v4
+ *   2. `X-Trace-Id` header — used as-is
+ *   3. `X-Correlation-ID` header — used as-is
+ *   4. Auto-generated UUID v4
+ *
+ * The resolved traceId is attached to `res.locals.traceId`,
+ * `res.locals.correlationId`, `req.traceId`, `req.correlationId` and echoed as
+ * the `X-Trace-Id` / `X-Correlation-ID` response headers so downstream
+ * services can forward it.
  *
  * ### AsyncLocalStorage
  * After resolving the trace identity, the middleware enters an
@@ -47,10 +54,10 @@ function parseTraceparent(header: string): { traceId: string; parentSpanId: stri
  * status `'completed'` or `'failed'`) when the response finishes.
  */
 export function requestId(req: Request, res: Response, next: NextFunction): void {
-  // ── X-Request-Id ──────────────────────────────────────────────────────────
-  const id = (req.headers['x-request-id'] as string) || randomUUID();
+  const id = (req.headers["x-request-id"] as string | undefined) || randomUUID();
   res.locals.requestId = id;
-  res.setHeader('X-Request-Id', id);
+  req.requestId = id;
+  res.setHeader("X-Request-Id", id);
 
   // ── Trace identity ────────────────────────────────────────────────────────
   let traceId: string | undefined;
@@ -66,9 +73,11 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
     }
   }
 
-  // 2. X-Correlation-ID (backward compatible)
+  // 2. X-Trace-Id / X-Correlation-ID (backward compatible)
   if (!traceId) {
-    traceId = (req.headers['x-correlation-id'] as string) || undefined;
+    traceId =
+      (req.headers['x-trace-id'] as string | undefined) ||
+      (req.headers['x-correlation-id'] as string | undefined);
   }
 
   // 3. Generate fresh
@@ -76,7 +85,11 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
     traceId = randomUUID();
   }
 
+  res.locals.traceId = traceId;
   res.locals.correlationId = traceId;
+  req.traceId = traceId;
+  req.correlationId = traceId;
+  res.setHeader("X-Trace-Id", traceId);
   res.setHeader('X-Correlation-ID', traceId);
 
   // ── Tracing span ──────────────────────────────────────────────────────────
@@ -87,12 +100,10 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
     { method: req.method, path: req.path, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) }
   );
 
-  if (typeof res.on === 'function') {
-    res.on('finish', () => {
-      const status = res.statusCode < 400 ? 'completed' : 'failed';
-      tracingService.endSpan(span.spanId, status, {
-        statusCode: res.statusCode,
-      });
+  if (typeof res.on === "function") {
+    res.on("finish", () => {
+      const status = res.statusCode < 400 ? "completed" : "failed";
+      tracingService.endSpan(span.spanId, status, { statusCode: res.statusCode });
     });
   }
 

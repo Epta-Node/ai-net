@@ -83,6 +83,8 @@
 //! view, which is the same code path the contract verifies against.
 
 mod errors;
+#[cfg(test)]
+mod property_tests;
 mod types;
 
 pub use errors::Error;
@@ -105,6 +107,7 @@ use soroban_sdk::{
 const TTL_THRESHOLD: u32 = 100_000;
 /// Target TTL after extension (~31 days at 5s ledgers).
 const TTL_EXTEND_TO: u32 = 535_680;
+const CONTRACT_VERSION: &str = "1.0.0";
 
 /// Maximum page size accepted by [`AgentBiddingContract::get_bidders`].
 const MAX_PAGE_SIZE: u32 = 50;
@@ -207,6 +210,48 @@ pub struct AgentBiddingContract;
 
 #[contractimpl]
 impl AgentBiddingContract {
+    // ── Administration / Upgradeability ───────────────────────────────────
+
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
+        Ok(())
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn contract_version(env: Env) -> String {
+        env.storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(
+        env: Env,
+        new_wasm_hash: BytesN<32>,
+        new_version: String,
+    ) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("upgraded")),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+        );
+        Ok(())
+    }
+
     // ── Creation ─────────────────────────────────────────────────────────
 
     /// Initialise a new auction for `task_id`.
@@ -654,6 +699,60 @@ impl AgentBiddingContract {
         Ok(())
     }
 
+    /// Allow a losing bidder to claim their bid bond refund after a winner is selected.
+    ///
+    /// This path intentionally excludes the winner because the winning bid proceeds to
+    /// escrow award. It lets unsuccessful bidders recover independently if `award_contract`
+    /// is delayed by the creator or an off-chain coordinator.
+    pub fn claim_bid_refund(env: Env, task_id: Symbol, bidder: Address) -> Result<(), Error> {
+        bidder.require_auth();
+
+        let auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Auction(task_id.clone()))
+            .ok_or(Error::NotFound)?;
+
+        if auction.phase != AuctionPhase::Reveal {
+            return Err(Error::NotInRevealPhase);
+        }
+
+        let winner: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Winner(task_id.clone()))
+            .ok_or(Error::WinnerNotDetermined)?;
+        if winner == bidder {
+            return Err(Error::WinnerCannotClaimRefund);
+        }
+
+        let bid_key = DataKey::Bid(task_id.clone(), bidder.clone());
+        let mut bid: SealedBid = env
+            .storage()
+            .persistent()
+            .get(&bid_key)
+            .ok_or(Error::NotFound)?;
+        if bid.refunded {
+            return Err(Error::RefundAlreadyClaimed);
+        }
+
+        bid.refunded = true;
+        let bond = bid.bond;
+        env.storage().persistent().set(&bid_key, &bid);
+        extend_ttl_for_key(&env, &bid_key);
+
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("ref_claim")),
+            BondRefundClaimedEvent {
+                task_id,
+                bidder,
+                bond,
+            },
+        );
+
+        Ok(())
+    }
+
     // ── Award Contract ─────────────────────────────────────────────────────
 
     /// Award the contract to the winner determined by `reveal_bids`.
@@ -834,6 +933,72 @@ impl AgentBiddingContract {
                 task_id,
                 caller,
                 refunded_bidders: refunded_count,
+            },
+        );
+
+        Ok(())
+    }
+
+    // ── Claim Refund ────────────────────────────────────────────────────────
+
+    /// Let a bidder reclaim their own bond directly, without depending on the
+    /// creator ever calling `reveal_bids`/`award_contract`.
+    ///
+    /// `award_contract` already refunds every bidder's bond automatically
+    /// once the auction resolves normally — this function exists for the
+    /// case it never does (the creator goes silent, nobody reveals, the
+    /// auction stalls in `Bidding`/`Reveal` forever). Without it, a bidder
+    /// whose bond is stuck in an abandoned auction has no way to get it back.
+    ///
+    /// Idempotency and "proof of loss" both fall out of the same check: a
+    /// bond that's already `refunded` — whether from a prior claim or from
+    /// `award_contract` (which includes the winner) — cannot be claimed
+    /// again, so there's no need to separately look up who the winner was.
+    ///
+    /// Only callable once the bidding period has definitively closed
+    /// (`now >= auction.deadline`) and before the claim window's resolution
+    /// deadline (`auction.deadline + CLAIM_WINDOW_SECS`) elapses. Emits
+    /// `(bidding, refnd_clm)`.
+    pub fn claim_refund(env: Env, task_id: Symbol, bidder: Address) -> Result<(), Error> {
+        bidder.require_auth();
+
+        let auct_key = DataKey::Auction(task_id.clone());
+        let auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&auct_key)
+            .ok_or(Error::NotFound)?;
+
+        let now = env.ledger().timestamp();
+        if now < auction.deadline {
+            return Err(Error::BiddingPeriodActive);
+        }
+        if now >= auction.deadline.saturating_add(CLAIM_WINDOW_SECS) {
+            return Err(Error::ClaimWindowExpired);
+        }
+
+        let bid_key = DataKey::Bid(task_id.clone(), bidder.clone());
+        let mut bid: SealedBid = env
+            .storage()
+            .persistent()
+            .get(&bid_key)
+            .ok_or(Error::NotFound)?;
+
+        if bid.refunded {
+            return Err(Error::AlreadyRefunded);
+        }
+
+        bid.refunded = true;
+        let bond = bid.bond;
+        env.storage().persistent().set(&bid_key, &bid);
+        extend_ttl_for_key(&env, &bid_key);
+
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("refnd_clm")),
+            RefundClaimedEvent {
+                task_id,
+                bidder,
+                bond,
             },
         );
 
@@ -2006,6 +2171,71 @@ mod test {
     }
 
     #[test]
+    fn unsuccessful_bidder_can_claim_refund_after_reveal() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_ref");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let winner = Address::generate(&env);
+        let loser = Address::generate(&env);
+        let terms = String::from_str(&env, "Terms");
+        let winner_salt = BytesN::<32>::from_array(&env, &[51u8; 32]);
+        let loser_salt = BytesN::<32>::from_array(&env, &[52u8; 32]);
+        let winner_price = 2_000_000i128;
+        let loser_price = 5_000_000i128;
+        let winner_commitment = test_commitment(&env, &winner, winner_price, &terms, &winner_salt);
+        let loser_commitment = test_commitment(&env, &loser, loser_price, &terms, &loser_salt);
+
+        client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
+        client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &winner, &winner_price, &terms, &winner_salt);
+        client.reveal_bid(&task_id, &loser, &loser_price, &terms, &loser_salt);
+        client.reveal_bids(&task_id);
+
+        client.claim_bid_refund(&task_id, &loser);
+
+        let loser_bid = client.get_bid(&task_id, &loser).unwrap();
+        assert!(loser_bid.refunded);
+        let events = env.events().all();
+        assert_eq!(
+            events.last().unwrap().1,
+            (symbol_short!("bidding"), symbol_short!("ref_claim")).into_val(&env)
+        );
+    }
+
+    #[test]
+    fn winner_cannot_claim_unsuccessful_bidder_refund() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "win_ref");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let winner = Address::generate(&env);
+        let loser = Address::generate(&env);
+        let terms = String::from_str(&env, "Terms");
+        let winner_salt = BytesN::<32>::from_array(&env, &[53u8; 32]);
+        let loser_salt = BytesN::<32>::from_array(&env, &[54u8; 32]);
+        let winner_commitment = test_commitment(&env, &winner, 2_000_000, &terms, &winner_salt);
+        let loser_commitment = test_commitment(&env, &loser, 5_000_000, &terms, &loser_salt);
+
+        client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
+        client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &winner, &2_000_000, &terms, &winner_salt);
+        client.reveal_bid(&task_id, &loser, &5_000_000, &terms, &loser_salt);
+        client.reveal_bids(&task_id);
+
+        let err = client.try_claim_bid_refund(&task_id, &winner);
+        assert_eq!(err.err(), Some(Ok(Error::WinnerCannotClaimRefund)));
+    }
+
+    #[test]
     fn award_contract_before_reveal_bids_fails() {
         let (env, client, _) = setup();
         let creator = Address::generate(&env);
@@ -2243,6 +2473,153 @@ mod test {
         client.reveal_bid(&task_id, &bidder, &price, &t, &s);
 
         assert!(client.get_bid(&task_id, &bidder).unwrap().revealed);
+    }
+
+    // ── claim_refund ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn claim_refund_before_deadline_fails() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_early");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[21u8; 32]);
+        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        // Bidding period is still open.
+        let err = client.try_claim_refund(&task_id, &bidder);
+        assert_eq!(err.err(), Some(Ok(Error::BiddingPeriodActive)));
+    }
+
+    #[test]
+    fn claim_refund_with_no_bid_fails() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_no_bid");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+        let stranger = Address::generate(&env);
+        let err = client.try_claim_refund(&task_id, &stranger);
+        assert_eq!(err.err(), Some(Ok(Error::NotFound)));
+    }
+
+    #[test]
+    fn claim_refund_recovers_bond_from_a_stalled_auction() {
+        // Creator never calls reveal_bids/award_contract — bidding closes and
+        // the auction just sits there. Without claim_refund the bidder's
+        // bond would be stuck forever.
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_stalled");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[22u8; 32]);
+        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+        assert!(!client.get_bid(&task_id, &bidder).unwrap().refunded);
+
+        client.claim_refund(&task_id, &bidder);
+
+        assert!(client.get_bid(&task_id, &bidder).unwrap().refunded);
+    }
+
+    #[test]
+    fn claim_refund_twice_fails_idempotency() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_twice");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[23u8; 32]);
+        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+        client.claim_refund(&task_id, &bidder);
+
+        let err = client.try_claim_refund(&task_id, &bidder);
+        assert_eq!(err.err(), Some(Ok(Error::AlreadyRefunded)));
+    }
+
+    #[test]
+    fn claim_refund_after_window_expires_fails() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_expired");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[24u8; 32]);
+        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        // Past deadline + the full claim window.
+        env.ledger()
+            .set_timestamp(env.ledger().timestamp() + 3601 + CLAIM_WINDOW_SECS);
+
+        let err = client.try_claim_refund(&task_id, &bidder);
+        assert_eq!(err.err(), Some(Ok(Error::ClaimWindowExpired)));
+    }
+
+    #[test]
+    fn claim_refund_after_normal_award_is_a_noop_error_not_a_double_payout() {
+        // award_contract already refunded this bidder automatically —
+        // claim_refund must recognise that via the idempotency check rather
+        // than re-refunding (there's nothing to "re-refund" on-chain, but the
+        // point is it must not treat this as a fresh, valid claim).
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_after_award");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[25u8; 32]);
+        let price = 2_000_000i128;
+        let terms = String::from_str(&env, "Solo");
+        let comm = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+        client.reveal_bids(&task_id);
+        client.award_contract(&task_id);
+
+        assert!(client.get_bid(&task_id, &bidder).unwrap().refunded);
+
+        let err = client.try_claim_refund(&task_id, &bidder);
+        assert_eq!(err.err(), Some(Ok(Error::AlreadyRefunded)));
+    }
+
+    #[test]
+    fn claim_refund_emits_exactly_one_event() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "claim_event");
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let bidder = Address::generate(&env);
+        let salt = BytesN::<32>::from_array(&env, &[26u8; 32]);
+        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        let _ = env.events().all(); // drain
+
+        client.claim_refund(&task_id, &bidder);
+
+        let events = env.events().all();
+        assert_eq!(events.len(), 1, "expected exactly one RefundClaimed event");
     }
 
     // ── Full end-to-end flow ─────────────────────────────────────────────────

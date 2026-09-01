@@ -89,10 +89,10 @@ const MobileDrawer = forwardRef<HTMLDivElement, MobileDrawerProps>(
       <>
         <motion.div
           className="drawer-backdrop"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          variants={backdrop}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
           onClick={onClose}
           aria-hidden="true"
         />

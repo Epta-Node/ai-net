@@ -8,6 +8,8 @@ import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import MobileDrawer from './MobileDrawer'
 import Breadcrumb from './Breadcrumb'
+import RouteProgressBar from './RouteProgressBar'
+import { useRouteProgress } from '../../hooks/useRouteProgress'
 import './AppShell.css'
 
 interface AppShellProps {

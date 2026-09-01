@@ -66,11 +66,11 @@ const dummyRisks: RiskItem[] = [
 
 const dummyDesign = {
   palette: [
-    { name: 'Dark Bg', hex: '#0f172a' },
-    { name: 'Card Slate', hex: '#1e293b' },
-    { name: 'Stellar Blue', hex: '#38bdf8' },
-    { name: 'Green Alert', hex: '#10b981' },
-    { name: 'Red Danger', hex: '#ef4444' }
+    { name: 'Dark Bg', hex: 'var(--surface-canvas)' },
+    { name: 'Card Slate', hex: 'var(--surface-elevated)' },
+    { name: 'Stellar Blue', hex: 'var(--accent-info)' },
+    { name: 'Green Alert', hex: 'var(--status-success)' },
+    { name: 'Red Danger', hex: 'var(--status-danger)' }
   ],
   hierarchy: {
     name: 'AppShell',

@@ -7,13 +7,13 @@
 .dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius-round);
   display: inline-block;
 }
 
-.green { background-color: #22c55e; }
-.yellow { background-color: #eab308; }
-.red { background-color: #ef4444; }
+.green { background-color: var(--status-success); }
+.yellow { background-color: var(--status-warning-strong); }
+.red { background-color: var(--status-danger); }
 
 .label {
   font-size: 0.875rem;

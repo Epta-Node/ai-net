@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { Navigate } from 'react-router-dom';
 import { useWallet } from '../hooks/useWallet';
 import { useNetworkStats } from '../hooks/useNetworkStats';
-import { useToast } from '../context/ToastContext';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
@@ -13,8 +12,7 @@ import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonTable } from '../compon
 import styles from './dashboard.module.css';
 import type { TimePoint } from '../types/api';
 
-// Extract just the y-values from a 24h TimePoint[] series, falling back to a
-// deterministic synthetic series shaped around the current value.
+// Extract y-values from a TimePoint[] series.
 const toSeries = (points: TimePoint[] | undefined): number[] => {
   if (points && points.length > 0) {
     return points.map((p) => p.value);
@@ -22,11 +20,11 @@ const toSeries = (points: TimePoint[] | undefined): number[] => {
   return [];
 };
 
-const syntheticSeries = (value: number): number[] => {
+const syntheticSeries = (value: number, length = 7): number[] => {
   const base = Math.max(value, 1);
-  return Array.from({ length: 24 }, (_, i) => {
+  return Array.from({ length }, (_, i) => {
     const wave = Math.sin(i / 2) * base * 0.12;
-    const drift = (i / 23) * base * 0.3;
+    const drift = (i / (length - 1)) * base * 0.3;
     return Math.max(0, Math.round(drift + wave + 1));
   });
 };
@@ -67,12 +65,11 @@ export const DashboardPage: React.FC = () => {
   const { showToast } = useToast();
   const { t, i18n } = useTranslation();
 
-  // Show error toast when network stats fetch fails
   React.useEffect(() => {
     if (error) {
       // i18n.t so the toast uses the current language without re-running the
       // effect on every language change.
-      showToast(i18n.t('page.dashboard.statsError', { error }), 'error');
+      showToast(i18n.t('page.dashboard.statsError', { error: error.message || String(error) }), 'error');
     }
   }, [error, showToast, i18n]);
 
@@ -80,12 +77,6 @@ export const DashboardPage: React.FC = () => {
   if (!connected) {
     return <Navigate to="/" replace />;
   }
-
-  React.useEffect(() => {
-    if (error) {
-      showToast(error.message || 'Unable to load dashboard data.', 'error');
-    }
-  }, [error, showToast]);
 
   if (!address) return null; // render nothing while redirecting
   if (loading) {
@@ -103,10 +94,22 @@ export const DashboardPage: React.FC = () => {
     uptimePercent: 0,
   };
 
-  const agentsSeries = toSeries(kpiData.tasksLast24h).length > 0 ? toSeries(kpiData.tasksLast24h) : syntheticSeries(kpiData.totalAgents);
-  const tasksSeries = toSeries(kpiData.tasksLast24h).length > 0 ? toSeries(kpiData.tasksLast24h) : syntheticSeries(kpiData.totalTasks);
-  const xlmSeries = toSeries(kpiData.xlmLast24h).length > 0 ? toSeries(kpiData.xlmLast24h) : syntheticSeries(kpiData.totalXLMTransacted);
-  const uptimeSeries = toSeries(kpiData.tasksLast24h).length > 0 ? toSeries(kpiData.tasksLast24h) : syntheticSeries(Math.round(kpiData.uptimePercent));
+  const agentsSeries =
+    toSeries(kpiData.tasksLast7d).length > 0
+      ? toSeries(kpiData.tasksLast7d)
+      : syntheticSeries(kpiData.totalAgents);
+  const tasksSeries =
+    toSeries(kpiData.tasksLast7d).length > 0
+      ? toSeries(kpiData.tasksLast7d)
+      : syntheticSeries(kpiData.totalTasks);
+  const xlmSeries =
+    toSeries(kpiData.xlmLast7d).length > 0
+      ? toSeries(kpiData.xlmLast7d)
+      : syntheticSeries(kpiData.totalXLMTransacted);
+  const uptimeSeries =
+    toSeries(kpiData.tasksLast7d).length > 0
+      ? toSeries(kpiData.tasksLast7d)
+      : syntheticSeries(Math.round(kpiData.uptimePercent));
 
   return (
     <DashboardLayout className="fade-in">
