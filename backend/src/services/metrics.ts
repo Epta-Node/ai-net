@@ -38,6 +38,7 @@ import type {
   PaymentMetrics,
   RegistryCacheMetrics,
   PrometheusHistogram,
+  RegistryCacheMetrics,
   RequestMetrics,
   RequestSample,
   ScrapeHealth,
