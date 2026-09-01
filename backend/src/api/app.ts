@@ -213,6 +213,9 @@ export function createApp(opts: AppOptions = {}): {
     return v2TasksRouter(req, res, next);
   });
 
+  // ── Prometheus metrics endpoint ──────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+
   // ── Admin Queue routes ─────────────────────────────────────────────────────
   app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
   app.use("/api/admin", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
