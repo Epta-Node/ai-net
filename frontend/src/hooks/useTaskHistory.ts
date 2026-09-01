@@ -193,8 +193,11 @@ export function useTaskHistory(
     null,
     null,
   ]);
+  // Cursor state for incremental loading
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
-  const fetchTasks = useCallback(async () => {
+  const fetchTasks = useCallback(async (cursor?: string | null) => {
     setLoading(true);
     setError(null);
     try {
@@ -203,31 +206,77 @@ export function useTaskHistory(
         localStorage.getItem('walletAddress') ||
         '';
 
-      let tasks: TaskResponse[] = [];
-      if (walletAddress) {
-        tasks = await apiClient.get<TaskResponse[]>(
+      if (!walletAddress) {
+        setAllTasks([]);
+        return;
+      }
+
+      // Build cursor-based query params
+      const qs = new URLSearchParams({ limit: '50' });
+      if (cursor) qs.set('cursor', cursor);
+      if (filters.status && filters.status !== 'all') qs.set('status', filters.status);
+
+      const url = `/api/wallets/${walletAddress}/tasks?${qs.toString()}`;
+
+      // Try v2 cursor envelope first, fall back to flat array
+      let fetchedTasks: TaskResponse[] = [];
+      let newCursor: string | null = null;
+      let morePages = false;
+
+      try {
+        type V2Envelope = { data: { items: TaskResponse[]; pagination: { nextCursor: string | null; hasNextPage: boolean } } };
+        const envelope = await apiClient.get<V2Envelope>(url);
+        if (envelope?.data?.items) {
+          fetchedTasks = envelope.data.items;
+          newCursor = envelope.data.pagination.nextCursor ?? null;
+          morePages = envelope.data.pagination.hasNextPage;
+        } else {
+          // Flat array response from v1 / wallet endpoint
+          fetchedTasks = Array.isArray(envelope) ? (envelope as unknown as TaskResponse[]) : [];
+        }
+      } catch {
+        // Fallback: fetch without cursor
+        const fallback = await apiClient.get<TaskResponse[]>(
           `/api/wallets/${walletAddress}/tasks?limit=200`
         );
-      } else {
-        // Fallback: try generic tasks endpoint
-        tasks = await apiClient.get<TaskResponse[]>('/api/tasks?limit=200');
+        fetchedTasks = Array.isArray(fallback) ? fallback : [];
       }
-      setAllTasks(Array.isArray(tasks) ? tasks : []);
+
+      setAllTasks((prev) => (cursor ? [...prev, ...fetchedTasks] : fetchedTasks));
+      setNextCursor(newCursor);
+      setHasNextPage(morePages);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load task history');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filters.status]);
 
   useEffect(() => {
-    fetchTasks();
+    // Reset and fetch from the start whenever filters change
+    setAllTasks([]);
+    setNextCursor(null);
+    setHasNextPage(false);
+    fetchTasks(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.status]);
+
+  // Initial load (non-status filters are applied client-side)
+  useEffect(() => {
+    fetchTasks(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refetch = useCallback(() => {
+    setAllTasks([]);
+    setNextCursor(null);
+    setHasNextPage(false);
+    fetchTasks(null);
   }, [fetchTasks]);
 
   // Derive filtered + zoomed list
   const filteredTasks = useMemo(() => {
     const afterFilter = allTasks.filter((t) => taskMatchesFilters(t, filters));
-    // Only apply zoom when no explicit date range is set
     if (!filters.dateFrom && !filters.dateTo) {
       return applyZoom(afterFilter, filters.zoom).sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
@@ -238,7 +287,6 @@ export function useTaskHistory(
     );
   }, [allTasks, filters]);
 
-  // Available agent types for filter dropdown
   const availableAgentTypes = useMemo(() => {
     const types = new Set<string>();
     allTasks.forEach((t) => getTaskAgentTypes(t).forEach((k) => types.add(k)));
@@ -248,13 +296,10 @@ export function useTaskHistory(
   const toggleSelect = useCallback((taskId: string) => {
     setSelectedIds((prev) => {
       const [a, b] = prev;
-      // Deselect if already selected
       if (a === taskId) return [b, null];
       if (b === taskId) return [a, null];
-      // Fill first empty slot
       if (a === null) return [taskId, b];
       if (b === null) return [a, taskId];
-      // Both slots filled: replace oldest (a) with new
       return [b, taskId];
     });
   }, []);
@@ -273,7 +318,7 @@ export function useTaskHistory(
     filters,
     updateFilters,
     resetFilters,
-    refetch: fetchTasks,
+    refetch,
     selectedIds,
     toggleSelect,
     clearSelection,

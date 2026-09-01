@@ -10,6 +10,7 @@ export const RegisterAgentSchema = z.object({
   stellarPublicKey: z
     .string()
     .regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key format"),
+  bondAmountXLM: z.number().nonnegative("Bond amount must be non-negative").optional().default(0),
 });
 
 export const AgentListQuerySchema = z.object({

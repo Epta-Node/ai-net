@@ -25,4 +25,25 @@ export default defineConfig({
     globals: true,
     exclude: ['tests/e2e/**', 'node_modules/**'],
   },
+  build: {
+    // Warn when an individual chunk exceeds 250kb (developer-specified budget)
+    chunkSizeWarningLimit: 250,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom')) {
+              return 'vendor_react'
+            }
+            if (id.includes('lodash')) {
+              return 'vendor_lodash'
+            }
+            // group remaining node_modules into vendor chunk by package name
+            const parts = id.split('node_modules/')[1].split('/')
+            return parts[0]
+          }
+        },
+      },
+    },
+  },
 })

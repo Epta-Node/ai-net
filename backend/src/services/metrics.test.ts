@@ -22,6 +22,10 @@ import {
   summarizePayments,
   summarizeTasks,
   toPaymentAmount,
+  createEmptyHistogram,
+  observeHistogram,
+  renderHistogram,
+  formatPrometheusMetrics,
   type NodeTimingEvent,
   type PaymentRow,
 } from "./metrics";
@@ -835,4 +839,98 @@ describe("MetricsService", () => {
     expect(service.getSystemMetrics().gc.available).toBe(true);
     service.stopGcObserver();
   });
+
+  // ── Prometheus Telemetry (Issue #499) ──────────────────────────────────────
+
+  describe("Prometheus Metrics & Histograms", () => {
+    it("accumulates histogram observations accurately into buckets", () => {
+      const hist = createEmptyHistogram([0.1, 0.5, 1.0, 2.0]);
+      observeHistogram(hist, 0.05);
+      observeHistogram(hist, 0.45);
+      observeHistogram(hist, 0.8);
+      observeHistogram(hist, 1.5);
+      observeHistogram(hist, 3.0);
+
+      expect(hist.count).toBe(5);
+      expect(hist.sum).toBe(5.8);
+      expect(hist.buckets[0.1]).toBe(1);
+      expect(hist.buckets[0.5]).toBe(2);
+      expect(hist.buckets[1.0]).toBe(3);
+      expect(hist.buckets[2.0]).toBe(4);
+    });
+
+    it("renders histogram in valid Prometheus text format", () => {
+      const hist = createEmptyHistogram([0.5, 1.0]);
+      observeHistogram(hist, 0.2);
+      observeHistogram(hist, 0.8);
+
+      const rendered = renderHistogram("ainet_test_duration", "Test duration", hist);
+      expect(rendered).toContain("# HELP ainet_test_duration Test duration");
+      expect(rendered).toContain("# TYPE ainet_test_duration histogram");
+      expect(rendered).toContain('ainet_test_duration_bucket{le="0.5"} 1');
+      expect(rendered).toContain('ainet_test_duration_bucket{le="1"} 2');
+      expect(rendered).toContain('ainet_test_duration_bucket{le="+Inf"} 2');
+      expect(rendered).toContain("ainet_test_duration_sum 1");
+      expect(rendered).toContain("ainet_test_duration_count 2");
+    });
+
+    it("formats all 8 Prometheus metric families", () => {
+      const tasks: TaskMetrics = { total: 5, active: 1, queued: 0, completed: 3, failed: 1, cancelled: 0 };
+      const agents: AgentMetrics = { total: 4, online: 3, offline: 1, avgResponseTimeMs: 95 };
+      const payments: PaymentMetrics = {
+        locked: { count: 1, stroops: "10000000", xlm: 1.0 },
+        released: { count: 3, stroops: "30000000", xlm: 3.0 },
+        refunded: { count: 0, stroops: "0", xlm: 0 },
+      };
+      const taskDurationHist = createEmptyHistogram([0.5, 1.0, 5.0]);
+      observeHistogram(taskDurationHist, 0.8);
+      const veniceRequests = new Map<string, number>([["llama-3.3-70b::success", 12], ["llama-3.3-70b::error", 1]]);
+      const veniceLatencyHist = createEmptyHistogram([0.5, 1.0]);
+      observeHistogram(veniceLatencyHist, 0.3);
+
+      const text = formatPrometheusMetrics({
+        tasks,
+        agents,
+        payments,
+        taskDurationHistogram: taskDurationHist,
+        veniceRequests,
+        veniceLatencyHistogram: veniceLatencyHist,
+        veniceCircuitBreakerState: 0,
+      });
+
+      expect(text).toContain('ainet_tasks_total{status="completed"} 3');
+      expect(text).toContain('ainet_tasks_total{status="failed"} 1');
+      expect(text).toContain("ainet_agents_total 4");
+      expect(text).toContain('ainet_payments_total{currency="XLM",status="released"} 3');
+      expect(text).toContain("ainet_payment_amount_xlm_total 4");
+      expect(text).toContain('ainet_venice_requests_total{model="llama-3.3-70b",status="success"} 12');
+      expect(text).toContain("ainet_venice_circuit_breaker_state 0");
+    });
+
+    it("records task and venice telemetry through MetricsService and exports Prometheus text", async () => {
+      const { service } = buildService();
+
+      service.recordTaskCompletion(1.2);
+      service.recordVeniceCall("llama-3.3-70b", "success", 0.35);
+      service.setVeniceCircuitBreakerState("open");
+      expect(service.getVeniceCircuitBreakerState()).toBe(1);
+      service.setVeniceCircuitBreakerState("half-open");
+      expect(service.getVeniceCircuitBreakerState()).toBe(2);
+      service.setVeniceCircuitBreakerState("closed");
+      expect(service.getVeniceCircuitBreakerState()).toBe(0);
+
+      const exported = await service.exportPrometheusMetrics();
+      expect(exported).toContain("ainet_tasks_duration_seconds_count 1");
+      expect(exported).toContain('ainet_venice_requests_total{model="llama-3.3-70b",status="success"} 1');
+      expect(exported).toContain("ainet_venice_circuit_breaker_state 0");
+
+      const health = service.getScrapeHealth();
+      expect(health.status).toBe("ok");
+      expect(health.registeredOnce).toBe(true);
+
+      service.resetPrometheusMetrics();
+      expect(service.getVeniceCircuitBreakerState()).toBe(0);
+    });
+  });
 });
+

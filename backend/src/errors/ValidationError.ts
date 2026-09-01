@@ -13,5 +13,6 @@ export class ValidationError extends AppError {
     correlationId?: string,
   ) {
     super(message, 400, "VALIDATION_ERROR", details, correlationId);
+    this.name = "ValidationError";
   }
 }
