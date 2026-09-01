@@ -128,8 +128,8 @@ export function createTasksRouter(
    *             schema:
    *               $ref: '#/components/schemas/InternalServerError'
    */
-  // POST /api/tasks — rate-limited, then Zod-validated
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  // POST /api/tasks — idempotent, rate-limited, then Zod-validated
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
     try {
       const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
       // Body first, then the header (both spellings accepted), then "anonymous".

@@ -36,8 +36,8 @@ export function createV1TasksRouter(
   const tasksRouter = Router();
   const jobQueue = queue ?? getGlobalJobQueue();
 
-  // POST /api/tasks — v1 format
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+  // POST /api/tasks — v1 format, idempotent
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
