@@ -4,6 +4,9 @@
  * Issue #263 — acceptance criterion:
  *   "Cache invalidation on data mutations (agent registration, task creation)"
  *
+ * Issue #427 — also invalidates the registry-prefixed key space so that both
+ *   `api:GET:/api/agents*` and `{prefix}:agents:*` are swept together.
+ *
  * Call the appropriate invalidator from any mutation handler (POST, PUT, DELETE).
  * All invalidators use `delByPattern` so they sweep every variant (different
  * query strings) of the affected route family.
@@ -12,6 +15,8 @@
  */
 
 import { getCacheClient } from './index';
+import { invalidateRegistryCache } from './registry';
+import { recordInvalidation } from './metrics';
 
 // ---------------------------------------------------------------------------
 // Route-family constants
@@ -28,11 +33,19 @@ export const CACHE_PREFIX = {
 // ---------------------------------------------------------------------------
 
 /**
- * Bust all cached GET /api/agents responses.
- * Call after:  POST /api/agents/register, DELETE /api/agents/:id, reputation updates
+ * Bust all cached GET /api/agents responses **and** the deployment-keyed
+ * registry cache entries (Issue #427).
+ *
+ * Call after:  POST /api/agents/register, DELETE /api/agents/:id,
+ *              POST /api/agents/:id/heartbeat, reputation updates,
+ *              on-chain sync events (agent_reg, agent_drg, freeze, …)
  */
 export async function invalidateAgentsCache(): Promise<void> {
-  await getCacheClient().delByPattern(`${CACHE_PREFIX.AGENTS}*`);
+  await Promise.all([
+    getCacheClient().delByPattern(`${CACHE_PREFIX.AGENTS}*`),
+    invalidateRegistryCache(), // sweeps {REGISTRY_CACHE_KEY_PREFIX}:agents:*
+  ]);
+  recordInvalidation();
 }
 
 /**
