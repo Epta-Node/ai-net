@@ -2,6 +2,7 @@ import React, { forwardRef, useEffect, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion, PanInfo } from 'framer-motion'
 import { NAV_GROUPS, NAV_ITEMS, isNavItemActive } from './navigation'
+import { backdrop } from '../../utils/animationPresets'
 import './MobileDrawer.css'
 
 export { NAV_ITEMS }

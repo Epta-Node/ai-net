@@ -100,7 +100,7 @@ export function DataTable<T>({
     rowRefs.current = rowRefs.current.slice(0, visibleRows.length);
   }, [visibleRows.length]);
 
-  const handleSelect = (key: string | number, row: T) => {
+  const handleSelect = (_key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 
@@ -210,6 +210,7 @@ export function DataTable<T>({
                 <tr
                   key={rowKey}
                   ref={(element) => { rowRefs.current[rowIndex] = element; }}
+                  data-testid={getRowTestId ? getRowTestId(row) : `agent-row-${String(rowKey)}`}
                   className={classes.join(' ')}
                   onClick={() => onRowClick?.(row)}
                   onFocus={() => setActiveRowIndex(rowIndex)}

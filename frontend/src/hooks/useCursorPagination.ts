@@ -34,7 +34,7 @@ export function useCursorPagination<T>(
   params: Record<string, string> = {},
 ): UseCursorPaginationResult<T> {
   const [items, setItems] = useState<T[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [, setCursor] = useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
