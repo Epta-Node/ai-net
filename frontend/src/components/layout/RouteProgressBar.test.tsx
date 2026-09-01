@@ -1,36 +1,8 @@
 import { render, screen, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import React from 'react';
+import { MemoryRouter } from 'react-router-dom';
+import { describe, it, expect } from 'vitest';
 import { RouteProgressProvider, useRouteProgressContext } from '../../../src/context/RouteProgressContext';
 import RouteProgressBar from '../../../src/components/layout/RouteProgressBar';
-import { useRouteProgress } from '../../../src/hooks/useRouteProgress';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Mounts the bar inside a provider + router so we can test navigation. */
-function BarFixture({ initialPath = '/' }: { initialPath?: string }) {
-  return (
-    <RouteProgressProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <RouteProgressBar />
-        <RouteProgressBarTestRoutes />
-      </MemoryRouter>
-    </RouteProgressProvider>
-  );
-}
-
-function RouteProgressBarTestRoutes() {
-  useRouteProgress();
-  return (
-    <Routes>
-      <Route path="/" element={<div>home</div>} />
-      <Route path="/about" element={<div>about</div>} />
-    </Routes>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // RouteProgressBar rendering

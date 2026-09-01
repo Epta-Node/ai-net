@@ -38,6 +38,7 @@ import {
 } from "../payment";
 import { agentsRouter } from "./routes/agents";
 import { healthRouter } from "./routes/health";
+import { metricsRouter } from "./routes/metrics";
 import { createStatsRouter } from "./routes/stats";
 import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
 import { rateLimitMiddleware, registerRateLimitMiddleware, publicLimiter, authedLimiter, adminLimiter } from "./middleware/rateLimit";
@@ -97,6 +98,14 @@ export interface AppOptions {
   authService?: AuthService;
   /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
+  /**
+   * How long close() waits for in-flight jobs to finish before closing the
+   * HTTP/WS server anyway. Default: 10000 (10s). A job still running when
+   * this elapses is left in the queue's "active" state — the next worker
+   * start (see JobWorker.start()/recoverIncompleteJobs()) resets it to
+   * "pending" and retries it, rather than losing the work.
+   */
+  jobWorkerStopTimeoutMs?: number;
 }
 
 function tryLoadStellarRelease(): StellarReleasePaymentFn | undefined {
@@ -128,6 +137,7 @@ export function createApp(opts: AppOptions = {}): {
   app.use(requestId);
   app.use(requestLogger);
   app.use(metricsMiddleware);
+  app.use(globalRateLimitMiddleware);
   app.use(versioningMiddleware);
   app.use(
     readOnlyMiddleware({
@@ -167,6 +177,10 @@ export function createApp(opts: AppOptions = {}): {
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", publicLimiter.middleware, healthRouter);
 
+  // ── Metrics routes (Issue #499) ───────────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+  app.use("/api/metrics", metricsRouter);
+
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", publicLimiter.middleware, createStatsRouter(getTaskDb()));
 
@@ -181,20 +195,8 @@ export function createApp(opts: AppOptions = {}): {
   app.use("/api/agents", agentsRouter);
 
   app.get("/openapi.json", (_req: Request, res: Response) => {
-    res.json(getOpenapiJson());
+    res.json(openapiSpec);
   });
-  app.get("/openapi.yaml", (_req: Request, res: Response) => {
-    res.setHeader("Content-Type", "text/yaml; charset=utf-8");
-    res.send(getOpenapiYaml());
-  });
-  app.get("/docs/swagger.json", (_req: Request, res: Response) => {
-    res.json(getOpenapiJson());
-  });
-  app.get("/docs/swagger.yaml", (_req: Request, res: Response) => {
-    res.setHeader("Content-Type", "text/yaml; charset=utf-8");
-    res.send(getOpenapiYaml());
-  });
-  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec, swaggerUiOptions));
 
   // ── Task routes ────────────────────────────────────────────────────────────
   // Authenticated task creation uses the tighter authed limiter.
@@ -210,6 +212,9 @@ export function createApp(opts: AppOptions = {}): {
     }
     return v2TasksRouter(req, res, next);
   });
+
+  // ── Prometheus metrics endpoint ──────────────────────────────────────
+  app.use("/metrics", metricsRouter);
 
   // ── Admin Queue routes ─────────────────────────────────────────────────────
   app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
@@ -252,15 +257,21 @@ export function createApp(opts: AppOptions = {}): {
   }));
 
   function close(callback?: () => void): void {
-    jobWorker.stop();
-    heartbeatService.stop();
-    metricsService.setWebSocketProbe(null);
-    detachStream();
-    if (httpServer.listening) {
-      httpServer.close(callback);
-    } else if (callback) {
-      callback();
-    }
+    // Drain first: wait for in-flight jobs to finish (bounded by
+    // jobWorkerStopTimeoutMs) before we stop accepting connections. A job
+    // still active when the drain window elapses is NOT force-failed — it
+    // stays "active" in the store and is picked back up by the next
+    // JobWorker.start() via recoverIncompleteJobs().
+    jobWorker.stop(opts.jobWorkerStopTimeoutMs ?? 10_000).finally(() => {
+      heartbeatService.stop();
+      metricsService.setWebSocketProbe(null);
+      detachStream();
+      if (httpServer.listening) {
+        httpServer.close(callback);
+      } else if (callback) {
+        callback();
+      }
+    });
   }
 
   const routeCount = (app as unknown as { _router?: { stack?: unknown[] } })._router?.stack?.length;

@@ -12,6 +12,6 @@ export class AuthenticationError extends AppError {
     details?: AppErrorDetails,
     correlationId?: string,
   ) {
-    super(message, 401, "AUTHENTICATION_ERROR", details, correlationId);
+    super(message, 401, "UNAUTHORIZED", details, correlationId);
   }
 }

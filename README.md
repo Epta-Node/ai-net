@@ -114,6 +114,14 @@ ai-net/
 
 ---
 
+## Documentation & Integration Guides
+
+- [AI-Agent Integration Guide](docs/ai-agent-integration-guide.md) — Step-by-step guide for registering third-party agents, staking bonds, heartbeats, task execution, and dispute resolution.
+- [Smart Contract Deployment & Upgrades](smart-contracts/docs/DEPLOYMENT_GUIDE.md) — Deployment and upgrade workflows.
+- [Storage Migration Guide](smart-contracts/docs/STORAGE_MIGRATION.md) — Storage migration guidelines.
+
+---
+
 ## Getting Started
 
 ### Quick Start (Docker Compose — Recommended)
@@ -258,6 +266,7 @@ npm run test:e2e
 - [End-to-End Testing Guide](docs/e2e-testing.md): Automated test execution and validation.
 - [Release Engineering Guide](docs/RELEASE_ENGINEERING.md): Tagging, changelog generation, artifact signing, and release checklists.
 - [Frontend Architecture & Conventions](docs/FRONTEND_ARCHITECTURE.md): Folder structure, naming rules, state management, and component patterns.
+- [Frontend Visual Regression Testing](docs/visual-regression-testing.md): Screenshot coverage per UI surface, diff threshold, and the baseline update flow.
 
 ---
 

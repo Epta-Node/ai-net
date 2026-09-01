@@ -104,8 +104,8 @@ export class TokenService {
     const expectedEncodedSignature = base64UrlEncode(expectedSignature);
 
     // Constant-time comparison
-    const sigBuf = Buffer.from(encodedSignature);
-    const expBuf = Buffer.from(expectedEncodedSignature);
+    const sigBuf = Uint8Array.from(Buffer.from(encodedSignature, "utf8"));
+    const expBuf = Uint8Array.from(Buffer.from(expectedEncodedSignature, "utf8"));
     if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
       throw new Error("Invalid token signature");
     }

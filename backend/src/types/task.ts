@@ -37,6 +37,8 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   requestId?: string;
+  /** Trace identifier (correlationId) propagated from the triggering request. */
+  traceId?: string;
 }
 
 /** Events emitted by the coordinator */

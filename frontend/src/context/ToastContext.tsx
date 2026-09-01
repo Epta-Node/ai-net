@@ -4,6 +4,11 @@ import { ToastContainer } from '../components/common/Toast';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info'
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Toast {
   id: string;
   message: string;
@@ -45,10 +50,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       if (duration > 0) {
         window.setTimeout(() => dismissToast(id), duration)
       }
+
+      return id
     },
     [dismissToast],
   )
 
+  // External dispatch support (used by services/api.ts notifyToast)
   useEffect(() => {
     const handleExternalToast = (event: Event) => {
       const customEvent = event as CustomEvent<{
@@ -75,9 +83,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+      <ToastContainer toasts={activeToasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
-  );
+  )
 }
 
 export function useToast() {

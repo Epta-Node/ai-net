@@ -398,9 +398,9 @@ impl UpgradeManager {
         );
 
         // Store rollback info if we had a previous version
-        if let Some(prev_version) = current_version {
+        if let Some(ref prev_version) = current_version {
             let rollback_record = RollbackRecord {
-                previous_version: prev_version,
+                previous_version: prev_version.clone(),
                 rollback_deadline,
                 can_rollback: true,
             };
@@ -426,7 +426,7 @@ impl UpgradeManager {
                     .map(|v| v.version)
                     .unwrap_or(String::from_str(&env, "none")),
                 new_version: proposal.new_version,
-                wasm_hash: proposal.new_wasm_hash,
+                wasm_hash: proposal.new_wasm_hash.clone(),
                 admin: new_version.admin,
             },
         );

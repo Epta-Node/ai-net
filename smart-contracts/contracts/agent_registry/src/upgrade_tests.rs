@@ -10,11 +10,11 @@ mod upgrade_tests {
         MigrationMetadata, UpgradeStatus, Upgradeable, UpgradeableError, VersionCompatibility,
     };
 
-    fn setup_upgrade_test() -> (Env, AgentRegistryContractClient<'static>, Address) {
+    fn setup_upgrade_test() -> (Env, crate::AgentRegistryContractClient<'static>, Address) {
         let env = Env::default();
         env.mock_all_auths();
-        let contract_id = env.register(AgentRegistryContract, ());
-        let client = AgentRegistryContractClient::new(&env, &contract_id);
+        let contract_id = env.register(crate::AgentRegistryContract, ());
+        let client = crate::AgentRegistryContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         client.initialize(&admin);
         (env, client, admin)
@@ -58,8 +58,8 @@ mod upgrade_tests {
     #[test]
     fn test_set_upgrade_manager_unauthorized() {
         let env = Env::default();
-        let contract_id = env.register(AgentRegistryContract, ());
-        let client = AgentRegistryContractClient::new(&env, &contract_id);
+        let contract_id = env.register(crate::AgentRegistryContract, ());
+        let client = crate::AgentRegistryContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
         env.mock_all_auths();
@@ -222,8 +222,8 @@ mod upgrade_tests {
     #[test]
     fn test_upgrade_contract_unauthorized() {
         let env = Env::default();
-        let contract_id = env.register(AgentRegistryContract, ());
-        let client = AgentRegistryContractClient::new(&env, &contract_id);
+        let contract_id = env.register(crate::AgentRegistryContract, ());
+        let client = crate::AgentRegistryContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
 
         env.mock_all_auths();
@@ -497,7 +497,7 @@ mod upgrade_integration_tests {
 
     fn setup_integration_test() -> (
         Env,
-        AgentRegistryContractClient<'static>,
+        crate::AgentRegistryContractClient<'static>,
         UpgradeManagerClient<'static>,
         Address,
     ) {

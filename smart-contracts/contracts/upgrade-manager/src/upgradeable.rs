@@ -140,8 +140,8 @@ pub mod version_utils {
         let mut migration_required = false;
 
         // Simple version comparison - in practice would use proper semver
-        match current_str.cmp(&target_str) {
-            std::cmp::Ordering::Less => {
+        match current.cmp(&target) {
+            core::cmp::Ordering::Less => {
                 // Upgrading to newer version - generally compatible
                 migration_required = true;
             }

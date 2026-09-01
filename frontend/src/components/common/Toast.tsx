@@ -3,8 +3,15 @@ import './Toast.css';
 import type { Toast } from '../../context/ToastContext';
 
 interface ToastContainerProps {
-  toasts: Toast[];
-  onDismiss: (id: string) => void;
+  toasts: Toast[]
+  onDismiss: (id: string) => void
+}
+
+const icons: Record<Toast['type'], React.ReactNode> = {
+  success: <CheckCircle size={18} aria-hidden />,
+  error: <XCircle size={18} aria-hidden />,
+  warning: <AlertTriangle size={18} aria-hidden />,
+  info: <Info size={18} aria-hidden />,
 }
 
 export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
@@ -21,5 +28,5 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
         </div>
       ))}
     </div>
-  );
+  )
 }

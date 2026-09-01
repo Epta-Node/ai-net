@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import pino from "pino";
 import type { DestinationStream, Logger } from "pino";
 import { getConfig } from "../config";
+import { currentTraceContext } from '../services/traceContext';
 
 const REDACTED = "[REDACTED]";
 const REDACTED_ADDRESS = "[REDACTED_ADDRESS]";
@@ -140,6 +141,17 @@ function createBaseLogger(destination?: DestinationStream): Logger {
       },
     },
     timestamp: pino.stdTimeFunctions.isoTime,
+    // Auto-inject traceId / spanId from the active AsyncLocalStorage trace
+    // context (Issue #407) so every log line in a traced flow carries the
+    // correlation IDs without the caller having to pass them explicitly.
+    mixin() {
+      const ctx = currentTraceContext();
+      if (!ctx) return {};
+      const bindings: Record<string, unknown> = { traceId: ctx.traceId, spanId: ctx.spanId };
+      if (ctx.taskId) bindings.taskId = ctx.taskId;
+      if (ctx.requestId) bindings.requestId = ctx.requestId;
+      return bindings;
+    },
     hooks: {
       logMethod(inputArgs, method) {
         const currentLogger = this as Logger & {

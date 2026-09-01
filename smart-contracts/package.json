@@ -11,6 +11,8 @@
     "test:upgrade": "jest --runInBand --forceExit tests/upgrade-migration.test.ts",
     "test:integration": "RUN_INTEGRATION_TESTS=true jest --runInBand --forceExit --testPathPattern='tests/e2e|tests/integration'",
     "test:e2e": "RUN_STELLAR_E2E_TESTS=true jest --runInBand --forceExit tests/e2e/market-report.test.ts",
+    "testnet:farm": "bash scripts/testnet-farm.sh",
+    "testnet:farm:run": "RUN_TESTNET_FARM=true bash scripts/testnet-farm.sh",
     "lint": "eslint src --ext .ts"
   },
   "keywords": [

@@ -4,26 +4,34 @@ import type { Task, TaskStatus } from "../types/task";
 import type { QualityScoreRecord } from "../services/qualityScorer.types";
 import { createLogger } from "../utils/logger";
 import { migrateToLatest } from "./migrator";
+import { createPool, type SqlitePool } from "./pool";
+import { decodeCursor, encodeCursor, type CursorPage } from "./cursor";
 
 const logger = createLogger({ component: "task-db" });
 const MIGRATIONS_DIR = path.join(__dirname, "migrations", "tasks");
 
 let _taskPool: SqlitePool | null = null;
 
-export function getTaskDb(dbPath?: string): Database.Database {
-  if (!_taskDb) {
+/** Lazily open (or reopen) the pooled task database. */
+export function getTaskPool(dbPath?: string): SqlitePool {
+  if (!_taskPool || _taskPool.closed) {
     const filePath = dbPath ?? path.join(process.cwd(), "tasks.db");
-    _taskDb = new Database(filePath);
-    _taskDb.pragma("busy_timeout = 5000");
-    _taskDb.pragma("journal_mode = WAL");
-    try {
-      (_taskDb as any).on("error", (err: Error) => {
-        logger.error({ err }, "task database error");
-      });
-    } catch {
-      // error events are emitted from node EventEmitter support in runtime
-    }
-    migrateToLatest(_taskDb, MIGRATIONS_DIR);
+    _taskPool = createPool({
+      filePath,
+      min: 1,
+      max: 4,
+      acquireTimeoutMs: 5_000,
+      onCreate: (db) => {
+        try {
+          (db as any).on("error", (err: Error) => {
+            logger.error({ err }, "task database error");
+          });
+        } catch {
+          // error events are emitted from node EventEmitter support in runtime
+        }
+        migrateToLatest(db, MIGRATIONS_DIR);
+      },
+    });
   }
   return _taskPool;
 }

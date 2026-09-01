@@ -128,8 +128,8 @@ export function createTasksRouter(
    *             schema:
    *               $ref: '#/components/schemas/InternalServerError'
    */
-  // POST /api/tasks — rate-limited, then Zod-validated
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  // POST /api/tasks — idempotent, rate-limited, then Zod-validated
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
     try {
       const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
       // Body first, then the header (both spellings accepted), then "anonymous".
@@ -357,7 +357,7 @@ export function createTasksRouter(
       }
       const requesterKey = req.headers["walletpublickey"] as string;
       if (!requesterKey || requesterKey !== task.walletPublicKey) {
-        throw new AppError("Access denied", 403, "FORBIDDEN", undefined, correlationId);
+        throw new ForbiddenError("Access denied", undefined, correlationId);
       }
       res.json(task);
     } catch (err) {
@@ -423,15 +423,12 @@ export function createTasksRouter(
 
       const requesterKey = req.headers["walletpublickey"] as string;
       if (!requesterKey || requesterKey !== task.walletPublicKey) {
-        throw new AppError("Not authorized to cancel this task", 403, "FORBIDDEN", undefined, correlationId);
+        throw new ForbiddenError("Not authorized to cancel this task", undefined, correlationId);
       }
 
       if (task.status !== "queued") {
-        // 409 Conflict — use AppError directly since there's no ConflictError subclass
-        throw new AppError(
+        throw new ConflictError(
           `Cannot cancel task in '${task.status}' status`,
-          409,
-          "CONFLICT",
           { currentStatus: task.status },
           correlationId,
         );

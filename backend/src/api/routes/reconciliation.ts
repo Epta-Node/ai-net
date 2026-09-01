@@ -5,6 +5,7 @@ import {
 } from '../../services/reconciliation';
 import type { ReconciliationTrigger } from '../../services/reconciliation.types';
 import { createLogger } from '../../utils/logger';
+import { NotFoundError, AppError } from '../../errors';
 
 export interface ReconciliationRouterOptions {
   /** Service to use; defaults to the production service. */
@@ -69,7 +70,7 @@ export function createReconciliationRouter(
   const getService = (): ReconciliationService =>
     (service ??= options.service ?? createDefaultReconciliationService());
 
-  router.post('/run', async (req, res) => {
+    router.post('/run', async (req, res, next) => {
     try {
       const requested = req.body?.triggeredBy as string | undefined;
       const triggeredBy: ReconciliationTrigger =
@@ -79,14 +80,15 @@ export function createReconciliationRouter(
       return res.status(200).json(report);
     } catch (error) {
       logger.error({ err: error }, "reconciliation run failed");
-      return res.status(500).json({ error: 'RECONCILIATION_FAILED' });
+      next(new AppError('Reconciliation run failed', 500, 'INTERNAL_ERROR'));
     }
   });
 
-  router.get('/report', (_req, res) => {
+  router.get('/report', (_req, res, next) => {
     const report = getService().getLatestReport();
     if (!report) {
-      return res.status(404).json({ error: 'NO_RECONCILIATION_REPORT' });
+      next(new NotFoundError('Reconciliation Report'));
+      return;
     }
     return res.status(200).json(report);
   });

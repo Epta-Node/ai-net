@@ -9,6 +9,7 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { currentTraceId } from "../../../services/traceContext";
 import { getConfig } from "../../../config";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
@@ -44,8 +45,8 @@ export function createV2TasksRouter(
   const tasksRouter = Router();
   const jobQueue = queue ?? getGlobalJobQueue();
 
-  // POST /api/tasks — v2 format with enhanced response
-  tasksRouter.post("/", rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+  // POST /api/tasks — v2 format with enhanced response, idempotent
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
@@ -75,6 +76,7 @@ export function createV2TasksRouter(
     const taskId = `task_${nanoid(12)}`;
     const dag = decompose(taskId, prompt);
     const now = new Date().toISOString();
+    const traceId = currentTraceId();
     const task: Task = {
       id: taskId,
       prompt,
@@ -83,6 +85,8 @@ export function createV2TasksRouter(
       dag,
       createdAt: now,
       updatedAt: now,
+      requestId: res.locals.requestId,
+      traceId,
     };
 
     createTask(task);

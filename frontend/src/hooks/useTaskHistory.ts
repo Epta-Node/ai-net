@@ -194,8 +194,8 @@ export function useTaskHistory(
     null,
   ]);
   // Cursor state for incremental loading
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasNextPage, setHasNextPage] = useState(false);
+  const [, setNextCursor] = useState<string | null>(null);
+  const [, setHasNextPage] = useState(false);
 
   const fetchTasks = useCallback(async (cursor?: string | null) => {
     setLoading(true);

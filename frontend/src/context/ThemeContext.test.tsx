@@ -43,7 +43,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
         addEventListener: vi.fn((event: string, handler: (e: { matches: boolean }) => void) => {
           if (event === 'change') mediaQueryListeners.push(handler)
         }),
-        removeEventListener: vi.fn((event: string, handler: (e: { matches: boolean }) => void) => {
+        removeEventListener: vi.fn((_event: string, handler: (e: { matches: boolean }) => void) => {
           mediaQueryListeners = mediaQueryListeners.filter((l) => l !== handler)
         }),
         addListener: vi.fn((handler: (e: { matches: boolean }) => void) => {

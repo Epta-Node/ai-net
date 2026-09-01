@@ -11,7 +11,7 @@ import { RecentTasksTable } from '../components/dashboard/RecentTasksTable';
 import { useToast } from '../hooks/useToast';
 import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonTable } from '../components/common/Skeleton';
 import styles from './dashboard.module.css';
-import type { TimePoint } from '../types/api';
+import type { TimePoint, NetworkStats } from '../types/api';
 
 // Extract y-values from a TimePoint[] series.
 const toSeries = (points: TimePoint[] | undefined): number[] => {
@@ -70,7 +70,7 @@ export const DashboardPage: React.FC = () => {
     if (error) {
       // i18n.t so the toast uses the current language without re-running the
       // effect on every language change.
-      showToast(i18n.t('page.dashboard.statsError', { error }), 'error');
+      showToast(i18n.t('page.dashboard.statsError', { error: error.message || String(error) }), 'error');
     }
   }, [error, showToast, i18n]);
 
@@ -88,7 +88,7 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
-  const kpiData = data || {
+  const kpiData: NetworkStats = data || {
     totalAgents: 0,
     totalTasks: 0,
     totalXLMTransacted: 0,

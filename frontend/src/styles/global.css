@@ -1,10 +1,36 @@
 @import './tokens.css';
 @import './animations.css';
 @import './micro-interactions.css';
+@import './report.css';
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --bg-primary: #0A0E14;
+  --bg-surface: #11151D;
+  --bg-surface-alt: #161B24;
+  --bg-secondary: #1A1F2E;
+  --border-color: #2A3040;
+  --border-subtle: #1F2630;
+  --text-primary: #F5F7FA;
+  --text-secondary: #8A93A3;
+  --accent-cyan: #38BDF8;
+  --accent-purple: #8B5CF6;
+  --accent-green: #34D399;
+  --gradient-primary: linear-gradient(90deg, #38BDF8 0%, #8B5CF6 100%);
+  --panel-bg: var(--bg-surface);
+  --panel-border: var(--border-subtle);
+  --primary: var(--accent-purple);
+  --primary-hover: #7c3aed;
+  --success: var(--accent-green);
+  --danger: #ef4444;
+  --accent: var(--accent-cyan);
+  --skeleton-base: #1a1f2e;
+  --skeleton-shine: #2a3040;
+}
 
 * {
   box-sizing: border-box;
@@ -218,6 +244,15 @@ select:focus-visible {
   box-shadow: var(--focus-ring-info);
 }
 
+.risk-point:focus-visible {
+  outline: none;
+}
+
+.risk-point:focus-visible .risk-dot {
+  stroke: var(--accent);
+  stroke-width: 4px;
+}
+
 /* ─── Screen reader only utility ──────────────────────────────────────────── */
 .sr-only {
   position: absolute;
@@ -242,4 +277,3 @@ td,
 .chip {
   transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease;
 }
-

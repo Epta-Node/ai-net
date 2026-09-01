@@ -14,3 +14,6 @@ coverage/
 **/target/
 playwright-report/
 test-results/
+
+# Testnet contract farm output (deploy + gas + report artifacts)
+smart-contracts/testnet-farm-output/

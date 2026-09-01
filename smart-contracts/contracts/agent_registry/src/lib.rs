@@ -62,12 +62,9 @@ pub const DEFAULT_PROPOSAL_EXPIRY: u64 = 604_800;
 
 #[allow(dead_code)]
 const MAX_AGENT_ID: u32 = 64;
-
-const MAX_METADATA_ENTRIES: u32 = 16;
-
+const MAX_METADATA_ENTRIES: u32 = 5;
 #[allow(dead_code)]
-const MAX_METADATA_VALUE_SIZE: u32 = 256;
-
+const MAX_METADATA_VALUE_SIZE: u32 = 64;
 #[allow(dead_code)]
 const MAX_TOTAL_AGENT_STORAGE: u32 = 4096;
 
@@ -100,15 +97,14 @@ pub const DEFAULT_MIN_BOND_STROOPS: i128 = 100_000_000;
 /// At ~5s per ledger: 17_280 ledgers ≈ 24 hours.
 pub const BOND_COOLDOWN_LEDGERS: u32 = 17_280;
 
-/// Default TTL threshold.
-pub const TTL_THRESHOLD: u32 = 100_000;
+/// Default TTL threshold (ledgers remaining) below which we extend.
+pub const TTL_THRESHOLD: u32 = 50_000;
+/// Target TTL after extension (14 days at 5s ledgers: 241_920).
+pub const TTL_EXTEND_TO: u32 = 241_920;
 
-/// Target TTL after extension.
-pub const TTL_EXTEND_TO: u32 = 535_680;
-
-/// Default error entry retention, in ledger sequences (~30 days at 5s/ledger).
+/// Default error entry retention, in ledger sequences (7 days at 5s/ledger: 120_960).
 /// Overridable via `set_error_ttl`.
-pub const DEFAULT_ERROR_TTL: u64 = 518_400;
+pub const DEFAULT_ERROR_TTL: u64 = 120_960;
 
 /// Default analytics snapshot retention (30 days).
 pub const ANALYTICS_SNAPSHOT_RETENTION: u32 = 30;
@@ -123,6 +119,11 @@ pub const SLA_BONUS_REPUTATION_BOOST: u32 = 5;
 pub const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum upper bound on page size to guarantee execution within one ledger footprint budget.
 pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Billing period applied when `create_subscription` is called with `0` (30 days).
+pub const DEFAULT_SUBSCRIPTION_PERIOD_SECS: u64 = 2_592_000;
+/// Minimum accepted subscription billing period (1 hour).
+pub const MIN_SUBSCRIPTION_PERIOD_SECS: u64 = 3_600;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -271,11 +272,10 @@ pub enum DataKey {
     TotalAgents,
     DiscoveryCache(DiscoveryQuery),
     DiscoveryStats,
-    // Analytics keys
-    AgentAnalytics(Symbol),
+    // Analytics and SLA combined
+    AgentMetrics(Symbol),
     AnalyticsSnapshot(Symbol, u64),
     // SLA keys
-    AgentSla(Symbol),
     SlaViolation(Symbol, u64),
     SlaViolationCount(Symbol),
     // Pagination keys (issue #339)
@@ -550,6 +550,16 @@ fn min_bond(env: &Env) -> i128 {
         .instance()
         .get(&DataKey::MinBond)
         .unwrap_or(DEFAULT_MIN_BOND_STROOPS)
+}
+
+/// Prorated refund for cancelling `sub` at `now`: the payment for the unused
+/// remainder of the current billing period, capped at one full period.
+fn prorated_refund(sub: &Subscription, now: u64) -> i128 {
+    if sub.period_secs == 0 || now >= sub.end_time {
+        return 0;
+    }
+    let window = (sub.end_time - now).min(sub.period_secs);
+    sub.payment_amount.saturating_mul(window as i128) / (sub.period_secs as i128)
 }
 
 #[contractimpl]
@@ -2195,21 +2205,21 @@ impl AgentRegistryContract {
                     last_updated: env.ledger().sequence() as u64,
                 });
 
-        let old_total = analytics.total_tasks;
-        analytics.total_tasks += 1;
+        let old_total = metrics.total_tasks;
+        metrics.total_tasks += 1;
         if success {
-            analytics.successful_tasks += 1;
+            metrics.successful_tasks += 1;
         } else {
-            analytics.failed_tasks += 1;
+            metrics.failed_tasks += 1;
         }
-        analytics.total_earnings += earnings;
+        metrics.total_earnings += earnings;
 
         // Running average response time
-        analytics.avg_response_time = if analytics.total_tasks == 1 {
+        metrics.avg_response_time = if metrics.total_tasks == 1 {
             response_time
         } else {
-            ((analytics.avg_response_time as u64 * old_total + response_time as u64)
-                / analytics.total_tasks) as u32
+            ((metrics.avg_response_time as u64 * old_total + response_time as u64)
+                / metrics.total_tasks) as u32
         };
 
         analytics.last_updated = env.ledger().sequence() as u64;
@@ -2220,9 +2230,9 @@ impl AgentRegistryContract {
         let snapshot_date = env.ledger().sequence() as u64;
         let snapshot = AnalyticsSnapshot {
             snapshot_date,
-            total_tasks: analytics.total_tasks,
-            successful_tasks: analytics.successful_tasks,
-            total_earnings: analytics.total_earnings,
+            total_tasks: metrics.total_tasks,
+            successful_tasks: metrics.successful_tasks,
+            total_earnings: metrics.total_earnings,
         };
         let snap_key = DataKey::AnalyticsSnapshot(agent_id.clone(), snapshot_date);
         env.storage().persistent().set(&snap_key, &snapshot);
@@ -2274,20 +2284,20 @@ impl AgentRegistryContract {
         let success_sym = Symbol::new(&env, "successful_tasks");
 
         for id in agent_ids.iter() {
-            let analytics_key = DataKey::AgentAnalytics(id.clone());
-            if let Some(analytics) = env
+            let metrics_key = DataKey::AgentMetrics(id.clone());
+            if let Some(metrics) = env
                 .storage()
                 .persistent()
-                .get::<_, AgentAnalytics>(&analytics_key)
+                .get::<_, AgentMetrics>(&metrics_key)
             {
                 let metric_value = if metric == tasks_sym {
-                    analytics.total_tasks
+                    metrics.total_tasks
                 } else if metric == earnings_sym {
-                    analytics.total_earnings as u64
+                    metrics.total_earnings as u64
                 } else if metric == success_sym {
-                    analytics.successful_tasks
+                    metrics.successful_tasks
                 } else {
-                    analytics.total_tasks
+                    metrics.total_tasks
                 };
 
                 entries.push_back(LeaderboardEntry {
@@ -2363,21 +2373,28 @@ impl AgentRegistryContract {
             return Err(Error::InvalidSla);
         }
 
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        if env.storage().persistent().has(&sla_key) {
-            return Err(Error::SlaAlreadyExists);
-        }
-
-        let sla = AgentSla {
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let mut metrics = env.storage().persistent().get(&metrics_key).unwrap_or_else(|| AgentMetrics {
             agent_id: agent_id.clone(),
-            max_response_time,
-            min_uptime,
-            min_quality_score,
-            created_at: env.ledger().sequence() as u64,
+            max_response_time: 0,
+            min_uptime: 0,
+            min_quality_score: 0,
+            sla_created_at: env.ledger().sequence() as u64,
             total_checks: 0,
             violations: 0,
             last_check_at: 0,
-        };
+            total_tasks: 0,
+            successful_tasks: 0,
+            failed_tasks: 0,
+            total_earnings: 0,
+            avg_response_time: 0,
+            last_updated: 0,
+        });
+
+        metrics.max_response_time = max_response_time;
+        metrics.min_uptime = min_uptime;
+        metrics.min_quality_score = min_quality_score;
+        metrics.sla_created_at = env.ledger().sequence() as u64;
 
         env.storage().persistent().set(&sla_key, &sla);
         extend_ttl_for_existing_key(&env, &sla_key);
@@ -2403,27 +2420,27 @@ impl AgentRegistryContract {
         actual_uptime: u32,
         actual_quality: u32,
     ) -> Result<bool, Error> {
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        let mut sla: AgentSla = env
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let mut metrics: AgentMetrics = env
             .storage()
             .persistent()
-            .get(&sla_key)
+            .get(&metrics_key)
             .ok_or(Error::SlaNotFound)?;
 
-        sla.total_checks += 1;
-        sla.last_check_at = env.ledger().sequence() as u64;
+        metrics.total_checks += 1;
+        metrics.last_check_at = env.ledger().sequence() as u64;
 
         let mut compliant = true;
         let mut violation_type: Option<u32> = None;
 
         // Check response time
-        if actual_response_time > sla.max_response_time {
+        if actual_response_time > metrics.max_response_time {
             compliant = false;
             violation_type = Some(0);
         }
 
         // Check uptime
-        if actual_uptime < sla.min_uptime {
+        if actual_uptime < metrics.min_uptime {
             compliant = false;
             if violation_type.is_none() {
                 violation_type = Some(1);
@@ -2431,7 +2448,7 @@ impl AgentRegistryContract {
         }
 
         // Check quality
-        if actual_quality < sla.min_quality_score {
+        if actual_quality < metrics.min_quality_score {
             compliant = false;
             if violation_type.is_none() {
                 violation_type = Some(2);
@@ -2439,7 +2456,7 @@ impl AgentRegistryContract {
         }
 
         if !compliant {
-            sla.violations += 1;
+            metrics.violations += 1;
 
             // Record violation
             let violation_count_key = DataKey::SlaViolationCount(agent_id.clone());
@@ -2493,7 +2510,7 @@ impl AgentRegistryContract {
         } else {
             // Bonus: reputation boost for consistently exceeding SLA
             // Award bonus after 10 consecutive compliant checks
-            if sla.total_checks >= 10 && sla.violations == 0 {
+            if metrics.total_checks >= 10 && metrics.violations == 0 {
                 env.events().publish(
                     (symbol_short!("registry"), symbol_short!("sla_bonus")),
                     SlaBonusAwardedEvent {
@@ -2511,18 +2528,18 @@ impl AgentRegistryContract {
     }
 
     /// Get SLA status and compliance percentage for an agent.
-    pub fn get_sla_status(env: Env, agent_id: Symbol) -> Option<(AgentSla, u32)> {
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        let sla: AgentSla = env.storage().persistent().get(&sla_key)?;
+    pub fn get_sla_status(env: Env, agent_id: Symbol) -> Option<(AgentMetrics, u32)> {
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let metrics: AgentMetrics = env.storage().persistent().get(&metrics_key)?;
 
-        let compliance = if sla.total_checks == 0 {
+        let compliance = if metrics.total_checks == 0 {
             100u32
         } else {
-            let compliant_checks = sla.total_checks - sla.violations;
-            ((compliant_checks * 100) / sla.total_checks) as u32
+            let compliant_checks = metrics.total_checks - metrics.violations;
+            ((compliant_checks * 100) / metrics.total_checks) as u32
         };
 
-        Some((sla, compliance))
+        Some((metrics, compliance))
     }
 
     // ── Cross-chain identity bridging (issue #259) ───────────────────────────
@@ -2714,3 +2731,5 @@ mod bridge_tests;
 mod test;
 #[cfg(test)]
 mod test_multisig;
+#[cfg(test)]
+mod property_tests;

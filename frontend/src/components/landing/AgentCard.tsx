@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { formatNumber } from '../../utils/format'
+import { cardEntrance } from '../../utils/animationPresets'
 import { Star } from 'lucide-react'
 
 export interface AgentData {

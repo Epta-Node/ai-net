@@ -9,11 +9,11 @@ import { initializeAgents, globalAgentRegistry } from "./agents";
 import { startAgentSync, stopAgentSync } from "./registry/sync";
 import { loadConfig } from "./config";
 import { AgentCleanupService } from "./services/agentCleanup";
-import { createTaskDb, getTaskDb, closeTaskDb } from "./db/tasks";
 import { createAgentDb, getAgentDb, closeAgentDb } from "./db/agents";
 import { closeDb } from "./db/index";
 import { closeAuthDb } from "./db/auth";
 import { closeJobDb } from "./queue";
+import { eventBus } from "./coordinator/eventBus";
 import { createDefaultReconciliationService } from "./services/reconciliation";
 import { createLogger } from "./utils/logger";
 import { redactedConfigSnapshot } from "./config";
@@ -58,7 +58,9 @@ async function main() {
     errorRegistryMaintenance.start();
 
     // Create and start the server
-    const { httpServer, close } = createApp();
+    const { httpServer, close } = createApp({
+      jobWorkerStopTimeoutMs: config.GRACEFUL_SHUTDOWN_TIMEOUT * 1000,
+    });
 
     const port = config.PORT;
 
@@ -97,10 +99,30 @@ async function main() {
   }
 }
 
+export interface GracefulShutdownExtras {
+  cleanupService?: { stop(): void };
+  reconciliationService?: { stop(): void };
+  globalAgentRegistry?: { shutdown(): void };
+}
+
+/**
+ * SIGTERM/SIGINT handler: stop accepting new work, drain in-flight jobs and
+ * the WebSocket stream, flush the event store, close every database
+ * connection, then exit 0 — or force-exit 1 if any of that takes longer
+ * than `config.GRACEFUL_SHUTDOWN_TIMEOUT` seconds.
+ *
+ * In-flight tasks are drained (via `closeApp`, which awaits the job
+ * worker's stop()) rather than force-failed: anything still running when
+ * the drain window elapses stays "active" in the job store and is resumed
+ * by the next `JobWorker.start()` (`recoverIncompleteJobs()` resets it to
+ * "pending" for retry) — see `docs/e2e-testing.md` and
+ * `tests/shutdown.test.ts` for the restart-mid-stream scenario.
+ */
 export function setupGracefulShutdown(
   httpServer: any,
   closeApp: (callback?: () => void) => void,
-  config: { GRACEFUL_SHUTDOWN_TIMEOUT?: number }
+  config: { GRACEFUL_SHUTDOWN_TIMEOUT?: number },
+  extras: GracefulShutdownExtras = {},
 ) {
   const logger = createLogger({ module: "shutdown" });
   let isShuttingDown = false;
@@ -128,6 +150,9 @@ export function setupGracefulShutdown(
 
       logger.info("stopping agent sync service");
       stopAgentSync();
+      extras.cleanupService?.stop();
+      extras.reconciliationService?.stop();
+      extras.globalAgentRegistry?.shutdown();
 
       logger.info("failing running tasks");
       try {
