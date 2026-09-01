@@ -4,7 +4,6 @@ import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
-import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
@@ -17,42 +16,16 @@ import RendererDemoPage from './pages/RendererDemoPage'
 import WalletPage from './pages/WalletPage'
 import DashboardPage from './pages/dashboard'
 import ErrorBoundary from './components/common/ErrorBoundary'
-import { ProtectedRoute } from './components/common/ProtectedRoute'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import './components/common/Toast.css'
 
-/**
- * Everything that needs router context lives here, so `<Router>` (mounted by
- * `App` below) is already in place before `useCommandPalette` calls
- * `useNavigate`.
- */
-const AppContent: React.FC = () => {
-  return (
-    <Router>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/dashboard" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/wallet" element={<WalletPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/tasks/new" element={<ProtectedRoute><NewTaskPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/renderer-demo" element={<RendererDemoPage />} />
-        </Routes>
-      </AppShell>
-    <NotificationProvider>
-      <RoutedContent />
-    </NotificationProvider>
-  )
-}
-
-// Lives INSIDE <Router>: useCommandPalette() calls useNavigate(), which
-// throws the "may be used only in the context of a <Router>" invariant when
-// rendered above it.
+// Lives INSIDE <Router> and the theme/wallet providers: useCommandPalette()
+// calls useNavigate(), useTheme() and useWallet(), which all require their
+// context providers to be mounted above this component.
 const RoutedContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
+  const { isOpen, closePalette, commands } = useCommandPalette()
 
   return (
     <>
@@ -91,12 +64,7 @@ const RoutedContent: React.FC = () => {
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
-        onSearch={search}
-        recentSearches={recentSearches}
-        onRecentSearchClick={(query) => {
-          // Trigger search with the recent query
-          search(query)
-        }}
+        commands={commands}
       />
     </>
   )
@@ -110,7 +78,7 @@ const App: React.FC = () => {
           <WalletProvider>
             <ToastProvider>
               <Router>
-                <AppContent />
+                <RoutedContent />
               </Router>
             </ToastProvider>
           </WalletProvider>
