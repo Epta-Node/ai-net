@@ -107,3 +107,40 @@ export interface AgentQualityMetrics {
   /** Most recent scores, oldest first. */
   lastScores: number[];
 }
+
+/** Full breakdown of agent reputation components (Issue #497). */
+export interface ReputationBreakdown {
+  /** Overall reputation score clamped to 0.0 - 5.0 scale. */
+  overallScore: number;
+  /** Task outcome contribution based on success/failure ratio. */
+  taskSuccessScore: number;
+  /** Output quality contribution (completeness, format, relevance). */
+  qualityScore: number;
+  /** Response latency contribution (faster response bonus). */
+  latencyScore: number;
+  /** Staking/bond weight multiplier (bounded, e.g. 1.0 - 1.5x). */
+  bondWeightMultiplier: number;
+  /** Staked bond amount in XLM. */
+  bondAmountXLM: number;
+  /** Total tasks successfully completed. */
+  tasksCompleted: number;
+  /** Total tasks failed. */
+  tasksFailed: number;
+  /** Timestamp when decay was last calculated or applied. */
+  lastDecayAt?: string;
+  /** Inactivity decay penalty applied. */
+  decayApplied?: number;
+}
+
+/** Parameters for computing reputation delta upon task execution. */
+export interface ReputationEvaluationInput {
+  outcome: 'success' | 'failure';
+  /** Quality score from qualityScorer (0 - 100). */
+  qualityScore?: number;
+  /** Response latency in milliseconds. */
+  latencyMs?: number;
+  /** Bond/stake amount in XLM. */
+  bondAmountXLM?: number;
+  /** Current agent reputation (0.0 - 5.0). */
+  currentReputation?: number;
+}

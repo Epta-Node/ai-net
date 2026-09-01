@@ -1,52 +1,79 @@
 /**
- * Prometheus metrics endpoint.
+ * Prometheus metrics export route.
  *
- * Exposes `GET /metrics` in the Prometheus text exposition format so that
- * Prometheus (or any compatible scraper) can poll it directly.
- *
- * No authentication is required — this endpoint is intended for internal
- * network scraping only.
+ * Exposes:
+ *  - GET /metrics         — Prometheus text format scrape target
+ *  - GET /metrics/health  — Scrape reliability and uptime diagnostics
+ *  - POST /metrics/reset  — Safe metrics reset
  */
 
-import { Router, Request, Response } from 'express';
-import { generatePrometheusMetrics } from '../../services/prometheus';
+import { Router, Request, Response, NextFunction } from "express";
+import { metricsService, MetricsService } from "../../services/metrics";
 
-const router = Router();
+export interface MetricsRouterOptions {
+  service?: MetricsService;
+}
 
-/**
- * @openapi
- * /metrics:
- *   get:
- *     summary: Prometheus-format metrics
- *     description: >
- *       Returns all application metrics in the Prometheus text exposition
- *       format.  Includes HTTP traffic (request count, latency histogram,
- *       error rates), WebSocket connections, task pipeline counters, agent
- *       population, payment amounts, queue status, LLM latency, and process
- *       health gauges.
- *     tags: [Metrics]
- *     security: []
- *     responses:
- *       200:
- *         description: Prometheus text exposition
- *         content:
- *           text/plain:
- *             schema:
- *               type: string
- *             example: |
- *               # HELP ainet_up Whether the ai-net backend is running
- *               # TYPE ainet_up gauge
- *               ainet_up 1
- */
-router.get('/', (_req: Request, res: Response) => {
-  try {
-    const body = generatePrometheusMetrics();
-    res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-    res.send(body);
-  } catch (error) {
-    res.status(500).send('# Error generating metrics\n');
-  }
-});
+export function createMetricsRouter(options: MetricsRouterOptions = {}): Router {
+  const router = Router();
+  const service = options.service ?? metricsService;
 
-export { router as metricsRouter };
-export default router;
+  /**
+   * @openapi
+   * /metrics:
+   *   get:
+   *     summary: Prometheus metrics endpoint
+   *     description: Exports system and domain metrics in Prometheus text format for scraping.
+   *     tags: [Metrics]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: Prometheus metric families
+   *         content:
+   *           text/plain:
+   *             schema:
+   *               type: string
+   */
+  router.get("/", async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const output = await service.exportPrometheusMetrics();
+      res.setHeader("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
+      res.status(200).send(output);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @openapi
+   * /metrics/health:
+   *   get:
+   *     summary: Prometheus scrape health
+   *     description: Checks telemetry scrape reliability and registration status.
+   *     tags: [Metrics]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: Scrape health status
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   */
+  router.get("/health", (_req: Request, res: Response): void => {
+    const health = service.getScrapeHealth();
+    res.status(200).json(health);
+  });
+
+  /**
+   * Safe metrics reset.
+   */
+  router.post("/reset", (_req: Request, res: Response): void => {
+    service.resetPrometheusMetrics();
+    res.status(200).json({ status: "ok", message: "Metrics reset successfully" });
+  });
+
+  return router;
+}
+
+export const metricsRouter = createMetricsRouter();
