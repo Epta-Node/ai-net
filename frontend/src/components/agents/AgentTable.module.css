@@ -45,13 +45,26 @@
   color: var(--text-primary);
 }
 
+.sortButton:active {
+  transform: scale(0.95);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .row {
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
 .row:hover td {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-hover-subtle);
+}
+
+.row:active td {
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .row:focus-visible {
@@ -79,9 +92,9 @@
 .pill {
   background: rgba(99, 102, 241, 0.15);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  color: #C7D2FE;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.72rem;
   font-weight: 600;
   white-space: nowrap;
@@ -106,7 +119,7 @@
 }
 
 .starBg {
-  color: #475569;
+  color: var(--border-strong);
 }
 
 .starFill {
@@ -119,7 +132,7 @@
 }
 
 .starFg {
-  color: #fbbf24;
+  color: #FCD34D;
   fill: #fbbf24;
 }
 
@@ -134,7 +147,7 @@
 .status {
   display: inline-block;
   padding: 3px 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: capitalize;
@@ -143,13 +156,13 @@
 .statusActive {
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
-  color: #6ee7b7;
+  color: #6EE7B7;
 }
 
 .statusInactive {
   background: rgba(239, 68, 68, 0.12);
   border: 1px solid rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  color: #FCA5A5;
 }
 
 .detailsButton {
@@ -157,17 +170,26 @@
   border: 1px solid var(--panel-border);
   color: var(--text-primary);
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 0.8rem;
   font-weight: 600;
   box-shadow: none;
 }
 
 .detailsButton:hover {
-  background: rgba(99, 102, 241, 0.15);
-  border-color: rgba(99, 102, 241, 0.4);
+  background: var(--accent-surface);
+  border-color: var(--accent-border-strong);
   transform: none;
   box-shadow: none;
+}
+
+.detailsButton:active {
+  transform: scale(0.95);
+}
+
+.detailsButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Skeleton */
@@ -179,8 +201,8 @@
   display: block;
   height: 14px;
   width: 80%;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--white-alpha-08);
   animation: agentPulse 1.5s ease-in-out infinite;
 }
 

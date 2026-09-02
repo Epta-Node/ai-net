@@ -202,7 +202,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           <input
             type="text"
             className={styles.input}
-            placeholder={placeholder}
+            placeholder={resolvedPlaceholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}

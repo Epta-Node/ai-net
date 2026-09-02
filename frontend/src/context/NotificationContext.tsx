@@ -12,12 +12,27 @@ function loadInitialNotifications(): AppNotification[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed;
+      return parsed.map((item: any) => ({
+        ...item,
+        message: item.message || item.description || '',
+        description: item.description || item.message || '',
+      }));
     }
   } catch (err) {
     console.error('Failed to parse notifications from localStorage:', err);
   }
   return [];
+}
+
+/** Helper to dispatch an application toast event */
+export function triggerToastNotification(message: string, type: 'success' | 'error' | 'warning' | 'info' = 'info') {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('app-toast', {
+        detail: { message, type },
+      })
+    );
+  }
 }
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
@@ -54,12 +69,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const id = input.id || `notif_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const timestamp = input.timestamp || new Date().toISOString();
     const read = input.read ?? false;
+    const msg = input.message || input.description || '';
+    const desc = input.description || input.message || '';
 
     const newNotification: AppNotification = {
       ...input,
       id,
       timestamp,
       read,
+      message: msg,
+      description: desc,
     };
 
     setNotifications(prev => {
@@ -72,11 +91,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setNotifications(prev => prev.filter(n => n.id !== id));
   }, []);
 
-  const clearNotifications = useCallback(() => {
+  const clearAll = useCallback(() => {
     setNotifications([]);
   }, []);
 
-  // Helper to map incoming WebSocket / event data to AppNotification
+  // Helper to map incoming WebSocket / event data to AppNotification and trigger toasts
   const handleIncomingEvent = useCallback((eventData: any) => {
     if (!eventData || typeof eventData !== 'object') return;
 
@@ -87,101 +106,131 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const timestamp = eventData.timestamp || new Date().toISOString();
 
     let notification: NewNotificationInput | null = null;
+    let toastMessage: string | null = null;
+    let toastType: 'success' | 'error' | 'warning' | 'info' = 'info';
 
     switch (eventType) {
       case 'task_completed':
         notification = {
-          type: 'task',
+          type: 'task_completed',
           title: 'Task Completed',
+          message: `Task ${taskId || ''} completed successfully.`,
           description: `Task ${taskId || ''} completed successfully.`,
           link: taskId ? `/tasks/${taskId}` : '/dashboard',
           timestamp,
+          metadata: payload,
         };
+        toastMessage = `Task ${taskId || ''} completed successfully.`;
+        toastType = 'success';
         break;
 
       case 'task_failed':
         notification = {
-          type: 'task',
+          type: 'task_failed',
           title: 'Task Failed',
+          message: `Task ${taskId || ''} failed.${payload?.error ? ` Error: ${payload.error}` : ''}`,
           description: `Task ${taskId || ''} failed.${payload?.error ? ` Error: ${payload.error}` : ''}`,
           link: taskId ? `/tasks/${taskId}` : '/dashboard',
           timestamp,
+          metadata: payload,
         };
+        toastMessage = `Task ${taskId || ''} failed.`;
+        toastType = 'error';
         break;
 
       case 'node_completed':
         notification = {
-          type: 'task',
+          type: 'task_completed',
           title: 'DAG Node Completed',
+          message: `Node ${nodeId || 'task'} finished in task ${taskId || ''}.`,
           description: `Node ${nodeId || 'task'} finished in task ${taskId || ''}.`,
           link: taskId ? `/tasks/${taskId}` : '/dashboard',
           timestamp,
+          metadata: payload,
         };
         break;
 
       case 'node_failed':
         notification = {
-          type: 'task',
+          type: 'task_failed',
           title: 'DAG Node Failed',
+          message: `Node ${nodeId || 'task'} failed in task ${taskId || ''}.${payload?.error ? ` (${payload.error})` : ''}`,
           description: `Node ${nodeId || 'task'} failed in task ${taskId || ''}.${payload?.error ? ` (${payload.error})` : ''}`,
           link: taskId ? `/tasks/${taskId}` : '/dashboard',
           timestamp,
+          metadata: payload,
         };
         break;
 
+      case 'payment_received':
       case 'payment_released':
         notification = {
-          type: 'payment',
-          title: 'Payment Confirmed',
-          description: `Payment released for task ${taskId || ''}.${payload?.txHash ? ` Tx: ${payload.txHash.slice(0, 8)}...` : ''}`,
+          type: 'payment_received',
+          title: 'Payment Received',
+          message: `Payment received for task ${taskId || ''}.${payload?.amount ? ` (${payload.amount} XLM)` : ''}${payload?.txHash ? ` Tx: ${payload.txHash.slice(0, 8)}...` : ''}`,
+          description: `Payment received for task ${taskId || ''}.${payload?.amount ? ` (${payload.amount} XLM)` : ''}${payload?.txHash ? ` Tx: ${payload.txHash.slice(0, 8)}...` : ''}`,
           link: '/wallet',
           timestamp,
+          metadata: payload,
         };
+        toastMessage = `Payment of ${payload?.amount ? `${payload.amount} XLM` : 'funds'} received.`;
+        toastType = 'success';
         break;
 
       case 'payment_locked':
         notification = {
-          type: 'payment',
+          type: 'payment_received',
           title: 'Payment Escrow Locked',
+          message: `Payment locked in escrow for task ${taskId || ''}.`,
           description: `Payment locked in escrow for task ${taskId || ''}.`,
           link: '/wallet',
           timestamp,
+          metadata: payload,
         };
         break;
 
       case 'agent_status':
       case 'agent_registered':
         notification = {
-          type: 'agent',
-          title: 'Agent Status Changed',
-          description: payload?.message || `Agent ${payload?.agentId || 'status'} updated.`,
+          type: 'agent_registered',
+          title: 'Agent Registered',
+          message: payload?.message || `Agent ${payload?.agentId || payload?.name || 'status'} updated.`,
+          description: payload?.message || `Agent ${payload?.agentId || payload?.name || 'status'} updated.`,
           link: '/agents',
           timestamp,
+          metadata: payload,
         };
         break;
 
       case 'notification':
       case 'custom_notification':
-        if (payload?.title && payload?.description) {
+        if (payload?.title && (payload?.message || payload?.description)) {
           notification = {
             type: payload.type || 'system',
             title: payload.title,
-            description: payload.description,
+            message: payload.message || payload.description,
+            description: payload.description || payload.message,
             link: payload.link,
             timestamp,
+            metadata: payload,
           };
+          if (payload.toast) {
+            toastMessage = payload.message || payload.description;
+            toastType = payload.toastType || 'info';
+          }
         }
         break;
 
       default:
-        // If direct notification shape was sent
-        if (eventData.title && eventData.description) {
+        if (eventData.title && (eventData.message || eventData.description)) {
           notification = {
             type: eventData.type || 'system',
             title: eventData.title,
-            description: eventData.description,
+            message: eventData.message || eventData.description,
+            description: eventData.description || eventData.message,
             link: eventData.link,
             timestamp,
+            metadata: eventData.metadata || payload,
           };
         }
         break;
@@ -189,6 +238,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     if (notification) {
       addNotification(notification);
+    }
+
+    if (toastMessage) {
+      triggerToastNotification(toastMessage, toastType);
     }
   }, [addNotification]);
 
@@ -241,12 +294,18 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     connect();
 
-    // Also listen for local custom events
+    // Also listen for local custom events (allows testing & client-side triggers)
     const handleCustomEvent = (e: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent.detail) {
-        if (customEvent.detail.title) {
+        if (customEvent.detail.title && (customEvent.detail.message || customEvent.detail.description)) {
           addNotification(customEvent.detail);
+          if (customEvent.detail.type === 'task_completed' || customEvent.detail.type === 'payment_received') {
+            triggerToastNotification(
+              customEvent.detail.message || customEvent.detail.description || customEvent.detail.title,
+              'success'
+            );
+          }
         } else {
           handleIncomingEvent(customEvent.detail);
         }
@@ -274,9 +333,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         unreadCount,
         markAsRead,
         markAllAsRead,
+        clearAll,
+        clearNotifications: clearAll,
         addNotification,
         removeNotification,
-        clearNotifications,
         isConnected,
       }}
     >
