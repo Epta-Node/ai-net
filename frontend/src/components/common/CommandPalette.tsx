@@ -144,6 +144,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+
     if (filtered.length === 0) return;
 
     switch (e.key) {
@@ -159,23 +166,17 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         e.preventDefault();
         executeCommand(filtered[safeIndex]);
         break;
-      case 'Escape':
-        e.preventDefault();
-        onClose();
-        break;
     }
   };
 
-  // Escape also works when focus is not on the input (e.g. after clicking a
-  // result). The hook handles Cmd/Ctrl+K globally.
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+
+      e.preventDefault();
+      onClose();
     };
 
     document.addEventListener('keydown', handleKeyDown);

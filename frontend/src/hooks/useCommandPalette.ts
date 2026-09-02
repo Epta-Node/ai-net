@@ -82,7 +82,6 @@ export function useCommandPalette() {
   }, [navigate, effectiveTheme, setMode, disconnect]);
 
   // Global shortcut: Cmd+K (macOS) / Ctrl+K (other) toggles the palette.
-  // Escape closes it from anywhere while open.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -91,7 +90,7 @@ export function useCommandPalette() {
         return;
       }
 
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !e.defaultPrevented) {
         e.preventDefault();
         closePalette();
       }

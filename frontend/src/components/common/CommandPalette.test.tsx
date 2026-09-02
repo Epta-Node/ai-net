@@ -207,6 +207,16 @@ describe('CommandPalette', () => {
     expect(screen.queryByRole('option')).not.toBeInTheDocument();
   });
 
+  test('Escape closes from the search input when no commands match', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.change(input, { target: { value: 'zzz-no-match' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
   test('shows keyboard shortcut hints', () => {
     render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
 
