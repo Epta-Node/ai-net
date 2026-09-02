@@ -1,7 +1,7 @@
 // src/components/dashboard/RecentTasksTable.tsx
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Skeleton } from '../common/Skeleton';
+import { SkeletonTable } from '../common/Skeleton';
 import styles from './RecentTasksTable.module.css';
 import { getRecentTasks } from '@services/api';
 import { useToast } from '../../hooks/useToast';
@@ -46,14 +46,7 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
   if (loading) {
     return (
       <div className={styles.table}>
-        {[...Array(5)].map((_, i) => (
-          <div key={i} className={styles.row}>
-            <Skeleton width="20%" height="1rem" />
-            <Skeleton width="30%" height="1rem" />
-            <Skeleton width="30%" height="1rem" />
-            <Skeleton width="15%" height="1rem" />
-          </div>
-        ))}
+        <SkeletonTable rows={5} columns={4} />
       </div>
     );
   }

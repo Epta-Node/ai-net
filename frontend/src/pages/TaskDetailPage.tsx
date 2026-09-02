@@ -63,7 +63,11 @@ export const TaskDetailSkeleton: React.FC = () => {
         <div className="flex items-center gap-2 mb-3">
           <Skeleton width="12rem" height="1rem" />
         </div>
-        <Skeleton variant="rectangular" width="100%" height="280px" className="rounded-xl" />
+        <div className="w-full bg-slate-950/40 rounded-xl border border-[var(--panel-border)] overflow-hidden flex items-center gap-8 px-8" style={{ height: '280px' }}>
+          {Array.from({ length: 3 }, (_, index) => (
+            <Skeleton key={index} variant="rect" width="160px" height="92px" className="shrink-0 rounded-xl" />
+          ))}
+        </div>
       </div>
 
       {/* Combined Panels */}

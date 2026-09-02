@@ -8,6 +8,7 @@ import styles from './TransactionTable.module.css'
 import { formatDate } from '../../utils/format'
 import { ExportButton } from './ExportButton'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
+import { SkeletonTable } from '../common/Skeleton'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
@@ -81,14 +82,7 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
     return (
       <div className={styles.container}>
         <h3 className={styles.heading}>{t('wallet.tx.heading')}</h3>
-        <div className={styles.skeletonList}>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className={styles.skeletonRow}>
-              <div className={styles.skeletonIcon} />
-              <div className={styles.skeletonLine} />
-            </div>
-          ))}
-        </div>
+        <SkeletonTable rows={5} columns={5} />
       </div>
     )
   }
@@ -230,28 +224,6 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
           stickyHeader
           emptyState={<div className={styles.emptyState}><Clock size={32} className={styles.emptyIcon} /><p>{t('wallet.tx.noMatches')}</p></div>}
         />
-      )}
-
-      <div className={styles.pagination}>
-        <button type="button" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1}>
-          Previous
-        </button>
-        <span>
-          Page {currentPage} of {totalPages}
-        </span>
-        <button type="button" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>
-          Next
-        </button>
-      </div>
-      <div className={styles.runningTotal}>
-        {t('wallet.tx.total')} {runningTotal > 0 ? '+' : ''}{runningTotal.toFixed(7)} XLM
-      </div>
-    </div>
-  )
-}            </span>
-          </div>
-        ))}
-      </div>
       )}
 
       {filtered.length > 0 && (

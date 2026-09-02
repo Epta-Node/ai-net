@@ -6,6 +6,7 @@ import { ReputationStars } from './ReputationStars'
 import { useAgentReputation } from '../../hooks/useAgentReputation'
 import { AgentReputationRadar } from './AgentReputationRadar'
 import { AgentReputationTrend } from './AgentReputationTrend'
+import { SkeletonText } from '../common/Skeleton'
 import styles from './AgentDetailModal.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
@@ -131,7 +132,7 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
             <dt>Reputation Details</dt>
             <dd>
               {reputationLoading ? (
-                <div>Loading charts...</div>
+                <SkeletonText lines={4} />
               ) : reputationData ? (
                 <div className={styles.chartsContainer}>
                   <AgentReputationRadar dimensions={reputationData.dimensions} />
