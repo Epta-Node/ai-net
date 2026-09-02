@@ -1,9 +1,11 @@
+@import './tokens.css';
+@import './animations.css';
+@import './micro-interactions.css';
+@import './report.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import './animations.css';
-@import './micro-interactions.css';
 
 :root {
   --font-sans: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -14,7 +16,9 @@
   --border-color: #2A3040;
   --border-subtle: #1F2630;
   --text-primary: #F5F7FA;
-  --text-secondary: #8A93A3;
+  /* WCAG AA on --bg-primary/#0A0E14 and --bg-surface/#11151D (>= 7:1). The
+     previous #8A93A3 fell below 4.5:1 on surface backgrounds. */
+  --text-secondary: #A5AEBD;
   --accent-cyan: #38BDF8;
   --accent-purple: #8B5CF6;
   --accent-green: #34D399;
@@ -23,11 +27,18 @@
   --panel-border: var(--border-subtle);
   --primary: var(--accent-purple);
   --primary-hover: #7c3aed;
+  --primary-active: #6d28d9;
   --success: var(--accent-green);
   --danger: #ef4444;
   --accent: var(--accent-cyan);
   --skeleton-base: #1a1f2e;
   --skeleton-shine: #2a3040;
+  /* Shared press/elevation tokens (issue #380). */
+  --press-scale: 0.97;
+  --press-brightness: 0.92;
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --elevation-2: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --elevation-3: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 * {
@@ -75,17 +86,18 @@ html, body {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--panel-border);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-md);
   padding: 24px;
 }
 
 .chip {
   background: rgba(99, 102, 241, 0.15);
   border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #a5b4fc;
+  /* #C7D2FE meets AA on the chip's indigo-tinted dark background. */
+  color: #C7D2FE;
   padding: 6px 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -109,7 +121,7 @@ th {
 }
 
 tr:hover td {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-hover-subtle);
 }
 
 .form-group {
@@ -127,10 +139,10 @@ label {
 
 input[type="text"], input[type="number"], textarea {
   font-family: var(--font-sans);
-  background: rgba(15, 23, 42, 0.6);
+  background: var(--surface-glass);
   border: 1px solid var(--panel-border);
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 12px;
   font-size: 1rem;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -139,7 +151,7 @@ input[type="text"], input[type="number"], textarea {
 input:focus, textarea:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: var(--focus-ring-info);
 }
 
 .error-msg {
@@ -154,16 +166,16 @@ input:focus, textarea:focus {
   justify-content: center;
   align-items: center;
   padding: 40px;
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.4);
+  border-radius: var(--radius-xl);
+  background: var(--surface-glass-subtle);
   border: 1px dashed var(--panel-border);
   margin-top: 24px;
 }
 
 .dag-node {
-  background: #334155;
-  border: 2px solid #475569;
-  border-radius: 12px;
+  background: var(--surface-muted);
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius-xl);
   padding: 16px 24px;
   min-width: 140px;
   text-align: center;
@@ -173,10 +185,28 @@ input:focus, textarea:focus {
 }
 
 .dag-node.completed {
-  background: #064e3b;
+  background: var(--status-success-surface);
   border-color: var(--success);
-  color: #a7f3d0;
+  color: #A7F3D0;
   box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.dag-node.pending {
+  background: rgba(245, 158, 11, 0.12);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: #FCD34D;
+}
+
+.dag-node.failed {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #FCA5A5;
+}
+
+.dag-node.running {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #C7D2FE;
 }
 
 .dag-arrow {
@@ -191,7 +221,7 @@ input:focus, textarea:focus {
 
   .glass-panel {
     padding: 16px;
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
   }
 
   .dag-container {
@@ -213,9 +243,9 @@ input:focus, textarea:focus {
   z-index: 10000;
   padding: 8px 16px;
   background: var(--primary);
-  color: #ffffff;
+  color: var(--text-inverse);
   font-weight: 600;
-  border-radius: 0 0 8px 8px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   text-decoration: none;
   transition: top 0.2s ease;
 }
@@ -239,7 +269,16 @@ select:focus-visible {
   outline: 3px solid var(--accent);
   outline-offset: 2px;
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  box-shadow: var(--focus-ring-info);
+}
+
+.risk-point:focus-visible {
+  outline: none;
+}
+
+.risk-point:focus-visible .risk-dot {
+  stroke: var(--accent);
+  stroke-width: 4px;
 }
 
 /* ─── Screen reader only utility ──────────────────────────────────────────── */
@@ -276,6 +315,7 @@ td,
   --border-color: #E6E9EE;
   --border-subtle: #E9EEF4;
   --text-primary: #0A0E14;
+  /* WCAG AA on white/#F8FAFC (>= 7:1). */
   --text-secondary: #475569;
   --accent-cyan: #0EA5E9;
   --accent-purple: #7C3AED;
@@ -284,6 +324,7 @@ td,
   --panel-border: var(--border-color);
   --primary: var(--accent-purple);
   --primary-hover: #6d28d9;
+  --primary-active: #5b21b6;
   --accent: var(--accent-cyan);
 }
 

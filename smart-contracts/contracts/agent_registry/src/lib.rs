@@ -9,8 +9,8 @@
 //!
 //! | Operation            | count=1   | count=10 (batched) | vs 10 separate txs |
 //! |----------------------|-----------|--------------------|--------------------|
-//! | `register_agent(s)`  | ~100,000  | ~600,000           | 1,000,000          |
-//! | `resolve_error(s)`   | ~50,000   | ~320,000           | 500,000            |
+//! | `register_agent(s)`  | ~82,000   | ~464,500           | 820,000            |
+//! | `resolve_error(s)`   | ~42,000   | ~240,000           | 420,000            |
 //!
 //! Shared per-transaction overhead (~40k CU) is paid once in a batch.
 //! Marginal cost per extra item is lower than a full single-item invocation.
@@ -18,38 +18,38 @@
 //!
 //! ## Batch semantics
 //!
-//! Both `register_agents` and `resolve_errors` are **atomic**:
-//! 1. Validate every item (auth, existence, duplicates in-batch).
-//! 2. Collect per-item results.
-//! 3. Write storage **only if every item validated successfully**.
+//! `register_agents` and `resolve_errors` validate the entire batch before
+//! writing storage. If any item fails validation, no writes are committed.
 //!
-//! **IMPORTANT**: When implementing new batch operations that require authorization,
-//! never call `require_auth()` multiple times for the same address within a single
-//! transaction. Soroban's authorization system prevents this to avoid replay attacks.
-//! Instead, collect unique addresses first and authorize each unique address once.
-//! See `register_agents` Phase 0 for the correct pattern.
+//! ## Important authorization rule
 //!
-//! Callers inspect the returned `Vec<BatchResult>` / `Vec<VoidBatchResult>`:
-//! all-success means the batch committed; any failure means **no** writes occurred.
+//! When implementing batch operations that require authorization, do not call
+//! `require_auth()` multiple times for the same address in one transaction.
+//! Unique owners are collected and authorized exactly once.
 
-pub mod shared_exit_codes;
+pub mod audit;
+pub mod bridge;
 mod errors;
 mod events;
+pub mod shared_exit_codes;
+mod types;
 mod upgrade;
+
+pub use errors::Error;
+pub use types::*;
 
 #[cfg(test)]
 mod upgrade_tests;
 
-pub use upgrade::*;
 pub use shared_exit_codes::CommonExitCode;
+pub use upgrade::*;
 
 use events::{
-    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, ErrorReportedEvent,
-    ErrorResolvedEvent, OperationApproved, OperationCancelled, OperationExecuted,
-    OperationProposed, RegistryInitializedEvent, AnalyticsRecordedEvent,
-    LeaderboardUpdatedEvent, SlaSetEvent, SlaViolationDetectedEvent, SlaBonusAwardedEvent,
+    AdminChangedEvent, AgentDeregisteredEvent, AgentRegisteredEvent, AnalyticsRecordedEvent,
+    ErrorReportedEvent, ErrorResolvedEvent, LeaderboardUpdatedEvent, OperationApproved,
+    OperationCancelled, OperationExecuted, OperationProposed, RegistryInitializedEvent,
+    SlaBonusAwardedEvent, SlaSetEvent, SlaViolationDetectedEvent,
 };
-pub use types::Attestation;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
     TryFromVal, Val, Vec,
@@ -62,34 +62,33 @@ pub const DEFAULT_PROPOSAL_EXPIRY: u64 = 604_800;
 
 #[allow(dead_code)]
 const MAX_AGENT_ID: u32 = 64;
-const MAX_METADATA_ENTRIES: u32 = 16;
+const MAX_METADATA_ENTRIES: u32 = 5;
 #[allow(dead_code)]
-const MAX_METADATA_VALUE_SIZE: u32 = 256;
+const MAX_METADATA_VALUE_SIZE: u32 = 64;
 #[allow(dead_code)]
 const MAX_TOTAL_AGENT_STORAGE: u32 = 4096;
 
-// ─── Gas budget constants (empirical, CU / CPU instructions) ─────────────────
-// Stored as defaults in contract config; overridable via `set_gas_config`.
+// ─── Gas budget constants ────────────────────────────────────────────────────
 
 /// Fixed overhead charged once per transaction invocation.
 pub const GAS_TX_OVERHEAD: u64 = 40_000;
 /// Full cost of a single `register_agent` (includes overhead).
-pub const GAS_REGISTER_AGENT: u64 = 100_000;
+pub const GAS_REGISTER_AGENT: u64 = 82_000;
 /// Marginal cost of each additional agent in a batch after the first.
-/// Chosen so a batch of 10 ≈ 600_000 CU (issue #120 gas analysis).
-pub const GAS_REGISTER_AGENT_MARGINAL: u64 = 55_556;
+/// Reflects cached capability-index writes in `register_agents`.
+pub const GAS_REGISTER_AGENT_MARGINAL: u64 = 42_500;
 /// Full cost of a single error resolution (includes overhead).
-pub const GAS_RESOLVE_ERROR: u64 = 50_000;
+pub const GAS_RESOLVE_ERROR: u64 = 42_000;
 /// Marginal cost of each additional error resolution in a batch.
-pub const GAS_RESOLVE_ERROR_MARGINAL: u64 = 30_000;
+pub const GAS_RESOLVE_ERROR_MARGINAL: u64 = 22_000;
 /// Full cost of a single `slash_bond` operation (admin, includes overhead).
-pub const GAS_SLASH_BOND: u64 = 60_000;
+pub const GAS_SLASH_BOND: u64 = 52_000;
 /// Full cost of a `deregister_agent` that also returns a bond.
-pub const GAS_DEREGISTER_WITH_BOND: u64 = 80_000;
+pub const GAS_DEREGISTER_WITH_BOND: u64 = 68_000;
 /// Full cost of checking/removing a single expired error (includes overhead).
-pub const GAS_CLEANUP_ERROR: u64 = 20_000;
+pub const GAS_CLEANUP_ERROR: u64 = 16_000;
 /// Marginal cost of each additional error checked in a cleanup batch.
-pub const GAS_CLEANUP_ERROR_MARGINAL: u64 = 10_000;
+pub const GAS_CLEANUP_ERROR_MARGINAL: u64 = 8_000;
 
 /// Default minimum bond required to register an agent, in stroops.
 /// 10 XLM = 100_000_000 stroops.  Admin can override via `set_min_bond`.
@@ -99,13 +98,13 @@ pub const DEFAULT_MIN_BOND_STROOPS: i128 = 100_000_000;
 pub const BOND_COOLDOWN_LEDGERS: u32 = 17_280;
 
 /// Default TTL threshold (ledgers remaining) below which we extend.
-pub const TTL_THRESHOLD: u32 = 100_000;
-/// Target TTL after extension (~31 days at 5s ledgers: 535_680).
-pub const TTL_EXTEND_TO: u32 = 535_680;
+pub const TTL_THRESHOLD: u32 = 50_000;
+/// Target TTL after extension (14 days at 5s ledgers: 241_920).
+pub const TTL_EXTEND_TO: u32 = 241_920;
 
-/// Default error entry retention, in ledger sequences (~30 days at 5s/ledger).
+/// Default error entry retention, in ledger sequences (7 days at 5s/ledger: 120_960).
 /// Overridable via `set_error_ttl`.
-pub const DEFAULT_ERROR_TTL: u64 = 518_400;
+pub const DEFAULT_ERROR_TTL: u64 = 120_960;
 
 /// Default analytics snapshot retention (30 days).
 pub const ANALYTICS_SNAPSHOT_RETENTION: u32 = 30;
@@ -120,6 +119,11 @@ pub const SLA_BONUS_REPUTATION_BOOST: u32 = 5;
 pub const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum upper bound on page size to guarantee execution within one ledger footprint budget.
 pub const MAX_PAGE_SIZE: u32 = 50;
+
+/// Billing period applied when `create_subscription` is called with `0` (30 days).
+pub const DEFAULT_SUBSCRIPTION_PERIOD_SECS: u64 = 2_592_000;
+/// Minimum accepted subscription billing period (1 hour).
+pub const MIN_SUBSCRIPTION_PERIOD_SECS: u64 = 3_600;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +194,7 @@ pub enum Resolution {
     Escalated = 2,
 }
 
-/// Persistent error entry that can be batch-resolved.
+/// Persistent error entry.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ErrorEntry {
@@ -205,7 +209,7 @@ pub struct ErrorEntry {
     pub expires_at: u64,
 }
 
-/// Empirical gas budget parameters (instance storage).
+/// Empirical gas budget parameters.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GasConfig {
@@ -268,24 +272,34 @@ pub enum DataKey {
     TotalAgents,
     DiscoveryCache(DiscoveryQuery),
     DiscoveryStats,
-    // Analytics keys
-    AgentAnalytics(Symbol),
+    // Analytics and SLA combined
+    AgentMetrics(Symbol),
     AnalyticsSnapshot(Symbol, u64),
     // SLA keys
-    AgentSla(Symbol),
     SlaViolation(Symbol, u64),
     SlaViolationCount(Symbol),
     // Pagination keys (issue #339)
     AgentByIndex(u32),
     RegistrationSequence,
+    // Cross-chain bridging keys (issue #259)
+    /// Bridge proof for an agent on one target chain.
+    BridgeProof(Symbol, TargetChain),
+    // Security audit trail keys (issue #261)
+    /// One audit entry, keyed by sequence number.
+    AuditEntry(u64),
+    /// Next audit sequence number to allocate.
+    AuditSequence,
+    /// Thresholds for logging and anomaly detection.
+    AuditConfig,
+    /// Rolling operation counter for one caller.
+    CallerActivity(Address),
 }
 
-/// Per-item outcome for batch registration (`Ok(agent_id)` / `Err(code)`).
+/// Per-item result for batch registration.
 ///
-/// The failure payload is the raw `u32` error code rather than [`Error`]
-/// itself: a `#[contracterror]` type is represented on the wire as a bare
-/// status code and cannot be embedded inside a `#[contracttype]`. Use
-/// [`Error::from_code`] to recover the typed variant.
+/// The error is represented as a raw `u32` contract error code because
+/// contract error types cannot be nested directly inside another
+/// `#[contracttype]` enum.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BatchResult {
@@ -293,8 +307,7 @@ pub enum BatchResult {
     Err(u32),
 }
 
-/// Per-item outcome for batch error resolution. See [`BatchResult`] for why
-/// the failure payload is a `u32` code.
+/// Per-item result for batch error resolution.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VoidBatchResult {
@@ -353,74 +366,92 @@ fn get_capability_index(env: &Env, capability: &Symbol) -> Vec<Symbol> {
         .unwrap_or_else(|| Vec::new(env))
 }
 
-fn extend_ttl_for_key(env: &Env, key: &DataKey) {
-    // Only extend when the entry exists; extend_ttl panics on missing keys.
-    if env.storage().persistent().has(key) {
-        env.storage()
-            .persistent()
-            .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
-    }
+fn extend_ttl_for_existing_key(env: &Env, key: &DataKey) {
+    env.storage()
+        .persistent()
+        .extend_ttl(key, TTL_THRESHOLD, TTL_EXTEND_TO);
 }
 
-/// Extend TTL for a set of persistent keys in one pass (batched rent bump).
-fn extend_ttl_batch(env: &Env, keys: &Vec<DataKey>) {
+fn extend_ttl_batch_existing(env: &Env, keys: &Vec<DataKey>) {
     for key in keys.iter() {
-        extend_ttl_for_key(env, &key);
+        extend_ttl_for_existing_key(env, &key);
     }
 }
 
+/// Append an agent ID to the capability index.
 fn append_capability_index(env: &Env, capability: &Symbol, agent_id: &Symbol) {
     let cap_key = DataKey::CapabilityIndex(capability.clone());
+
     let mut ids: Vec<Symbol> = env
         .storage()
         .persistent()
         .get(&cap_key)
         .unwrap_or_else(|| Vec::new(env));
+
     ids.push_back(agent_id.clone());
+
     env.storage().persistent().set(&cap_key, &ids);
-    extend_ttl_for_key(env, &cap_key);
+    extend_ttl_for_existing_key(env, &cap_key);
 }
 
-/// True if `id` appears more than once in `agents` at or before `index`.
-fn is_duplicate_in_batch(agents: &Vec<AgentRecord>, index: u32, id: &Symbol) -> bool {
+/// Returns true if an agent ID has already appeared in the batch.
+fn is_duplicate_in_batch(
+    agents: &Vec<AgentRecord>,
+    index: u32,
+    id: &Symbol,
+) -> bool {
     let mut seen = 0u32;
+
     for i in 0..=index {
-        if let Some(a) = agents.get(i) {
-            if a.id == *id {
+        if let Some(agent) = agents.get(i) {
+            if agent.id == *id {
                 seen += 1;
+
                 if seen > 1 {
                     return true;
                 }
             }
         }
     }
+
     false
 }
 
-fn is_duplicate_error_id(ids: &Vec<BytesN<32>>, index: u32, id: &BytesN<32>) -> bool {
+/// Returns true if an error ID has already appeared in the batch.
+fn is_duplicate_error_id(
+    ids: &Vec<BytesN<32>>,
+    index: u32,
+    id: &BytesN<32>,
+) -> bool {
     let mut seen = 0u32;
+
     for i in 0..=index {
         if let Some(other) = ids.get(i) {
             if other == *id {
                 seen += 1;
+
                 if seen > 1 {
                     return true;
                 }
             }
         }
     }
+
     false
 }
 
+/// Ensure the contract isn't paused.
 fn require_not_paused(env: &Env) -> Result<(), Error> {
     let paused: bool = env
         .storage()
         .instance()
         .get(&DataKey::Paused)
         .unwrap_or(false);
+
     if paused {
         return Err(Error::ContractPaused);
     }
+
     Ok(())
 }
 
@@ -446,7 +477,9 @@ fn require_admin(env: &Env) -> Result<Address, Error> {
         .instance()
         .get(&DataKey::Admin)
         .ok_or(Error::NotAdmin)?;
+
     admin.require_auth();
+
     Ok(admin)
 }
 
@@ -467,7 +500,7 @@ fn internal_slash_bond(env: &Env, agent_id: Symbol, penalty_stroops: i128) -> Re
 
     record.bond_amount = remaining;
     env.storage().persistent().set(&agent_key, &record);
-    extend_ttl_for_key(env, &agent_key);
+    extend_ttl_for_existing_key(env, &agent_key);
 
     env.events().publish(
         (symbol_short!("registry"), symbol_short!("bond_slsh")),
@@ -486,19 +519,30 @@ fn require_not_frozen(env: &Env, agent_id: &Symbol) -> Result<(), Error> {
         .persistent()
         .get(&DataKey::FrozenAgent(agent_id.clone()))
         .unwrap_or(false);
+
     if frozen {
         return Err(Error::AgentFrozen);
     }
+
     Ok(())
 }
 
+/// Validate an agent record.
 fn validate_record(_env: &Env, record: &AgentRecord) -> Result<(), Error> {
+    // Critical validation:
+    // Prices must always be strictly positive.
+    if record.price_stroops <= 0 {
+        return Err(Error::InvalidPrice);
+    }
+
     if record.metadata.len() > MAX_METADATA_ENTRIES {
         return Err(Error::InvalidRecord);
     }
+
     Ok(())
 }
 
+// ─── Contract implementation ─────────────────────────────────────────────────
 /// Read the current minimum bond from instance storage, falling back to the
 /// compile-time default (10 XLM = 100_000_000 stroops).
 fn min_bond(env: &Env) -> i128 {
@@ -508,13 +552,33 @@ fn min_bond(env: &Env) -> i128 {
         .unwrap_or(DEFAULT_MIN_BOND_STROOPS)
 }
 
+/// Prorated refund for cancelling `sub` at `now`: the payment for the unused
+/// remainder of the current billing period, capped at one full period.
+fn prorated_refund(sub: &Subscription, now: u64) -> i128 {
+    if sub.period_secs == 0 || now >= sub.end_time {
+        return 0;
+    }
+    let window = (sub.end_time - now).min(sub.period_secs);
+    sub.payment_amount.saturating_mul(window as i128) / (sub.period_secs as i128)
+}
+
 #[contractimpl]
 impl AgentRegistryContract {
-    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+    // ── Initialization / administration ──────────────────────────────────────
+
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+    ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(Error::AlreadyExists);
         }
+        admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(
+            &DataKey::Agent(Symbol::new(&env, "version")),
+            &String::from_str(&env, "1.0.0"),
+        );
         env.storage().instance().set(&DataKey::Paused, &false);
 
         // Emit (registry, init) so indexers know exactly when the
@@ -529,6 +593,15 @@ impl AgentRegistryContract {
         Ok(())
     }
 
+    pub fn set_admin(
+        env: Env,
+        new_admin: Address,
+    ) -> Result<(), Error> {
+        require_admin(&env)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Admin, &new_admin);
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::MultisigConfig) {
             return Err(Error::Unauthorized);
@@ -541,11 +614,12 @@ impl AgentRegistryContract {
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("adm_chngd")),
             AdminChangedEvent {
-                old_admin,
+                old_admin: old_admin.clone(),
                 new_admin,
             },
         );
 
+        audit::record(&env, &old_admin, symbol_short!("setadmin"), None, 0);
         Ok(())
     }
 
@@ -860,18 +934,20 @@ impl AgentRegistryContract {
     }
 
     pub fn pause(env: Env) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         env.events()
             .publish((symbol_short!("registry"), symbol_short!("paused")), ());
+        audit::record(&env, &admin, symbol_short!("pause"), None, 0);
         Ok(())
     }
 
     pub fn unpause(env: Env) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Paused, &false);
         env.events()
             .publish((symbol_short!("registry"), symbol_short!("unpaused")), ());
+        audit::record(&env, &admin, symbol_short!("unpause"), None, 0);
         Ok(())
     }
 
@@ -882,58 +958,83 @@ impl AgentRegistryContract {
             .unwrap_or(false)
     }
 
-    pub fn get_admin(env: Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::Admin)
-    }
+    // ── Agent freezing ───────────────────────────────────────────────────────
 
     pub fn freeze_agent(env: Env, agent_id: Symbol) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .persistent()
-            .set(&DataKey::FrozenAgent(agent_id.clone()), &true);
+            .set(
+                &DataKey::FrozenAgent(agent_id.clone()),
+                &true,
+            );
+
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("freeze")),
-            agent_id,
+            agent_id.clone(),
         );
+        audit::record(&env, &admin, symbol_short!("freeze"), Some(agent_id), 0);
         Ok(())
     }
 
     pub fn unfreeze_agent(env: Env, agent_id: Symbol) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .persistent()
-            .set(&DataKey::FrozenAgent(agent_id.clone()), &false);
+            .set(
+                &DataKey::FrozenAgent(agent_id.clone()),
+                &false,
+            );
+
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("unfreeze")),
-            agent_id,
+            agent_id.clone(),
         );
+        audit::record(&env, &admin, symbol_short!("unfreeze"), Some(agent_id), 0);
         Ok(())
     }
 
-    pub fn is_agent_frozen(env: Env, agent_id: Symbol) -> bool {
+    pub fn is_agent_frozen(
+        env: Env,
+        agent_id: Symbol,
+    ) -> bool {
         env.storage()
             .persistent()
             .get(&DataKey::FrozenAgent(agent_id))
             .unwrap_or(false)
     }
 
-    pub fn register_agent(env: Env, record: AgentRecord) -> Result<(), Error> {
+    // ── Agent registration ───────────────────────────────────────────────────
+
+    pub fn register_agent(
+        env: Env,
+        record: AgentRecord,
+    ) -> Result<(), Error> {
         require_not_paused(&env)?;
+
         require_not_frozen(&env, &record.id)?;
+
+        // The owner must authorize registration.
         record.owner.require_auth();
 
+        // Validate price and metadata before writing.
         validate_record(&env, &record)?;
 
         let config = get_storage_config_internal(&env);
+        let current_total = get_total_agents(&env);
         if config.max_agents > 0 {
-            let total = get_total_agents(&env);
-            if total >= config.max_agents {
+            if current_total >= config.max_agents {
                 return Err(Error::StorageLimitReached);
             }
         }
 
+        let cap_key = DataKey::CapabilityIndex(record.capability.clone());
+        let mut cap_index: Vec<Symbol> = env
+            .storage()
+            .persistent()
+            .get(&cap_key)
+            .unwrap_or_else(|| Vec::new(&env));
         if config.max_per_capability > 0 {
-            let cap_index = get_capability_index(&env, &record.capability);
             if cap_index.len() >= config.max_per_capability {
                 return Err(Error::CapabilityLimitReached);
             }
@@ -946,26 +1047,28 @@ impl AgentRegistryContract {
         }
 
         let agent_key = DataKey::Agent(record.id.clone());
+
         if env.storage().persistent().has(&agent_key) {
             return Err(Error::AlreadyExists);
         }
 
-        append_capability_index(&env, &record.capability, &record.id);
+        cap_index.push_back(record.id.clone());
+        env.storage().persistent().set(&cap_key, &cap_index);
+        extend_ttl_for_existing_key(&env, &cap_key);
         env.storage().persistent().set(&agent_key, &record);
-        extend_ttl_for_key(&env, &agent_key);
+        extend_ttl_for_existing_key(&env, &agent_key);
 
         let seq = get_registration_sequence(&env);
         let index_key = DataKey::AgentByIndex(seq);
         env.storage().persistent().set(&index_key, &record.id);
-        extend_ttl_for_key(&env, &index_key);
+        extend_ttl_for_existing_key(&env, &index_key);
         env.storage()
             .instance()
             .set(&DataKey::RegistrationSequence, &(seq + 1));
 
-        let total = get_total_agents(&env);
         env.storage()
             .instance()
-            .set(&DataKey::TotalAgents, &(total + 1));
+            .set(&DataKey::TotalAgents, &(current_total + 1));
 
         // Emit (registry, agent_registered) so off-chain indexers can
         // immediately detect new agents without polling storage.
@@ -993,77 +1096,111 @@ impl AgentRegistryContract {
         Ok(())
     }
 
-    /// Batch-register agents in **one** transaction.
-    ///
-    /// * Validates every agent first (auth, not already registered, no in-batch
-    ///   duplicate ids).
-    /// * Returns a per-agent [`BatchResult`].
-    /// * Writes storage only when **all** items validate (atomic all-or-nothing).
-    /// * On success, extends TTL for every written key in a single pass.
-    pub fn register_agents(env: Env, agents: Vec<AgentRecord>) -> Vec<BatchResult> {
+    /// Batch-register agents atomically.
+    pub fn register_agents(
+        env: Env,
+        agents: Vec<AgentRecord>,
+    ) -> Vec<BatchResult> {
         let mut results: Vec<BatchResult> = Vec::new(&env);
+
         let mut all_ok = true;
 
-        // Contract-level pause applies to the whole batch.
+        // Contract-level pause applies to the entire batch.
         if require_not_paused(&env).is_err() {
             for _ in 0..agents.len() {
-                results.push_back(BatchResult::Err(Error::ContractPaused as u32));
+                results.push_back(
+                    BatchResult::Err(Error::ContractPaused as u32),
+                );
             }
+
             return results;
         }
 
-        // ── Phase 0: collect unique owners and authorize once per owner ──────
-        //
-        // Soroban's authorization system prevents calling require_auth() multiple
-        // times for the same address within a single transaction to avoid replay
-        // attacks. When batch processing agents with the same owner, we must
-        // deduplicate authorization calls by collecting unique owners first.
-        let mut unique_owners = Vec::new(&env);
+        // ── Phase 0: authorize each unique owner exactly once ────────────────
+
+        let mut unique_owners: Vec<Address> = Vec::new(&env);
+
         for i in 0..agents.len() {
             let record = agents.get(i).unwrap();
+
             let mut already_seen = false;
+
             for j in 0..unique_owners.len() {
                 if unique_owners.get(j).unwrap() == record.owner {
                     already_seen = true;
                     break;
                 }
             }
+
             if !already_seen {
                 unique_owners.push_back(record.owner.clone());
             }
         }
 
-        // Authorize each unique owner once. Host will reject the whole invocation
-        // if any required auth is missing.
         for i in 0..unique_owners.len() {
-            unique_owners.get(i).unwrap().require_auth();
+            unique_owners
+                .get(i)
+                .unwrap()
+                .require_auth();
         }
 
-        // ── Phase 1: validate (no writes) ────────────────────────────────────
+        // ── Phase 1: validate everything ─────────────────────────────────────
 
         let config = get_storage_config_internal(&env);
         let mut sim_total = get_total_agents(&env);
+        let mut existing_cap_counts: Map<Symbol, u32> = Map::new(&env);
+        let mut batch_cap_counts: Map<Symbol, u32> = Map::new(&env);
 
         for i in 0..agents.len() {
             let record = agents.get(i).unwrap();
 
-            // Auth already handled in Phase 0 for all unique owners.
+            // Validate price and metadata.
+            if let Err(error) = validate_record(&env, &record) {
+                results.push_back(
+                    BatchResult::Err(error as u32),
+                );
 
+                all_ok = false;
+                continue;
+            }
+
+            // Check frozen state.
             if require_not_frozen(&env, &record.id).is_err() {
-                results.push_back(BatchResult::Err(Error::AgentFrozen as u32));
+                results.push_back(
+                    BatchResult::Err(Error::AgentFrozen as u32),
+                );
+
                 all_ok = false;
                 continue;
             }
 
-            if is_duplicate_in_batch(&agents, i, &record.id) {
-                results.push_back(BatchResult::Err(Error::DuplicateInBatch as u32));
+            // Check duplicates inside this batch.
+            if is_duplicate_in_batch(
+                &agents,
+                i,
+                &record.id,
+            ) {
+                results.push_back(
+                    BatchResult::Err(
+                        Error::DuplicateInBatch as u32,
+                    ),
+                );
+
                 all_ok = false;
                 continue;
             }
 
-            let agent_key = DataKey::Agent(record.id.clone());
+            // Check existing storage.
+            let agent_key =
+                DataKey::Agent(record.id.clone());
+
             if env.storage().persistent().has(&agent_key) {
-                results.push_back(BatchResult::Err(Error::AlreadyExists as u32));
+                results.push_back(
+                    BatchResult::Err(
+                        Error::AlreadyExists as u32,
+                    ),
+                );
+
                 all_ok = false;
                 continue;
             }
@@ -1075,41 +1212,57 @@ impl AgentRegistryContract {
             }
 
             if config.max_per_capability > 0 {
-                let existing_cap = get_capability_index(&env, &record.capability).len();
-                let mut batch_cap_count = 0u32;
-                for j in 0..i {
-                    if let (Some(prev_res), Some(prev_agent)) = (results.get(j), agents.get(j)) {
-                        if prev_res == BatchResult::Ok(prev_agent.id.clone())
-                            && prev_agent.capability == record.capability
-                        {
-                            batch_cap_count += 1;
-                        }
-                    }
-                }
+                let existing_cap = if let Some(count) =
+                    existing_cap_counts.get(record.capability.clone())
+                {
+                    count
+                } else {
+                    let count = get_capability_index(&env, &record.capability).len();
+                    existing_cap_counts.set(record.capability.clone(), count);
+                    count
+                };
+                let batch_cap_count = batch_cap_counts
+                    .get(record.capability.clone())
+                    .unwrap_or(0);
                 if existing_cap + batch_cap_count >= config.max_per_capability {
                     results.push_back(BatchResult::Err(Error::CapabilityLimitReached as u32));
                     all_ok = false;
                     continue;
                 }
+                batch_cap_counts.set(record.capability.clone(), batch_cap_count + 1);
             }
 
             sim_total += 1;
             results.push_back(BatchResult::Ok(record.id.clone()));
         }
 
-        // ── Phase 2: abort without writing if any item failed ────────────────
+        // Empty batch or validation failure means no writes.
         if !all_ok || agents.is_empty() {
             return results;
         }
 
-        // ── Phase 3: commit all writes + batched TTL extension ───────────────
+        // ── Phase 2: commit ──────────────────────────────────────────────────
+
         let mut ttl_keys: Vec<DataKey> = Vec::new(&env);
+        let mut unique_capabilities: Vec<Symbol> = Vec::new(&env);
+        let mut updated_cap_indexes: Map<Symbol, Vec<Symbol>> = Map::new(&env);
         let mut seq = get_registration_sequence(&env);
         for i in 0..agents.len() {
             let record = agents.get(i).unwrap();
             let agent_key = DataKey::Agent(record.id.clone());
             let index_key = DataKey::AgentByIndex(seq);
-            append_capability_index(&env, &record.capability, &record.id);
+
+            let mut cap_ids = if let Some(ids) =
+                updated_cap_indexes.get(record.capability.clone())
+            {
+                ids
+            } else {
+                unique_capabilities.push_back(record.capability.clone());
+                get_capability_index(&env, &record.capability)
+            };
+            cap_ids.push_back(record.id.clone());
+            updated_cap_indexes.set(record.capability.clone(), cap_ids);
+
             env.storage().persistent().set(&agent_key, &record);
             env.storage().persistent().set(&index_key, &record.id);
             ttl_keys.push_back(agent_key);
@@ -1140,6 +1293,12 @@ impl AgentRegistryContract {
                 },
             );
         }
+        for capability in unique_capabilities.iter() {
+            let cap_key = DataKey::CapabilityIndex(capability.clone());
+            let ids = updated_cap_indexes.get(capability.clone()).unwrap();
+            env.storage().persistent().set(&cap_key, &ids);
+            extend_ttl_for_existing_key(&env, &cap_key);
+        }
         env.storage()
             .instance()
             .set(&DataKey::RegistrationSequence, &seq);
@@ -1147,35 +1306,37 @@ impl AgentRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalAgents, &(current_total + agents.len()));
-        extend_ttl_batch(&env, &ttl_keys);
+        extend_ttl_batch_existing(&env, &ttl_keys);
 
         results
     }
 
     pub fn lookup_agents(env: Env, capability: Symbol) -> Vec<AgentRecord> {
         let cap_key = DataKey::CapabilityIndex(capability);
-        let ids: Vec<Symbol> = env
+        let stored_ids: Option<Vec<Symbol>> = env
             .storage()
             .persistent()
-            .get(&cap_key)
-            .unwrap_or_else(|| Vec::new(&env));
+            .get(&cap_key);
+        let ids = stored_ids.clone().unwrap_or_else(|| Vec::new(&env));
 
         // Touch / extend the index TTL when used.
-        if env.storage().persistent().has(&cap_key) {
-            extend_ttl_for_key(&env, &cap_key);
+        if stored_ids.is_some() {
+            extend_ttl_for_existing_key(&env, &cap_key);
         }
 
-        let mut records = Vec::new(&env);
-        let mut ttl_keys: Vec<DataKey> = Vec::new(&env);
         for id in ids.iter() {
-            let agent_key = DataKey::Agent(id.clone());
-            if let Some(r) = env.storage().persistent().get(&agent_key) {
+            let agent_key =
+                DataKey::Agent(id.clone());
+
+            if let Some(record) =
+                env.storage().persistent().get(&agent_key)
+            {
                 ttl_keys.push_back(agent_key);
-                records.push_back(r);
+                records.push_back(record);
             }
         }
         // Batch-extend TTLs for every agent loaded in this lookup.
-        extend_ttl_batch(&env, &ttl_keys);
+        extend_ttl_batch_existing(&env, &ttl_keys);
         records
     }
 
@@ -1216,7 +1377,7 @@ impl AgentRegistryContract {
             current_idx += 1;
         }
 
-        extend_ttl_batch(&env, &ttl_keys);
+        extend_ttl_batch_existing(&env, &ttl_keys);
 
         let next_cursor = if current_idx < total_registered {
             Some(current_idx)
@@ -1266,14 +1427,14 @@ impl AgentRegistryContract {
 
         // 2. Fetch agent IDs registered for the capability
         let cap_key = DataKey::CapabilityIndex(query.required_capability.clone());
-        let agent_ids: Vec<Symbol> = env
+        let stored_agent_ids: Option<Vec<Symbol>> = env
             .storage()
             .persistent()
-            .get(&cap_key)
-            .unwrap_or_else(|| Vec::new(&env));
+            .get(&cap_key);
+        let agent_ids = stored_agent_ids.clone().unwrap_or_else(|| Vec::new(&env));
 
-        if env.storage().persistent().has(&cap_key) {
-            extend_ttl_for_key(&env, &cap_key);
+        if stored_agent_ids.is_some() {
+            extend_ttl_for_existing_key(&env, &cap_key);
         }
 
         let mut candidate_records: Vec<AgentRecord> = Vec::new(&env);
@@ -1496,6 +1657,11 @@ impl AgentRegistryContract {
 
         record.owner.require_auth();
 
+        let cap_key =
+            DataKey::CapabilityIndex(
+                record.capability.clone(),
+            );
+
         // Remove from capability index.
         let cap_key = DataKey::CapabilityIndex(record.capability.clone());
         let ids: Vec<Symbol> = env
@@ -1504,14 +1670,22 @@ impl AgentRegistryContract {
             .get(&cap_key)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let mut updated = Vec::new(&env);
+        let mut updated: Vec<Symbol> =
+            Vec::new(&env);
+
         for id in ids.iter() {
             if id != agent_id {
                 updated.push_back(id);
             }
         }
-        env.storage().persistent().set(&cap_key, &updated);
-        env.storage().persistent().remove(&agent_key);
+
+        env.storage()
+            .persistent()
+            .set(&cap_key, &updated);
+
+        env.storage()
+            .persistent()
+            .remove(&agent_key);
 
         let total = get_total_agents(&env);
         if total > 0 {
@@ -1549,20 +1723,24 @@ impl AgentRegistryContract {
         Ok(())
     }
 
-    /// Aggregate health view for `agent_id`, including its error count from
-    /// error-resolver (0 if error-resolver isn't configured or the
-    /// cross-contract call fails — see `AgentHealth`).
-    pub fn get_agent_health(env: Env, agent_id: Symbol) -> AgentHealth {
+    // ── Agent health ─────────────────────────────────────────────────────────
+
+    pub fn get_agent_health(
+        env: Env,
+        agent_id: Symbol,
+    ) -> AgentHealth {
         let exists = env
             .storage()
             .persistent()
             .has(&DataKey::Agent(agent_id.clone()));
+
         let frozen = env
             .storage()
             .persistent()
             .get(&DataKey::FrozenAgent(agent_id.clone()))
             .unwrap_or(false);
 
+        // Error resolver integration can be added later.
         let error_count = 0;
 
         AgentHealth {
@@ -1573,17 +1751,25 @@ impl AgentRegistryContract {
         }
     }
 
+    // ── Pricing ──────────────────────────────────────────────────────────────
+
+    pub fn update_pricing(
+        env: Env,
+        agent_id: Symbol,
+        new_price: i128,
+    ) -> Result<(), Error> {
     // ── Bond management ───────────────────────────────────────────────────────
 
     /// Admin: set the minimum bond required for agent registration (stroops).
     pub fn set_min_bond(env: Env, amount_stroops: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::MinBond, &amount_stroops);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("minbond"), None, amount_stroops);
         Ok(())
     }
 
@@ -1598,7 +1784,7 @@ impl AgentRegistryContract {
     /// If the penalty equals or exceeds the remaining bond the bond becomes 0.
     /// Emits a [`BondSlashed`][events::BondSlashed] event.
     pub fn slash_bond(env: Env, agent_id: Symbol, penalty_stroops: i128) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
 
         let agent_key = DataKey::Agent(agent_id.clone());
         let mut record: AgentRecord = env
@@ -1617,23 +1803,40 @@ impl AgentRegistryContract {
 
         record.bond_amount = remaining;
         env.storage().persistent().set(&agent_key, &record);
-        extend_ttl_for_key(&env, &agent_key);
+        extend_ttl_for_existing_key(&env, &agent_key);
 
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("bond_slsh")),
             events::BondSlashed {
-                agent_id,
+                agent_id: agent_id.clone(),
                 penalty_stroops: actual_penalty,
                 remaining_stroops: remaining,
             },
+        );
+        audit::record(
+            &env,
+            &admin,
+            symbol_short!("slashbond"),
+            Some(agent_id),
+            actual_penalty,
         );
         Ok(())
     }
 
     pub fn update_pricing(env: Env, agent_id: Symbol, new_price: i128) -> Result<(), Error> {
         require_not_paused(&env)?;
+
         require_not_frozen(&env, &agent_id)?;
-        let agent_key = DataKey::Agent(agent_id.clone());
+
+        // Critical validation:
+        // zero and negative prices are invalid.
+        if new_price <= 0 {
+            return Err(Error::InvalidPrice);
+        }
+
+        let agent_key =
+            DataKey::Agent(agent_id.clone());
+
         let mut record: AgentRecord = env
             .storage()
             .persistent()
@@ -1644,19 +1847,21 @@ impl AgentRegistryContract {
 
         record.price_stroops = new_price;
         env.storage().persistent().set(&agent_key, &record);
-        extend_ttl_for_key(&env, &agent_key);
+        extend_ttl_for_existing_key(&env, &agent_key);
 
         env.events().publish(
-            (symbol_short!("registry"), symbol_short!("price_upd")),
+            (
+                symbol_short!("registry"),
+                symbol_short!("price_upd"),
+            ),
             (agent_id, new_price),
         );
 
         Ok(())
     }
 
-    // ── Error reporting / batch resolution ───────────────────────────────────
+    // ── Error reporting ──────────────────────────────────────────────────────
 
-    /// Report an operational error (creates an unresolved entry).
     pub fn report_error(
         env: Env,
         error_id: BytesN<32>,
@@ -1665,7 +1870,9 @@ impl AgentRegistryContract {
     ) -> Result<(), Error> {
         reporter.require_auth();
 
-        let key = DataKey::ErrorRecord(error_id.clone());
+        let key =
+            DataKey::ErrorRecord(error_id.clone());
+
         if env.storage().persistent().has(&key) {
             return Err(Error::AlreadyExists);
         }
@@ -1676,13 +1883,14 @@ impl AgentRegistryContract {
             reporter: reporter.clone(),
             message,
             resolved: false,
-            // Placeholder until resolve_errors overwrites with a real resolution.
+
+            // Default value until resolution occurs.
             resolution: Resolution::Fixed,
             created_at,
             expires_at: created_at + error_ttl(&env),
         };
         env.storage().persistent().set(&key, &entry);
-        extend_ttl_for_key(&env, &key);
+        extend_ttl_for_existing_key(&env, &key);
 
         // Emit (registry, error_reported) so monitoring systems can trigger
         // alerting pipelines without polling contract state.
@@ -1697,10 +1905,11 @@ impl AgentRegistryContract {
     /// Configure how many ledger sequences newly reported errors live for
     /// before becoming eligible for `cleanup_expired_errors`.
     pub fn set_error_ttl(env: Env, ttl_ledgers: u64) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::ErrorTTL, &ttl_ledgers);
+        audit::record(&env, &admin, symbol_short!("errttl"), None, 0);
         Ok(())
     }
 
@@ -1746,48 +1955,85 @@ impl AgentRegistryContract {
     ) -> Result<Vec<VoidBatchResult>, Error> {
         require_admin(&env)?;
         let mut results: Vec<VoidBatchResult> = Vec::new(&env);
+        let mut entries: Vec<ErrorEntry> = Vec::new(&env);
         let mut all_ok = true;
 
         // ── Phase 1: validate ────────────────────────────────────────────────
+
         for i in 0..error_ids.len() {
             let id = error_ids.get(i).unwrap();
 
-            if is_duplicate_error_id(&error_ids, i, &id) {
-                results.push_back(VoidBatchResult::Err(Error::DuplicateInBatch as u32));
+            if is_duplicate_error_id(
+                &error_ids,
+                i,
+                &id,
+            ) {
+                results.push_back(
+                    VoidBatchResult::Err(
+                        Error::DuplicateInBatch as u32,
+                    ),
+                );
+
                 all_ok = false;
                 continue;
             }
 
-            let key = DataKey::ErrorRecord(id.clone());
-            let entry: Option<ErrorEntry> = env.storage().persistent().get(&key);
+            let key =
+                DataKey::ErrorRecord(id.clone());
+
+            let entry: Option<ErrorEntry> =
+                env.storage()
+                    .persistent()
+                    .get(&key);
+
             match entry {
                 None => {
-                    results.push_back(VoidBatchResult::Err(Error::NotFound as u32));
+                    results.push_back(
+                        VoidBatchResult::Err(
+                            Error::NotFound as u32,
+                        ),
+                    );
+
                     all_ok = false;
                 }
-                Some(e) if e.resolved => {
-                    results.push_back(VoidBatchResult::Err(Error::AlreadyResolved as u32));
+
+                Some(entry) if entry.resolved => {
+                    results.push_back(
+                        VoidBatchResult::Err(
+                            Error::AlreadyResolved as u32,
+                        ),
+                    );
+
                     all_ok = false;
                 }
-                Some(_) => {
+                Some(e) => {
+                    entries.push_back(e);
                     results.push_back(VoidBatchResult::Ok);
                 }
             }
         }
 
+        // Empty batch or validation failure.
         if !all_ok || error_ids.is_empty() {
             return Ok(results);
         }
 
         // ── Phase 2: commit ──────────────────────────────────────────────────
-        let mut ttl_keys: Vec<DataKey> = Vec::new(&env);
+
+        let mut ttl_keys: Vec<DataKey> =
+            Vec::new(&env);
+
         for i in 0..error_ids.len() {
             let id = error_ids.get(i).unwrap();
             let key = DataKey::ErrorRecord(id.clone());
-            let mut entry: ErrorEntry = env.storage().persistent().get(&key).unwrap();
+            let mut entry: ErrorEntry = entries.get(i).unwrap();
             entry.resolved = true;
             entry.resolution = resolution.clone();
-            env.storage().persistent().set(&key, &entry);
+
+            env.storage()
+                .persistent()
+                .set(&key, &entry);
+
             ttl_keys.push_back(key);
 
             // Emit one (registry, error_resolved) event per resolved error.
@@ -1801,7 +2047,7 @@ impl AgentRegistryContract {
                 },
             );
         }
-        extend_ttl_batch(&env, &ttl_keys);
+        extend_ttl_batch_existing(&env, &ttl_keys);
 
         Ok(results)
     }
@@ -1812,13 +2058,18 @@ impl AgentRegistryContract {
         let key = DataKey::ErrorRecord(error_id);
         let entry = env.storage().persistent().get(&key);
         if entry.is_some() {
-            extend_ttl_for_key(&env, &key);
+            extend_ttl_for_existing_key(&env, &key);
         }
         entry
     }
 
-    // ── Gas budget estimation ────────────────────────────────────────────────
+    // ── Gas estimation ───────────────────────────────────────────────────────
 
+    pub fn estimate_gas(
+        env: Env,
+        operation: String,
+        count: u32,
+    ) -> u64 {
     /// Estimate CPU instruction budget for a batch operation.
     ///
     /// `operation` is one of:
@@ -1836,8 +2087,11 @@ impl AgentRegistryContract {
         if count == 0 {
             return 0;
         }
+
         let cfg = gas_config(&env);
 
+        let register_agent =
+            String::from_str(&env, "register_agent");
         let register_agent = String::from_str(&env, "register_agent");
         let register_agents = String::from_str(&env, "register_agents");
         let resolve_error = String::from_str(&env, "resolve_error");
@@ -1846,16 +2100,33 @@ impl AgentRegistryContract {
         let deregister_bond_op = String::from_str(&env, "deregister_with_bond");
         let cleanup_expired_errors = String::from_str(&env, "cleanup_expired_errors");
 
-        if operation == register_agent || operation == register_agents {
-            // First item pays full single-call cost; rest pay marginal.
+        let register_agents =
+            String::from_str(&env, "register_agents");
+
+        let resolve_error =
+            String::from_str(&env, "resolve_error");
+
+        let resolve_errors =
+            String::from_str(&env, "resolve_errors");
+
+        if operation == register_agent
+            || operation == register_agents
+        {
             cfg.register_agent
                 + cfg
                     .register_agent_marginal
-                    .saturating_mul((count - 1) as u64)
-        } else if operation == resolve_error || operation == resolve_errors {
+                    .saturating_mul(
+                        (count - 1) as u64
+                    )
+        } else if operation == resolve_error
+            || operation == resolve_errors
+        {
             cfg.resolve_error
                 + cfg
                     .resolve_error_marginal
+                    .saturating_mul(
+                        (count - 1) as u64
+                    )
                     .saturating_mul((count - 1) as u64)
         } else if operation == cleanup_expired_errors {
             cfg.cleanup_error
@@ -1873,15 +2144,15 @@ impl AgentRegistryContract {
 
     /// Override empirical gas parameters stored in instance config.
     pub fn set_gas_config(env: Env, config: GasConfig) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::GasConfig, &config);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("gascfg"), None, 0);
         Ok(())
     }
 
-    /// Read the current gas configuration (defaults if never set).
     pub fn get_gas_config(env: Env) -> GasConfig {
         gas_config(&env)
     }
@@ -1898,13 +2169,14 @@ impl AgentRegistryContract {
 
     /// Update storage configuration (admin only).
     pub fn set_storage_config(env: Env, config: StorageConfig) -> Result<(), Error> {
-        require_admin(&env)?;
+        let admin = require_admin(&env)?;
         env.storage()
             .instance()
             .set(&DataKey::StorageConfig, &config);
         env.storage()
             .instance()
             .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        audit::record(&env, &admin, symbol_short!("storecfg"), None, 0);
         Ok(())
     }
 
@@ -1919,52 +2191,52 @@ impl AgentRegistryContract {
         earnings: i128,
     ) -> Result<(), Error> {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        let mut analytics: AgentAnalytics = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(AgentAnalytics {
-                agent_id: agent_id.clone(),
-                total_tasks: 0,
-                successful_tasks: 0,
-                failed_tasks: 0,
-                total_earnings: 0,
-                avg_response_time: 0,
-                last_updated: env.ledger().sequence() as u64,
-            });
+        let mut analytics: AgentAnalytics =
+            env.storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or(AgentAnalytics {
+                    agent_id: agent_id.clone(),
+                    total_tasks: 0,
+                    successful_tasks: 0,
+                    failed_tasks: 0,
+                    total_earnings: 0,
+                    avg_response_time: 0,
+                    last_updated: env.ledger().sequence() as u64,
+                });
 
-        let old_total = analytics.total_tasks;
-        analytics.total_tasks += 1;
+        let old_total = metrics.total_tasks;
+        metrics.total_tasks += 1;
         if success {
-            analytics.successful_tasks += 1;
+            metrics.successful_tasks += 1;
         } else {
-            analytics.failed_tasks += 1;
+            metrics.failed_tasks += 1;
         }
-        analytics.total_earnings += earnings;
+        metrics.total_earnings += earnings;
 
         // Running average response time
-        analytics.avg_response_time = if analytics.total_tasks == 1 {
+        metrics.avg_response_time = if metrics.total_tasks == 1 {
             response_time
         } else {
-            ((analytics.avg_response_time as u64 * old_total + response_time as u64)
-                / analytics.total_tasks) as u32
+            ((metrics.avg_response_time as u64 * old_total + response_time as u64)
+                / metrics.total_tasks) as u32
         };
 
         analytics.last_updated = env.ledger().sequence() as u64;
         env.storage().persistent().set(&key, &analytics);
-        extend_ttl_for_key(&env, &key);
+        extend_ttl_for_existing_key(&env, &key);
 
         // Store daily snapshot (last 30 days)
         let snapshot_date = env.ledger().sequence() as u64;
         let snapshot = AnalyticsSnapshot {
             snapshot_date,
-            total_tasks: analytics.total_tasks,
-            successful_tasks: analytics.successful_tasks,
-            total_earnings: analytics.total_earnings,
+            total_tasks: metrics.total_tasks,
+            successful_tasks: metrics.successful_tasks,
+            total_earnings: metrics.total_earnings,
         };
         let snap_key = DataKey::AnalyticsSnapshot(agent_id.clone(), snapshot_date);
         env.storage().persistent().set(&snap_key, &snapshot);
-        extend_ttl_for_key(&env, &snap_key);
+        extend_ttl_for_existing_key(&env, &snap_key);
 
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("anl_rec")),
@@ -1982,15 +2254,18 @@ impl AgentRegistryContract {
     /// Get aggregated analytics for an agent.
     pub fn get_analytics(env: Env, agent_id: Symbol) -> AgentAnalytics {
         let key = DataKey::AgentAnalytics(agent_id.clone());
-        env.storage().persistent().get(&key).unwrap_or(AgentAnalytics {
-            agent_id,
-            total_tasks: 0,
-            successful_tasks: 0,
-            failed_tasks: 0,
-            total_earnings: 0,
-            avg_response_time: 0,
-            last_updated: 0,
-        })
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(AgentAnalytics {
+                agent_id,
+                total_tasks: 0,
+                successful_tasks: 0,
+                failed_tasks: 0,
+                total_earnings: 0,
+                avg_response_time: 0,
+                last_updated: 0,
+            })
     }
 
     /// Get top N agents by a configurable metric.
@@ -2009,20 +2284,20 @@ impl AgentRegistryContract {
         let success_sym = Symbol::new(&env, "successful_tasks");
 
         for id in agent_ids.iter() {
-            let analytics_key = DataKey::AgentAnalytics(id.clone());
-            if let Some(analytics) = env
+            let metrics_key = DataKey::AgentMetrics(id.clone());
+            if let Some(metrics) = env
                 .storage()
                 .persistent()
-                .get::<_, AgentAnalytics>(&analytics_key)
+                .get::<_, AgentMetrics>(&metrics_key)
             {
                 let metric_value = if metric == tasks_sym {
-                    analytics.total_tasks
+                    metrics.total_tasks
                 } else if metric == earnings_sym {
-                    analytics.total_earnings as u64
+                    metrics.total_earnings as u64
                 } else if metric == success_sym {
-                    analytics.successful_tasks
+                    metrics.successful_tasks
                 } else {
-                    analytics.total_tasks
+                    metrics.total_tasks
                 };
 
                 entries.push_back(LeaderboardEntry {
@@ -2038,8 +2313,7 @@ impl AgentRegistryContract {
             let mut j = i + 1;
             let mut max_idx = i;
             while j < entries.len() {
-                if entries.get(j).unwrap().metric_value
-                    > entries.get(max_idx).unwrap().metric_value
+                if entries.get(j).unwrap().metric_value > entries.get(max_idx).unwrap().metric_value
                 {
                     max_idx = j;
                 }
@@ -2099,24 +2373,31 @@ impl AgentRegistryContract {
             return Err(Error::InvalidSla);
         }
 
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        if env.storage().persistent().has(&sla_key) {
-            return Err(Error::SlaAlreadyExists);
-        }
-
-        let sla = AgentSla {
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let mut metrics = env.storage().persistent().get(&metrics_key).unwrap_or_else(|| AgentMetrics {
             agent_id: agent_id.clone(),
-            max_response_time,
-            min_uptime,
-            min_quality_score,
-            created_at: env.ledger().sequence() as u64,
+            max_response_time: 0,
+            min_uptime: 0,
+            min_quality_score: 0,
+            sla_created_at: env.ledger().sequence() as u64,
             total_checks: 0,
             violations: 0,
             last_check_at: 0,
-        };
+            total_tasks: 0,
+            successful_tasks: 0,
+            failed_tasks: 0,
+            total_earnings: 0,
+            avg_response_time: 0,
+            last_updated: 0,
+        });
+
+        metrics.max_response_time = max_response_time;
+        metrics.min_uptime = min_uptime;
+        metrics.min_quality_score = min_quality_score;
+        metrics.sla_created_at = env.ledger().sequence() as u64;
 
         env.storage().persistent().set(&sla_key, &sla);
-        extend_ttl_for_key(&env, &sla_key);
+        extend_ttl_for_existing_key(&env, &sla_key);
 
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("sla_set")),
@@ -2139,27 +2420,27 @@ impl AgentRegistryContract {
         actual_uptime: u32,
         actual_quality: u32,
     ) -> Result<bool, Error> {
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        let mut sla: AgentSla = env
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let mut metrics: AgentMetrics = env
             .storage()
             .persistent()
-            .get(&sla_key)
+            .get(&metrics_key)
             .ok_or(Error::SlaNotFound)?;
 
-        sla.total_checks += 1;
-        sla.last_check_at = env.ledger().sequence() as u64;
+        metrics.total_checks += 1;
+        metrics.last_check_at = env.ledger().sequence() as u64;
 
         let mut compliant = true;
         let mut violation_type: Option<u32> = None;
 
         // Check response time
-        if actual_response_time > sla.max_response_time {
+        if actual_response_time > metrics.max_response_time {
             compliant = false;
             violation_type = Some(0);
         }
 
         // Check uptime
-        if actual_uptime < sla.min_uptime {
+        if actual_uptime < metrics.min_uptime {
             compliant = false;
             if violation_type.is_none() {
                 violation_type = Some(1);
@@ -2167,7 +2448,7 @@ impl AgentRegistryContract {
         }
 
         // Check quality
-        if actual_quality < sla.min_quality_score {
+        if actual_quality < metrics.min_quality_score {
             compliant = false;
             if violation_type.is_none() {
                 violation_type = Some(2);
@@ -2175,7 +2456,7 @@ impl AgentRegistryContract {
         }
 
         if !compliant {
-            sla.violations += 1;
+            metrics.violations += 1;
 
             // Record violation
             let violation_count_key = DataKey::SlaViolationCount(agent_id.clone());
@@ -2196,7 +2477,7 @@ impl AgentRegistryContract {
             env.storage()
                 .persistent()
                 .set(&violation_count_key, &(v_count + 1));
-            extend_ttl_for_key(&env, &v_key);
+            extend_ttl_for_existing_key(&env, &v_key);
 
             // Apply penalty: slash 10% of bond
             let agent_key = DataKey::Agent(agent_id.clone());
@@ -2215,7 +2496,7 @@ impl AgentRegistryContract {
                 };
                 record.bond_amount = remaining;
                 env.storage().persistent().set(&agent_key, &record);
-                extend_ttl_for_key(&env, &agent_key);
+                extend_ttl_for_existing_key(&env, &agent_key);
 
                 env.events().publish(
                     (symbol_short!("registry"), symbol_short!("sla_viol")),
@@ -2229,7 +2510,7 @@ impl AgentRegistryContract {
         } else {
             // Bonus: reputation boost for consistently exceeding SLA
             // Award bonus after 10 consecutive compliant checks
-            if sla.total_checks >= 10 && sla.violations == 0 {
+            if metrics.total_checks >= 10 && metrics.violations == 0 {
                 env.events().publish(
                     (symbol_short!("registry"), symbol_short!("sla_bonus")),
                     SlaBonusAwardedEvent {
@@ -2241,24 +2522,163 @@ impl AgentRegistryContract {
         }
 
         env.storage().persistent().set(&sla_key, &sla);
-        extend_ttl_for_key(&env, &sla_key);
+        extend_ttl_for_existing_key(&env, &sla_key);
 
         Ok(compliant)
     }
 
     /// Get SLA status and compliance percentage for an agent.
-    pub fn get_sla_status(env: Env, agent_id: Symbol) -> Option<(AgentSla, u32)> {
-        let sla_key = DataKey::AgentSla(agent_id.clone());
-        let sla: AgentSla = env.storage().persistent().get(&sla_key)?;
+    pub fn get_sla_status(env: Env, agent_id: Symbol) -> Option<(AgentMetrics, u32)> {
+        let metrics_key = DataKey::AgentMetrics(agent_id.clone());
+        let metrics: AgentMetrics = env.storage().persistent().get(&metrics_key)?;
 
-        let compliance = if sla.total_checks == 0 {
+        let compliance = if metrics.total_checks == 0 {
             100u32
         } else {
-            let compliant_checks = sla.total_checks - sla.violations;
-            ((compliant_checks * 100) / sla.total_checks) as u32
+            let compliant_checks = metrics.total_checks - metrics.violations;
+            ((compliant_checks * 100) / metrics.total_checks) as u32
         };
 
-        Some((sla, compliance))
+        Some((metrics, compliance))
+    }
+
+    // ── Cross-chain identity bridging (issue #259) ───────────────────────────
+
+    /// Mint a time-limited proof that `agent_id` is controlled by
+    /// `stellar_pubkey`, for use on `target_chain`.
+    ///
+    /// The agent's registered owner must authorise the call, and `signature`
+    /// must be `stellar_pubkey`'s ed25519 signature over the canonical message
+    /// described in `bridge::canonical_message`. Supplying `0` for `ttl_secs`
+    /// uses the 24-hour default; the ceiling is 30 days.
+    ///
+    /// Re-bridging the same agent to the same chain replaces the previous
+    /// proof, which is how a proof is rotated.
+    pub fn bridge_identity(
+        env: Env,
+        agent_id: Symbol,
+        stellar_pubkey: BytesN<32>,
+        target_chain: TargetChain,
+        ttl_secs: u64,
+        signature: BytesN<64>,
+    ) -> Result<BridgeProof, Error> {
+        require_not_paused(&env)?;
+        require_not_frozen(&env, &agent_id)?;
+
+        let record: AgentRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Agent(agent_id.clone()))
+            .ok_or(Error::NotFound)?;
+        record.owner.require_auth();
+
+        let proof = bridge::issue(
+            &env,
+            agent_id.clone(),
+            stellar_pubkey,
+            target_chain,
+            ttl_secs,
+            signature,
+        )?;
+
+        audit::record(
+            &env,
+            &record.owner,
+            symbol_short!("bridge"),
+            Some(agent_id),
+            0,
+        );
+
+        Ok(proof)
+    }
+
+    /// Check a presented bridge proof against the registry's record.
+    ///
+    /// Returns `Ok(())` only when the proof matches field for field and has not
+    /// expired. Every attempt, successful or not, emits a
+    /// `BridgeProofVerifiedEvent`.
+    pub fn verify_bridge_proof(env: Env, proof: BridgeProof) -> Result<(), Error> {
+        bridge::verify(&env, &proof)
+    }
+
+    /// Read the stored bridge proof for an agent and chain, if any.
+    pub fn get_bridge_proof(
+        env: Env,
+        agent_id: Symbol,
+        target_chain: TargetChain,
+    ) -> Option<BridgeProof> {
+        bridge::get(&env, agent_id, target_chain)
+    }
+
+    /// Revoke a bridge proof before its expiry.
+    ///
+    /// `caller` must be either the agent's owner or the registry admin; the
+    /// admin is allowed so a compromised agent key cannot strand a live proof.
+    /// Soroban cannot attempt an authorisation and fall back, so the caller is
+    /// named explicitly and checked before `require_auth`.
+    ///
+    /// This only clears the registry's record: a verifier checking the
+    /// signature offline cannot learn about the revocation, which is why proof
+    /// lifetimes are capped at `bridge::MAX_BRIDGE_TTL_SECS`.
+    pub fn revoke_bridge_proof(
+        env: Env,
+        caller: Address,
+        agent_id: Symbol,
+        target_chain: TargetChain,
+    ) -> Result<(), Error> {
+        let record: AgentRecord = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Agent(agent_id.clone()))
+            .ok_or(Error::NotFound)?;
+
+        let is_admin = env
+            .storage()
+            .instance()
+            .get::<DataKey, Address>(&DataKey::Admin)
+            .is_some_and(|admin| admin == caller);
+
+        if caller != record.owner && !is_admin {
+            return Err(Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        bridge::revoke(&env, agent_id.clone(), target_chain, caller.clone())?;
+        audit::record(&env, &caller, symbol_short!("unbridge"), Some(agent_id), 0);
+        Ok(())
+    }
+
+    // ── Security audit trail (issue #261) ────────────────────────────────────
+
+    /// Read a page of audit entries, newest first.
+    ///
+    /// Pass `None` for `before_seq` to start at the newest entry, then the
+    /// returned `next_cursor` to continue. `limit` of `0` uses the default page
+    /// size; anything above `MAX_AUDIT_PAGE_SIZE` is rejected.
+    pub fn get_audit_log(
+        env: Env,
+        before_seq: Option<u64>,
+        limit: u32,
+    ) -> Result<AuditPage, Error> {
+        audit::page(&env, before_seq, limit)
+    }
+
+    /// Total audit entries ever written, including any whose TTL has lapsed.
+    pub fn get_audit_total(env: Env) -> u64 {
+        audit::audit_total(&env)
+    }
+
+    /// Current audit thresholds.
+    pub fn get_audit_config(env: Env) -> AuditConfig {
+        audit::audit_config(&env)
+    }
+
+    /// Replace the audit thresholds. Admin only.
+    pub fn set_audit_config(env: Env, config: AuditConfig) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        audit::set_config(&env, config)?;
+        audit::record(&env, &admin, symbol_short!("auditcfg"), None, 0);
+        Ok(())
     }
 
     /// Map a raw error code from any ai-net contract to its standardized
@@ -2304,6 +2724,12 @@ fn get_metadata_u32(
 }
 
 #[cfg(test)]
+mod audit_tests;
+#[cfg(test)]
+mod bridge_tests;
+#[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_multisig;
+#[cfg(test)]
+mod property_tests;

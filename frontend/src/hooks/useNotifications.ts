@@ -7,9 +7,10 @@ const fallbackValue: NotificationContextValue = {
   unreadCount: 0,
   markAsRead: () => {},
   markAllAsRead: () => {},
+  clearAll: () => {},
+  clearNotifications: () => {},
   addNotification: () => {},
   removeNotification: () => {},
-  clearNotifications: () => {},
   isConnected: false,
 };
 

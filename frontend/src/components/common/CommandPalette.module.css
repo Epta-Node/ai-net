@@ -1,7 +1,7 @@
 ﻿.overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: var(--surface-scrim);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   display: flex;
@@ -20,12 +20,12 @@
 .modal {
   width: 100%;
   max-width: 560px;
-  background: rgba(30, 41, 59, 0.92);
+  background: var(--surface-panel-translucent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-2xl);
+  border: 1px solid var(--white-alpha-08);
+  box-shadow: var(--shadow-popover), 0 0 0 1px var(--white-alpha-04);
   overflow: hidden;
   max-height: 60vh;
   display: flex;
@@ -37,11 +37,11 @@
   align-items: center;
   gap: 12px;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--white-alpha-06);
 }
 
 .searchIcon {
-  color: rgba(148, 163, 184, 0.6);
+  color: var(--text-subtle);
   flex-shrink: 0;
 }
 
@@ -50,7 +50,7 @@
   background: transparent;
   border: none;
   outline: none;
-  color: #e2e8f0;
+  color: var(--text-primary);
   font-size: 16px;
   font-weight: 400;
   font-family: inherit;
@@ -58,14 +58,14 @@
 }
 
 .input::placeholder {
-  color: rgba(148, 163, 184, 0.5);
+  color: var(--text-subtle);
 }
 
 .shortcutHint {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: rgba(148, 163, 184, 0.4);
+  color: var(--text-disabled);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.5px;
@@ -74,12 +74,12 @@
 .keyHint {
   display: inline-block;
   padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-sm);
+  background: var(--white-alpha-06);
+  border: 1px solid var(--white-alpha-08);
   font-size: 10px;
   font-weight: 600;
-  color: rgba(148, 163, 184, 0.5);
+  color: var(--text-subtle);
   font-family: inherit;
 }
 
@@ -89,16 +89,21 @@
   justify-content: center;
   background: transparent;
   border: none;
-  color: rgba(148, 163, 184, 0.4);
+  color: var(--text-disabled);
   cursor: pointer;
   padding: 4px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   transition: all 0.2s ease;
 }
 
 .closeButton:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  background: var(--white-alpha-06);
+  color: var(--text-primary);
+}
+
+.closeButton:active {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(0.92);
 }
 
 .resultsWrapper {
@@ -117,12 +122,12 @@
 }
 
 .resultsWrapper::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.2);
-  border-radius: 4px;
+  background: var(--text-disabled);
+  border-radius: var(--radius-sm);
 }
 
 .resultsWrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.3);
+  background: var(--text-disabled);
 }
 
 .loadingState {
@@ -136,8 +141,8 @@
 .loadingDot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
-  background: rgba(99, 102, 241, 0.5);
+  border-radius: var(--radius-round);
+  background: var(--accent-surface-strong);
   animation: bounce 1.2s ease-in-out infinite;
 }
 
@@ -170,14 +175,14 @@
 }
 
 .emptyText {
-  color: rgba(148, 163, 184, 0.7);
+  color: var(--text-subtle);
   font-size: 14px;
   font-weight: 500;
   margin: 0;
 }
 
 .emptySubtext {
-  color: rgba(148, 163, 184, 0.4);
+  color: var(--text-disabled);
   font-size: 12px;
   margin: 4px 0 0 0;
 }
@@ -195,7 +200,7 @@
   font-weight: 600;
   letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: rgba(148, 163, 184, 0.35);
+  color: var(--text-disabled);
   padding: 8px 16px 4px 16px;
 }
 
@@ -210,17 +215,27 @@
   cursor: pointer;
   text-align: left;
   transition: background 0.15s ease;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   margin: 0 4px;
   width: calc(100% - 8px);
 }
 
 .resultItem.selected {
-  background: rgba(99, 102, 241, 0.12);
+  background: var(--accent-surface-muted);
 }
 
 .resultItem:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--accent-surface-muted);
+}
+
+.resultItem:active {
+  background: rgba(99, 102, 241, 0.18);
+  transform: scale(0.99);
+}
+
+.resultItem:focus-visible {
+  outline: 2px solid rgba(129, 140, 248, 0.8);
+  outline-offset: -2px;
 }
 
 .resultIcon {
@@ -229,9 +244,9 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(148, 163, 184, 0.6);
+  border-radius: var(--radius-md);
+  background: var(--white-alpha-04);
+  color: var(--text-subtle);
   flex-shrink: 0;
 }
 
@@ -242,7 +257,7 @@
 
 .resultTitle {
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--text-primary);
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -251,7 +266,7 @@
 
 .resultSubtitle {
   font-size: 11px;
-  color: rgba(148, 163, 184, 0.5);
+  color: var(--text-subtle);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -259,10 +274,10 @@
 
 .resultMetadata {
   font-size: 10px;
-  color: rgba(148, 163, 184, 0.3);
-  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-disabled);
+  background: var(--white-alpha-04);
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -270,7 +285,39 @@
 .resultShortcut {
   display: flex;
   align-items: center;
-  color: rgba(148, 163, 184, 0.3);
+  color: var(--text-disabled);
+}
+
+/* Fuzzy-match highlight: the characters the query actually matched. */
+.highlight {
+  background: transparent;
+  color: #a5b4fc;
+  font-weight: 700;
+}
+
+/* Keyboard legend pinned under the results. */
+.footer {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.45);
+}
+
+.footer kbd {
+  display: inline-block;
+  min-width: 16px;
+  padding: 1px 5px;
+  margin-right: 2px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 1.4;
+  text-align: center;
 }
 
 @media (max-width: 640px) {
@@ -282,7 +329,7 @@
   .modal {
     max-width: 94%;
     max-height: 80vh;
-    border-radius: 12px;
+    border-radius: var(--radius-xl);
     margin-top: 12px;
   }
 
@@ -296,5 +343,12 @@
 
   .resultsWrapper {
     max-height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* The legend is the first thing to go when height is scarce. */
+  .footer {
+    display: none;
   }
 }

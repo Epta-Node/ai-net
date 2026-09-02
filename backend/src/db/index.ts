@@ -1,6 +1,10 @@
 import Database from "better-sqlite3";
 import path from "path";
 import { createLogger } from "../utils/logger";
+import { migrateToLatest } from "./migrator";
+import { createPool, type SqlitePool } from "./pool";
+
+const MIGRATIONS_DIR = path.join(__dirname, "migrations", "payments");
 
 export type PaymentStatus = "locked" | "released" | "refunded";
 
@@ -15,39 +19,71 @@ export interface PaymentRecord {
 
 const logger = createLogger({ component: "payment-db" });
 
-let _db: Database.Database | null = null;
+let _pool: SqlitePool | null = null;
 
-export function getDb(dbPath?: string): Database.Database {
-  if (!_db) {
+/** Create the payments schema. Runs once, on the pool's writer connection. */
+function applyPaymentSchema(db: Database.Database): void {
+  (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
+    "error",
+    (error: Error) => {
+      logger.error({ err: error }, "payment database error");
+    },
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS payments (
+      taskId       TEXT NOT NULL,
+      nodeId       TEXT NOT NULL,
+      balanceId    TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'locked',
+      amountStroops TEXT NOT NULL,
+      txHash       TEXT,
+      PRIMARY KEY (taskId, nodeId)
+    )
+  `);
+}
+
+/** The payment database's connection pool. */
+export function getPaymentPool(dbPath?: string): SqlitePool {
+  if (!_pool || _pool.closed) {
     const filePath = dbPath ?? path.join(process.cwd(), "payments.db");
-    _db = new Database(filePath as unknown as string);
-    _db.pragma("busy_timeout = 5000");
-    _db.pragma("journal_mode = WAL");
-    logger.info({ dbPath: filePath }, "payment database opened");
-    (_db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
-      "error",
-      (error: Error) => {
-        logger.error({ err: error }, "payment database error");
+    _pool = createPool({
+      filePath,
+      min: 1,
+      max: 4,
+      acquireTimeoutMs: 5_000,
+      onCreate: (db) => {
+        (db as unknown as { on: (event: string, fn: (error: Error) => void) => void }).on(
+          "error",
+          (error: Error) => {
+            logger.error({ err: error }, "payment database error");
+          },
+        );
+        applyPaymentSchema(db);
+        migrateToLatest(db, MIGRATIONS_DIR);
       },
-    );
-    _db.exec(`
-      CREATE TABLE IF NOT EXISTS payments (
-        taskId       TEXT NOT NULL,
-        nodeId       TEXT NOT NULL,
-        balanceId    TEXT NOT NULL,
-        status       TEXT NOT NULL DEFAULT 'locked',
-        amountStroops TEXT NOT NULL,
-        txHash       TEXT,
-        PRIMARY KEY (taskId, nodeId)
-      )
-    `);
+    });
+    logger.info({ dbPath: filePath }, "payment database opened");
   }
-  return _db;
+  return _pool;
+}
+
+/**
+ * The writer connection, for the synchronous `createPaymentDb` API.
+ *
+ * New code should prefer `getPaymentPool().read(...)`.
+ */
+export function getDb(dbPath?: string): Database.Database {
+  return getPaymentPool(dbPath).writer;
 }
 
 export function closeDb(): void {
-  _db?.close();
-  _db = null;
+  void _pool?.close();
+  _pool = null;
+}
+
+/** The payments pool if one is open, else null. Used by the metrics endpoint. */
+export function currentPaymentPool(): SqlitePool | null {
+  return _pool && !_pool.closed ? _pool : null;
 }
 
 export function paymentDbHealthCheck(): boolean {

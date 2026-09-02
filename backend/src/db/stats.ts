@@ -76,18 +76,52 @@ async function getXLMHourlyTotals(db: DbClient, since: Date): Promise<Array<{ ho
   return rows.map((row) => ({ hour: row.hour, value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));
 }
 
+const MS_PER_DAY = 24 * MS_PER_HOUR;
+
+function truncateToDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+}
+
+function buildDailySeries(start: Date, end: Date, rows: Array<{ day: string; value: number }>): TimePoint[] {
+  const points: TimePoint[] = [];
+  const map = new Map(rows.map((row) => [truncateToDay(new Date(row.day)).toISOString(), row.value]));
+  for (let timestamp = start.getTime(); timestamp <= end.getTime(); timestamp += MS_PER_DAY) {
+    const iso = new Date(timestamp).toISOString();
+    points.push({ timestamp: iso, value: map.get(iso) ?? 0 });
+  }
+  return points;
+}
+
+async function getTasksDailyCounts(db: DbClient, since: Date): Promise<Array<{ day: string; value: number }>> {
+  const rows = db.prepare(
+    "SELECT strftime('%Y-%m-%d', \"createdAt\") AS day, COUNT(*) AS count FROM tasks WHERE \"createdAt\" >= ? GROUP BY day ORDER BY day"
+  ).all(since.toISOString()) as Array<{ day: string; count: string | number }>;
+  return rows.map((row) => ({ day: row.day + 'T00:00:00.000Z', value: Number(row.count ?? 0) }));
+}
+
+async function getXLMDailyTotals(db: DbClient, since: Date): Promise<Array<{ day: string; value: number }>> {
+  const rows = db.prepare(
+    "SELECT strftime('%Y-%m-%d', \"createdAt\") AS day, COALESCE(SUM(amount), 0) AS sum FROM payments WHERE status = 'released' AND \"createdAt\" >= ? GROUP BY day ORDER BY day"
+  ).all(since.toISOString()) as Array<{ day: string; sum: string | number }>;
+  return rows.map((row) => ({ day: row.day + 'T00:00:00.000Z', value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));
+}
+
 export async function getStats(db: DbClient, now: Date = new Date()): Promise<StatsResponse> {
   const currentHour = truncateToHour(now);
   const start24h = new Date(currentHour.getTime() - 23 * MS_PER_HOUR);
   const uptimeSince = new Date(now.getTime() - 7 * 24 * MS_PER_HOUR);
+  const today = truncateToDay(now);
+  const start7d = new Date(today.getTime() - 6 * MS_PER_DAY);
 
-  const [totalAgents, totalTasks, uptimePercent, taskRows, xlmRows, totalXLMTransacted] = await Promise.all([
+  const [totalAgents, totalTasks, uptimePercent, taskRows, xlmRows, totalXLMTransacted, taskDayRows, xlmDayRows] = await Promise.all([
     getTotalAgents(db),
     getTotalTasks(db),
     getUptimePercent(db, uptimeSince),
     getTasksHourlyCounts(db, start24h),
     getXLMHourlyTotals(db, start24h),
-    getTotalXLMTransacted(db)
+    getTotalXLMTransacted(db),
+    getTasksDailyCounts(db, start7d),
+    getXLMDailyTotals(db, start7d),
   ]);
 
   return {
@@ -96,6 +130,8 @@ export async function getStats(db: DbClient, now: Date = new Date()): Promise<St
     uptimePercent,
     totalXLMTransacted,
     tasksLast24h: buildHourlySeries(start24h, currentHour, taskRows),
-    xlmLast24h: buildHourlySeries(start24h, currentHour, xlmRows)
+    xlmLast24h: buildHourlySeries(start24h, currentHour, xlmRows),
+    tasksLast7d: buildDailySeries(start7d, today, taskDayRows),
+    xlmLast7d: buildDailySeries(start7d, today, xlmDayRows),
   };
 }

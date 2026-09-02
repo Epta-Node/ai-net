@@ -500,3 +500,155 @@ describe("reconciliation API routes", () => {
     expect(response.body.error).toBe("NO_RECONCILIATION_REPORT");
   });
 });
+
+// ─── Repair (idempotent drift repair) ─────────────────────────────────────────
+
+describe("ReconciliationService.repair", () => {
+  it("repairs missing_on_chain by updating local status to released", async () => {
+    const records = [makeRecord({ taskId: "t1", nodeId: "n1", status: "locked" })];
+    const paymentDb = makePaymentDb(records);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([]), // no on-chain balance → missing_on_chain
+      reportStore: makeReportStore().store,
+    });
+
+    const report = await service.repair("manual");
+
+    expect(report.discrepancies).toHaveLength(1);
+    expect(report.discrepancies[0].type).toBe("missing_on_chain");
+    // Local record should now be "released"
+    const updated = paymentDb.findByKey("t1", "n1");
+    expect(updated?.status).toBe("released");
+    expect(updated?.txHash).toBe("reconciled-repair");
+  });
+
+  it("repairs amount_mismatch when on-chain balance is 0", async () => {
+    const records = [makeRecord({ taskId: "t2", nodeId: "n2", status: "locked" })];
+    const paymentDb = makePaymentDb(records);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([
+        makeBalance({ balanceId: "cb-local-1", amountStroops: "0" }),
+      ]),
+      reportStore: makeReportStore().store,
+    });
+
+    const report = await service.repair("manual");
+
+    expect(report.discrepancies).toHaveLength(1);
+    expect(report.discrepancies[0].type).toBe("amount_mismatch");
+    const updated = paymentDb.findByKey("t2", "n2");
+    expect(updated?.status).toBe("released");
+  });
+
+  it("does not auto-repair missing_local discrepancies", async () => {
+    const paymentDb = makePaymentDb([]);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([makeBalance()]),
+      reportStore: makeReportStore().store,
+      logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+    });
+
+    const report = await service.repair("manual");
+
+    expect(report.discrepancies).toHaveLength(1);
+    expect(report.discrepancies[0].type).toBe("missing_local");
+    // No local records to update
+  });
+
+  it("repair is idempotent — running twice produces the same result", async () => {
+    const records = [makeRecord({ taskId: "t3", nodeId: "n3", status: "locked" })];
+    const paymentDb = makePaymentDb(records);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([]),
+      reportStore: makeReportStore().store,
+    });
+
+    const report1 = await service.repair("manual");
+    const report2 = await service.repair("manual");
+
+    // Second run: the record is already released, so no missing_on_chain discrepancy
+    expect(report1.discrepancies).toHaveLength(1);
+    expect(report2.discrepancies).toHaveLength(0);
+    expect(report2.status).toBe("consistent");
+  });
+
+  it("returns consistent report when no discrepancies exist", async () => {
+    const paymentDb = makePaymentDb([makeRecord()]);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([
+        makeBalance({ balanceId: "cb-local-1" }),
+      ]),
+      reportStore: makeReportStore().store,
+    });
+
+    const report = await service.repair("manual");
+
+    expect(report.status).toBe("consistent");
+    expect(report.discrepancies).toHaveLength(0);
+  });
+});
+
+// ─── Frequent scheduling (5-minute drift detection) ───────────────────────────
+
+describe("ReconciliationService.startFrequent", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it("starts a 5-minute interval scheduler", async () => {
+    const paymentDb = makePaymentDb([]);
+    const service = new ReconciliationService({
+      paymentDb,
+      onChainProvider: makeOnChainProvider([]),
+      reportStore: makeReportStore().store,
+    });
+    const runSpy = jest.spyOn(service, "run").mockResolvedValue({
+      id: "r-1",
+      runAt: new Date().toISOString(),
+      triggeredBy: "scheduled",
+      status: "consistent",
+      summary: {
+        totalLocalRecords: 0,
+        totalOnChainBalances: 0,
+        matched: 0,
+        discrepancies: 0,
+        missingOnChain: 0,
+        missingLocal: 0,
+        amountMismatch: 0,
+      },
+      discrepancies: [],
+    });
+
+    service.startFrequent(300_000);
+
+    // Advance 5 minutes → should trigger one run
+    jest.advanceTimersByTime(300_000);
+    await Promise.resolve(); // flush microtasks
+
+    expect(runSpy).toHaveBeenCalledWith("scheduled");
+
+    service.stop();
+  });
+
+  it("stop() cancels the scheduler", () => {
+    const service = new ReconciliationService({
+      paymentDb: makePaymentDb(),
+      onChainProvider: makeOnChainProvider([]),
+      reportStore: makeReportStore().store,
+    });
+    service.startFrequent(300_000);
+    service.stop();
+
+    // No timer active after stop
+    expect((service as any).timer).toBeNull();
+  });
+});

@@ -33,10 +33,8 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 import { scValToNative } from "@stellar/stellar-base";
 import { getAgentDb, createAgentDb } from "../db/agents";
 import { createLogger } from "../utils/logger";
-
-const RPC_URL =
-  process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
-const CONTRACT_ID = process.env.REGISTRY_CONTRACT_ID;
+import { getConfig } from "../config";
+import { invalidateAgentsCache } from "../cache/invalidation";
 
 const logger = createLogger({ module: "registry-sync" });
 
@@ -157,6 +155,9 @@ function handleEvent(
         status: "online",
       });
 
+      // Invalidate registry cache so the updated agent list is served fresh
+      invalidateAgentsCache().catch(() => {/* best-effort — sync must not crash */});
+
       logger.info(
         { agentId: data.agent_id, capability: data.capability, owner: data.owner },
         "agent registered"
@@ -169,6 +170,9 @@ function handleEvent(
 
       // Remove the agent from the local DB using the existing delete method.
       db.delete(data.agent_id);
+
+      // Invalidate registry cache so the agent no longer appears in listings
+      invalidateAgentsCache().catch(() => {/* best-effort */});
 
       logger.info(
         { agentId: data.agent_id, capability: data.capability, owner: data.owner },
@@ -188,6 +192,7 @@ function handleEvent(
       const existing = db.findById(agentId);
       if (existing) {
         db.upsert({ ...existing, status: "offline" });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent frozen (marked offline)");
       break;
@@ -203,6 +208,7 @@ function handleEvent(
       const existing = db.findById(agentId);
       if (existing) {
         db.upsert({ ...existing, status: "online", lastSeenAt: new Date().toISOString() });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent unfrozen (marked online)");
       break;
@@ -223,6 +229,7 @@ function handleEvent(
           ...existing,
           pricingXLM: Number(priceStroops) / 10_000_000,
         });
+        invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info(
         { agentId, priceXLM: (Number(priceStroops) / 10_000_000).toFixed(7) },
@@ -236,9 +243,16 @@ function handleEvent(
     // These can be wired up once an errors table is added to the schema.
     case TOPICS.ERR_REPORTED: {
       const data = payload as ErrorReportedPayload;
+      db.upsertError?.({
+        id: data.error_id,
+        reporter: data.reporter,
+        resolved: false,
+        resolution: null,
+        reportedAt: new Date().toISOString(),
+      });
       logger.warn(
         { errorId: data.error_id, reporter: data.reporter },
-        "error reported (no DB schema for errors — logging only)"
+        "error reported and persisted to error registry"
       );
       break;
     }
@@ -246,9 +260,10 @@ function handleEvent(
     case TOPICS.ERR_RESOLVED: {
       const data = payload as ErrorResolvedPayload;
       const label = resolutionLabel(data.resolution_code);
+      db.resolveError?.(data.error_id, label);
       logger.info(
         { errorId: data.error_id, resolution: label },
-        "error resolved (no DB schema for errors — logging only)"
+        "error resolved and persisted to error registry"
       );
       break;
     }
@@ -271,12 +286,15 @@ function handleEvent(
  * last known ledger and dispatches them to `handleEvent`.
  */
 export function startAgentSync(): void {
-  if (!CONTRACT_ID) {
+  const config = getConfig();
+  const contractId = config.REGISTRY_CONTRACT_ID;
+
+  if (!contractId) {
     logger.warn("no REGISTRY_CONTRACT_ID provided, skipping agent sync");
     return;
   }
 
-  const server = new Server(RPC_URL);
+  const server = new Server(config.SOROBAN_RPC_URL);
 
   const poll = async () => {
     try {
@@ -304,7 +322,7 @@ export function startAgentSync(): void {
         filters: [
           {
             type: "contract",
-            contractIds: [CONTRACT_ID],
+            contractIds: [contractId],
             topics: [],
           },
         ],

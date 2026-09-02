@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { ExternalLink, ArrowUpRight, ArrowDownRight, Clock, Search } from 'lucide-react'
+import { ExternalLink, ArrowUpRight, ArrowDownRight, Clock, Search, CreditCard, Send } from 'lucide-react'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
 import { filterTransactions, computeRunningTotal } from '../../hooks/useTransactionHistory'
 import styles from './TransactionTable.module.css'
@@ -11,7 +11,6 @@ import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { SkeletonTable } from '../common/Skeleton'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
-const PAGE_SIZE_OPTIONS = [25, 50, 100] as const
 
 interface TransactionTableProps {
   transactions: TransactionEvent[]
@@ -19,8 +18,6 @@ interface TransactionTableProps {
   publicKey: string | null
 }
 
-// Takes `t` and the locale as arguments rather than becoming a hook, so it
-// stays a plain pure function that is easy to reason about and test.
 function formatTimestamp(ts: string, t: TFunction, locale: string): string {
   const date = new Date(ts)
   const now = new Date()
@@ -49,8 +46,20 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [pageSize, setPageSize] = useState<number>(25)
+  const [pageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
+  const pageSizeOptions = useMemo(
+    () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
+    []
+  )
+  const selectPageSize = (size: number) => {
+    setPageSize(size)
+    setPage(1)
+  }
+  const handlePageSizeTypeahead = useSelectTypeahead({
+    options: pageSizeOptions,
+    onMatch: selectPageSize,
+  })
 
   const filtered = useMemo(
     () => filterTransactions(transactions, { search, from: dateFrom || null, to: dateTo || null }),
@@ -65,8 +74,6 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
   )
   const runningTotal = useMemo(() => computeRunningTotal(filtered), [filtered])
 
-  // Any change that narrows/widens the result set can strand the user on a page
-  // past the new end, so every filter/page-size change snaps back to page 1.
   const resetToFirstPage = () => setPage(1)
 
   if (!publicKey) {
@@ -91,13 +98,20 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
     return (
       <div className={styles.container}>
         <h3 className={styles.heading}>{t('wallet.tx.heading')}</h3>
-        <div className={styles.emptyState}>
-          <Clock size={32} className={styles.emptyIcon} />
-          <p>{t('wallet.tx.empty')}</p>
-          <p className={styles.emptySubtext}>
-            {t('wallet.tx.emptySubtext')}
-          </p>
-        </div>
+        <EmptyState
+          icon={<CreditCard size={32} />}
+          title={t('wallet.tx.empty')}
+          description={t('wallet.tx.emptySubtext')}
+          primaryAction={{
+            label: 'Send XLM',
+            onClick: () => {
+              const el = document.getElementById('btn-send-xlm')
+              if (el) el.scrollIntoView({ behavior: 'smooth' })
+            },
+            icon: <Send size={16} />,
+          }}
+          variant="card"
+        />
       </div>
     )
   }

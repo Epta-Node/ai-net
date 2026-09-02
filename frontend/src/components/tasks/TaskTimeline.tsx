@@ -9,6 +9,9 @@ import {
   ChevronRight,
   ExternalLink,
   AlertCircle,
+  Copy,
+  Download,
+  Play,
 } from 'lucide-react';
 import type { TaskResponse } from '../../types/api';
 import {
@@ -23,11 +26,27 @@ import { Skeleton, SkeletonCard } from '../common/Skeleton';
 // ─── Agent icon colours ───────────────────────────────────────────────────────
 
 const AGENT_COLORS: Record<string, string> = {
-  research: '#38bdf8', // cyan
-  risk: '#f59e0b',     // amber
-  coding: '#a78bfa',   // violet
-  design: '#f472b6',   // pink
-  report: '#34d399',   // green
+  research: 'var(--agent-research)',
+  risk: 'var(--agent-risk)',
+  coding: 'var(--agent-coding)',
+  design: 'var(--agent-design)',
+  report: 'var(--agent-report)',
+};
+
+const AGENT_SURFACES: Record<string, string> = {
+  research: 'var(--agent-research-surface)',
+  risk: 'var(--agent-risk-surface)',
+  coding: 'var(--agent-coding-surface)',
+  design: 'var(--agent-design-surface)',
+  report: 'var(--agent-report-surface)',
+};
+
+const AGENT_BORDERS: Record<string, string> = {
+  research: 'var(--agent-research-border)',
+  risk: 'var(--agent-risk-border)',
+  coding: 'var(--agent-coding-border)',
+  design: 'var(--agent-design-border)',
+  report: 'var(--agent-report-border)',
 };
 
 const AGENT_ABBR: Record<string, string> = {
@@ -132,6 +151,7 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
 }) => {
   const navigate = useNavigate();
   const [errorExpanded, setErrorExpanded] = useState(false);
+  const [showActions, setShowActions] = useState(false);
 
   const taskId = task.taskId || task.id || '';
   const meta = getStatusMeta(task.status);
@@ -156,12 +176,36 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
     navigate(`/tasks/${taskId}`);
   };
 
+  const handleResume = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate('/tasks/new', { state: { previousTask: task } });
+  };
+
+  const handleDuplicate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigate('/tasks/new', { state: { duplicateFrom: task } });
+  };
+
+  const handleExport = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const json = JSON.stringify(task, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `task-${taskId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div
       className={`${styles.entry} ${isSelected ? styles.entrySelected : ''} ${
         hasFailed ? styles.entryFailed : ''
       }`}
       aria-selected={isSelected}
+      onMouseEnter={() => setShowActions(true)}
+      onMouseLeave={() => setShowActions(false)}
     >
       {/* Timeline connector */}
       <div className={styles.connectorArea}>
@@ -230,6 +274,39 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
             >
               <ExternalLink size={13} />
             </button>
+
+            {/* Row actions (visible on hover) */}
+            {showActions && (
+              <div className={styles.rowActions}>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleResume}
+                  title="Resume task"
+                  aria-label="Resume task"
+                >
+                  <Play size={13} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleDuplicate}
+                  title="Duplicate task"
+                  aria-label="Duplicate task"
+                >
+                  <Copy size={13} />
+                </button>
+                <button
+                  type="button"
+                  className={styles.actionBtn}
+                  onClick={handleExport}
+                  title="Export as JSON"
+                  aria-label="Export task as JSON"
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -245,9 +322,9 @@ const TimelineEntry: React.FC<TimelineEntryProps> = ({
                   key={type}
                   className={styles.agentBadge}
                   style={{
-                    background: `${AGENT_COLORS[type] || '#94a3b8'}22`,
-                    border: `1px solid ${AGENT_COLORS[type] || '#94a3b8'}44`,
-                    color: AGENT_COLORS[type] || '#94a3b8',
+                    background: AGENT_SURFACES[type] || 'var(--agent-default-surface)',
+                    border: `1px solid ${AGENT_BORDERS[type] || 'var(--agent-default-border)'}`,
+                    color: AGENT_COLORS[type] || 'var(--agent-default)',
                   }}
                   title={type}
                   aria-label={`${type} agent`}
@@ -344,20 +421,31 @@ function getBucketLabel(date: Date): string {
   return date.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
+import { EmptyState as CommonEmptyState } from '../common/EmptyState';
+import { Plus, History } from 'lucide-react';
+
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
 const EmptyState: React.FC<{ hasFilters: boolean }> = ({ hasFilters }) => (
-  <div className={styles.empty}>
-    <Clock size={40} className={styles.emptyIcon} aria-hidden="true" />
-    <p className={styles.emptyTitle}>
-      {hasFilters ? 'No tasks match the current filters' : 'No task history yet'}
-    </p>
-    <p className={styles.emptySubtitle}>
-      {hasFilters
-        ? 'Try adjusting the filters or expanding the zoom window.'
-        : 'Submit a task to see it appear here.'}
-    </p>
-  </div>
+  <CommonEmptyState
+    icon={hasFilters ? <Clock size={32} /> : <History size={32} />}
+    title={hasFilters ? 'No tasks match the current filters' : 'No task history yet'}
+    description={
+      hasFilters
+        ? 'Try adjusting the filters or expanding the date range.'
+        : 'Submit a task to see execution steps, agent timelines, and cost breakdowns here.'
+    }
+    primaryAction={
+      hasFilters
+        ? undefined
+        : {
+            label: 'Submit New Task',
+            to: '/tasks/new',
+            icon: <Plus size={16} />,
+          }
+    }
+    variant="card"
+  />
 );
 
 // ─── Skeleton loader ──────────────────────────────────────────────────────────
