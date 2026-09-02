@@ -1,1 +1,9 @@
-import fs from 'fs';`nimport path from 'path';`n`ndescribe('VeniceClient Single Canonical Service Guard', () => {`n  it('should ensure obsolete backend/src/venice directory does not exist', () => {`n    const obsoletePath = path.resolve(__dirname, '../../venice');`n    expect(fs.existsSync(obsoletePath)).toBe(false);`n  });`n});
+import fs from 'fs';
+import path from 'path';
+
+describe('VeniceClient Single Canonical Service Guard', () => {
+  it('should ensure obsolete backend/src/venice directory does not exist', () => {
+    const obsoletePath = path.resolve(__dirname, '../../venice');
+    expect(fs.existsSync(obsoletePath)).toBe(false);
+  });
+});
