@@ -1,0 +1,45 @@
+.chart {
+  position: relative;
+  width: 100%;
+  border-radius: 0.5rem;
+}
+
+.chart:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.tooltip {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 2;
+  display: flex;
+  min-width: 8rem;
+  max-width: min(16rem, calc(100% - 1rem));
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.5rem;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.35);
+  font-size: 0.75rem;
+  pointer-events: auto;
+}
+
+.tooltip:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tooltipLabel,
+.tooltipDetail {
+  color: var(--text-secondary);
+}
+
+.tooltipValue {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}

@@ -16,10 +16,16 @@ import type {
   AgentQualityMetrics,
   DimensionScore,
   QualityDimension,
+  QualityScorerConfig,
   QualityScore,
   QualityScoreRecord,
   QualityScoringRules,
   QualityTrend,
+  ReputationBreakdown,
+  ReputationEvaluationInput,
+  ValidationEntry,
+  ValidationReport,
+  ValidationResult,
 } from './qualityScorer.types';
 import { ResearchOutputSchema } from '../agents/research/research';
 import { CodingOutputSchema } from '../agents/coding/coding';
@@ -38,6 +44,29 @@ export const DEFAULT_WEIGHTS: Record<QualityDimension, number> = {
 };
 
 export const DEFAULT_REVIEW_THRESHOLD = 60;
+
+/**
+ * Load quality scorer configuration from process.env.
+ * Called lazily so config changes (env vars) take effect without redeploy.
+ * Falls back to defaults when env vars are not set.
+ */
+export function loadScorerConfig(): QualityScorerConfig {
+  const weightComp = Number(process.env.QUALITY_WEIGHT_COMPLETENESS ?? 0.4);
+  const weightRel = Number(process.env.QUALITY_WEIGHT_RELEVANCE ?? 0.3);
+  const weightFmt = Number(process.env.QUALITY_WEIGHT_FORMAT ?? 0.3);
+  const reviewThreshold = Number(process.env.QUALITY_REVIEW_THRESHOLD ?? 60);
+  const percentileEnabled = process.env.QUALITY_PERCENTILE_ENABLED === 'true';
+  const percentileMinSamples = Number(process.env.QUALITY_PERCENTILE_MIN_SAMPLES ?? 10);
+
+  return {
+    weightCompleteness: clamp(weightComp, 0, 1),
+    weightRelevance: clamp(weightRel, 0, 1),
+    weightFormat: clamp(weightFmt, 0, 1),
+    reviewThreshold: clamp(reviewThreshold, 0, 100),
+    percentileEnabled,
+    percentileMinSamples,
+  };
+}
 
 /** Small connector words excluded from prompt-token extraction. */
 const STOPWORDS = new Set([
@@ -235,28 +264,139 @@ export function computeTotalScore(
   return clamp(Math.round(total), 0, 100);
 }
 
+// ─── Percentile Normalization ────────────────────────────────────────────────
+
+/**
+ * Normalize a raw score to a percentile rank based on a historical distribution.
+ * The returned value (0–100) indicates what percentage of historical scores
+ * the raw score meets or exceeds.
+ *
+ * @param rawScore     The raw quality score (0–100).
+ * @param distribution Historical scores, sorted ascending.
+ * @returns Percentile rank, 0–100.
+ */
+export function percentileNormalize(rawScore: number, distribution: number[]): number {
+  if (distribution.length === 0) return rawScore;
+
+  const sorted = [...distribution].sort((a, b) => a - b);
+  let countBelow = 0;
+  for (const s of sorted) {
+    if (s < rawScore) countBelow += 1;
+    else break;
+  }
+  // Percentile = percentage of values less than the raw score.
+  const percentile = (countBelow / sorted.length) * 100;
+  return clamp(Math.round(percentile), 0, 100);
+}
+
+// ─── Validation Set ─────────────────────────────────────────────────────────
+
+/**
+ * Run a validation set through the scorer and produce a report.
+ * Each entry is scored against its agent type rules; the result records
+ * whether the score fell within the expected range.
+ *
+ * This makes scores re-derivable from documented inputs — every entry in
+ * the validation set is a documented input/output pair.
+ */
+export function runValidationSet(
+  scorer: QualityScorer,
+  entries: ValidationEntry[],
+): ValidationReport {
+  const results: ValidationResult[] = entries.map((entry) => {
+    const quality = scorer.scoreForAgentType(entry.output, entry.prompt, entry.agentType);
+    const actualScore = quality?.score ?? 0;
+    const actualNeedsReview = quality?.needsReview ?? true;
+
+    const [lo, hi] = entry.expectedScoreRange;
+    const passed = actualScore >= lo && actualScore <= hi && actualNeedsReview === entry.expectedNeedsReview;
+    const midpoint = (lo + hi) / 2;
+    const deviation = Math.abs(actualScore - midpoint);
+
+    return { entry, actualScore, actualNeedsReview, passed, deviation };
+  });
+
+  const passed = results.filter((r) => r.passed).length;
+  const averageDeviation = results.length > 0
+    ? round2(results.reduce((acc, r) => acc + r.deviation, 0) / results.length)
+    : 0;
+
+  return {
+    totalEntries: results.length,
+    passed,
+    failed: results.length - passed,
+    averageDeviation,
+    results,
+  };
+}
+
 // ─── Scorer ──────────────────────────────────────────────────────────────────
 
 export class QualityScorer {
   private readonly rulesByAgentType: Map<string, QualityScoringRules>;
+  private config: QualityScorerConfig;
+  /** Historical scores used for percentile normalization. */
+  private historicalScores: number[] = [];
 
-  /** @param rules Custom per-agent-type rules merged over the built-in defaults. */
-  constructor(rules: QualityScoringRules[] = []) {
+  /**
+   * @param rules  Custom per-agent-type rules merged over the built-in defaults.
+   * @param config Optional scorer configuration. When omitted, loaded from
+   *               process.env via `loadScorerConfig()`. Changing env vars and
+   *               recreating the scorer applies new weights without redeploy.
+   */
+  constructor(rules: QualityScoringRules[] = [], config?: QualityScorerConfig) {
     this.rulesByAgentType = new Map(rules.map((rule) => [rule.agentType, rule]));
+    this.config = config ?? loadScorerConfig();
+  }
+
+  /** Reload configuration from process.env. Call after env vars change. */
+  reloadConfig(): void {
+    this.config = loadScorerConfig();
+    log.info({ config: this.config }, 'quality scorer config reloaded');
+  }
+
+  /** Return the current configuration (read-only snapshot). */
+  getConfig(): Readonly<QualityScorerConfig> {
+    return this.config;
+  }
+
+  /**
+   * Load historical scores from the database for percentile normalization.
+   * Call this once at startup or periodically to keep the distribution fresh.
+   */
+  loadHistoricalScores(agentId?: string): void {
+    try {
+      const records = createTaskDb(getTaskDb()).listQualityScores(agentId);
+      this.historicalScores = records.map((r) => r.score);
+    } catch (err) {
+      log.warn({ err }, 'failed to load historical scores for percentile normalization');
+    }
+  }
+
+  /** Set historical scores directly (useful for testing). */
+  setHistoricalScores(scores: number[]): void {
+    this.historicalScores = [...scores];
   }
 
   /** Effective rules for an agent type (defaults merged with custom rules). */
   getRules(agentType: string): QualityScoringRules {
     const defaults = DEFAULT_QUALITY_RULES[agentType];
     const custom = this.rulesByAgentType.get(agentType);
+    const globalWeights: Partial<Record<QualityDimension, number>> = {
+      completeness: this.config.weightCompleteness,
+      relevance: this.config.weightRelevance,
+      format: this.config.weightFormat,
+    };
     return {
       // Sensible defaults for agent types without an explicit entry.
-      reviewThreshold: DEFAULT_REVIEW_THRESHOLD,
+      reviewThreshold: this.config.reviewThreshold,
       enabled: true,
       ...(defaults ?? {}),
       ...(custom ?? {}),
       // Always resolve to the queried type.
       agentType,
+      // Merge global config weights; per-type weights from rules take precedence.
+      weights: { ...globalWeights, ...(custom?.weights ?? defaults?.weights ?? {}) },
     };
   }
 
@@ -271,11 +411,20 @@ export class QualityScorer {
     const completeness = scoreCompleteness(output, rules);
     const relevance = scoreRelevance(output, prompt ?? '', rules);
     const format = scoreFormat(output, rules);
-    const total = computeTotalScore(
+    let total = computeTotalScore(
       { completeness: completeness.score, relevance: relevance.score, format: format.score },
       rules.weights,
     );
-    const reviewThreshold = rules.reviewThreshold ?? DEFAULT_REVIEW_THRESHOLD;
+
+    // Apply percentile normalization when enabled and enough data is available.
+    if (
+      this.config.percentileEnabled &&
+      this.historicalScores.length >= this.config.percentileMinSamples
+    ) {
+      total = percentileNormalize(total, this.historicalScores);
+    }
+
+    const reviewThreshold = rules.reviewThreshold ?? this.config.reviewThreshold;
 
     return {
       score: total,
@@ -300,6 +449,135 @@ export class QualityScorer {
 }
 
 // ─── Reputation feedback ─────────────────────────────────────────────────────
+
+// ─── Reputation feedback (Issue #497) ─────────────────────────────────────────
+
+export const MIN_REPUTATION = 0.0;
+export const MAX_REPUTATION = 5.0;
+export const DEFAULT_REPUTATION = 2.5;
+export const INACTIVITY_DECAY_RATE_PER_MONTH = 0.1;
+
+/**
+ * Compute reputation delta for an agent task outcome.
+ *
+ * Requirements:
+ *  - Task success increases reputation; failure decreases it.
+ *  - Output quality score contributes to reputation delta.
+ *  - Response latency gives slight positive bonus when fast (<1000ms).
+ *  - Higher bond-backed agents receive a bounded multiplier (1.0x - 1.5x).
+ *  - Clamped so reputation stays within 0.0 - 5.0.
+ */
+export function computeReputationDelta(input: ReputationEvaluationInput): number {
+  const { outcome, qualityScore = 75, latencyMs = 500, bondAmountXLM = 0, currentReputation = DEFAULT_REPUTATION } = input;
+
+  if (outcome === 'failure') {
+    // Failure decreases reputation
+    const penalty = -0.20;
+    const proposed = currentReputation + penalty;
+    const clamped = clamp(proposed, MIN_REPUTATION, MAX_REPUTATION);
+    return round2(clamped - currentReputation);
+  }
+
+  // 1. Output quality contribution: normalized 0.0 - 1.0
+  const normalizedQuality = clamp(qualityScore, 0, 100) / 100;
+  const baseSuccessDelta = 0.10 * normalizedQuality;
+
+  // 2. Response latency bonus (bounded: up to +0.03)
+  const latencyBonus = latencyMs < 1000 ? Math.max(0, (1000 - latencyMs) / 1000) * 0.03 : 0;
+
+  // 3. Staking/bond weight multiplier (bounded: 1.0 - 1.5x)
+  const bondWeightMultiplier = 1.0 + Math.min(0.5, Math.max(0, bondAmountXLM) / 1000);
+
+  const rawDelta = (baseSuccessDelta + latencyBonus) * bondWeightMultiplier;
+  const proposed = currentReputation + rawDelta;
+  const clamped = clamp(proposed, MIN_REPUTATION, MAX_REPUTATION);
+
+  return round2(clamped - currentReputation);
+}
+
+/**
+ * Inactive agents' reputation decays over time (0.1 / month of inactivity).
+ */
+export function applyInactivityDecay(
+  reputation: number,
+  lastActiveDate: string | Date | number,
+  now: string | Date | number = Date.now(),
+): { decayedReputation: number; decayApplied: number; monthsInactive: number } {
+  const lastActiveMs = typeof lastActiveDate === 'number'
+    ? lastActiveDate
+    : (lastActiveDate instanceof Date ? lastActiveDate.getTime() : new Date(lastActiveDate).getTime());
+  const nowMs = typeof now === 'number'
+    ? now
+    : (now instanceof Date ? now.getTime() : new Date(now).getTime());
+
+  if (Number.isNaN(lastActiveMs) || lastActiveMs >= nowMs) {
+    return { decayedReputation: clamp(reputation, MIN_REPUTATION, MAX_REPUTATION), decayApplied: 0, monthsInactive: 0 };
+  }
+
+  const msPerMonth = 30 * 24 * 60 * 60 * 1000;
+  const monthsInactive = (nowMs - lastActiveMs) / msPerMonth;
+  const decayApplied = round2(monthsInactive * INACTIVITY_DECAY_RATE_PER_MONTH);
+  const decayedReputation = clamp(round2(reputation - decayApplied), MIN_REPUTATION, MAX_REPUTATION);
+
+  return {
+    decayedReputation,
+    decayApplied,
+    monthsInactive: round2(monthsInactive),
+  };
+}
+
+/**
+ * Computes full reputation breakdown for an agent (success, quality, latency, bond).
+ */
+export function calculateReputationBreakdown(params: {
+  reputationScore: number;
+  tasksCompleted?: number;
+  tasksFailed?: number;
+  avgQualityScore?: number;
+  avgLatencyMs?: number;
+  bondAmountXLM?: number;
+  lastActiveAt?: string;
+  now?: string | Date | number;
+}): ReputationBreakdown {
+  const {
+    reputationScore,
+    tasksCompleted = 0,
+    tasksFailed = 0,
+    avgQualityScore = 80,
+    avgLatencyMs = 500,
+    bondAmountXLM = 0,
+    lastActiveAt,
+    now,
+  } = params;
+
+  const totalTasks = tasksCompleted + tasksFailed;
+  const taskSuccessScore = totalTasks > 0 ? round2((tasksCompleted / totalTasks) * 5.0) : 2.5;
+  const qualityScore = round2((clamp(avgQualityScore, 0, 100) / 100) * 5.0);
+  const latencyScore = round2(Math.max(0, Math.min(5.0, 5.0 - (avgLatencyMs / 1000))));
+  const bondWeightMultiplier = round2(1.0 + Math.min(0.5, Math.max(0, bondAmountXLM) / 1000));
+
+  let decayApplied = 0;
+  let overallScore = clamp(reputationScore, MIN_REPUTATION, MAX_REPUTATION);
+
+  if (lastActiveAt) {
+    const decayResult = applyInactivityDecay(overallScore, lastActiveAt, now);
+    decayApplied = decayResult.decayApplied;
+    overallScore = decayResult.decayedReputation;
+  }
+
+  return {
+    overallScore: round2(overallScore),
+    taskSuccessScore,
+    qualityScore,
+    latencyScore,
+    bondWeightMultiplier,
+    bondAmountXLM,
+    tasksCompleted,
+    tasksFailed,
+    lastDecayAt: lastActiveAt,
+    decayApplied,
+  };
+}
 
 /**
  * Map a normalized quality score (0–100) to a reputation delta.

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import styles from './DataTable.module.css';
 
@@ -27,11 +27,9 @@ export interface DataTableProps<T> {
   selectedRowKeys?: Array<string | number>;
   onRowSelect?: (row: T) => void;
   onRowClick?: (row: T) => void;
+  onSort?: (key: string, direction: SortDirection) => void;
   rowClassName?: (row: T) => string;
   getRowTestId?: (row: T) => string;
-  sortKey?: string | null;
-  sortDirection?: SortDirection;
-  onSort?: (key: string) => void;
 }
 
 function getCellValue<T>(row: T, key: string): string | number | boolean | null {
@@ -73,28 +71,21 @@ export function DataTable<T>({
   stickyHeader = true,
   virtualization = false,
   rowHeight = 48,
-  selectedRowKeys: selectedRowKeysProp = [],
+  selectedRowKeys = [],
   onRowSelect,
   onRowClick,
+  onSort,
   rowClassName,
   getRowTestId,
-  sortKey: externalSortKey,
-  sortDirection: externalSortDirection,
-  onSort: externalOnSort,
 }: DataTableProps<T>) {
-  const [internalSortKey, setInternalSortKey] = useState<string | null>(null);
-  const [internalSortDirection, setInternalSortDirection] = useState<SortDirection>('asc');
-  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>(selectedRowKeysProp);
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [scrollTop, setScrollTop] = useState(0);
+  const [activeRowIndex, setActiveRowIndex] = useState(0);
 
-  const sortKey = externalSortKey !== undefined ? externalSortKey : internalSortKey;
-  const sortDirection = externalSortDirection !== undefined ? externalSortDirection : internalSortDirection;
-
-  const sortedRows = useMemo(() => {
-    if (externalOnSort) return rows;
-    return sortRows(rows, sortKey, sortDirection);
-  }, [rows, sortKey, sortDirection, externalOnSort]);
+  const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDirection), [rows, sortKey, sortDirection]);
 
   const itemCount = sortedRows.length;
   const overscan = 6;
@@ -104,16 +95,17 @@ export function DataTable<T>({
     : itemCount;
   const visibleRows = virtualization ? sortedRows.slice(startIndex, endIndex) : sortedRows;
 
+  useEffect(() => {
+    setActiveRowIndex((current) => Math.min(current, Math.max(visibleRows.length - 1, 0)));
+    rowRefs.current = rowRefs.current.slice(0, visibleRows.length);
+  }, [visibleRows.length]);
+
   const handleSelect = (_key: string | number, row: T) => {
     if (onRowSelect) onRowSelect(row);
   };
 
   const handleSort = (column: DataTableColumn<T>) => {
     if (!column.sortable) return;
-    if (externalOnSort) {
-      externalOnSort(column.key);
-      return;
-    }
     const nextKey = column.key;
     let nextDirection: SortDirection = 'asc';
 
@@ -121,8 +113,47 @@ export function DataTable<T>({
       nextDirection = sortDirection === 'asc' ? 'desc' : 'asc';
     }
 
-    setInternalSortKey(nextKey);
-    setInternalSortDirection(nextDirection);
+    setSortKey(nextKey);
+    setSortDirection(nextDirection);
+    if (onSort) {
+      onSort(nextKey, nextDirection);
+    }
+  };
+
+  const focusRow = (index: number) => {
+    const nextIndex = Math.min(Math.max(index, 0), visibleRows.length - 1);
+    setActiveRowIndex(nextIndex);
+    rowRefs.current[nextIndex]?.focus();
+  };
+
+  const handleRowKeyDown = (event: React.KeyboardEvent<HTMLTableRowElement>, index: number, row: T) => {
+    if (event.target !== event.currentTarget) return;
+
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        focusRow(index + 1);
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        focusRow(index - 1);
+        break;
+      case 'Home':
+        event.preventDefault();
+        focusRow(0);
+        break;
+      case 'End':
+        event.preventDefault();
+        focusRow(visibleRows.length - 1);
+        break;
+      case 'Enter':
+      case ' ':
+        if (onRowClick) {
+          event.preventDefault();
+          onRowClick(row);
+        }
+        break;
+    }
   };
 
   if (rows.length === 0) {
@@ -169,7 +200,7 @@ export function DataTable<T>({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.map((row) => {
+            {visibleRows.map((row, rowIndex) => {
               const rowKey = getRowKey(row);
               const isSelected = selectedRowKeys.includes(rowKey);
               const classes = [styles.row, rowClassName ? rowClassName(row) : ''];
@@ -178,18 +209,21 @@ export function DataTable<T>({
               return (
                 <tr
                   key={rowKey}
-                  data-testid={getRowTestId ? getRowTestId(row) : undefined}
+                  ref={(element) => { rowRefs.current[rowIndex] = element; }}
+                  data-testid={getRowTestId ? getRowTestId(row) : `agent-row-${String(rowKey)}`}
                   className={classes.join(' ')}
                   onClick={() => onRowClick?.(row)}
-                  tabIndex={onRowClick ? 0 : undefined}
-                  role={onRowClick ? 'button' : undefined}
+                  onFocus={() => setActiveRowIndex(rowIndex)}
+                  onKeyDown={(event) => handleRowKeyDown(event, rowIndex, row)}
+                  tabIndex={rowIndex === activeRowIndex ? 0 : -1}
+                  aria-selected={onRowSelect ? isSelected : undefined}
                 >
                   {onRowSelect && (
                     <td className={styles.selectionCell}>
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => handleSelect(rowKey, row)}
+                        onChange={() => handleSelect(row)}
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Select row ${String(rowKey)}`}
                       />

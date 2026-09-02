@@ -1,0 +1,30 @@
+[package]
+name = "oracle-manager"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Enable cross-contract test helpers that register the real PriceOracle in tests.
+testutils = ["price-oracle/testutils", "soroban-sdk/testutils"]
+
+[dependencies]
+soroban-sdk = { version = "=22.0.11" }
+
+[dev-dependencies]
+soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+# Pull in the oracle so we can register it in testutils-gated tests.
+price-oracle = { path = "../price_oracle", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true

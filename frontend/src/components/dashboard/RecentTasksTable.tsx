@@ -9,6 +9,9 @@ import type { TaskResponse } from '../../types/api';
 import { formatDateTime } from '../../utils/format';
 import { DataTable, type DataTableColumn } from '../common/DataTable';
 
+import { Layers, Plus } from 'lucide-react';
+import { EmptyState } from '../common/EmptyState';
+
 interface Props {
   walletAddress: string;
   loading: boolean;
@@ -36,7 +39,8 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
         // i18n.t (not the captured t) so the toast always uses the current
         // language without putting t in the deps, which would refetch on every
         // language change.
-        showToast(i18n.t('dashboard.recentTasks.fetchError'), 'error');
+        const fallback = i18n.t('dashboard.recentTasks.fetchError');
+        showToast(e instanceof Error ? e.message : fallback, 'error');
         setTasks([]);
       }
     };
@@ -58,8 +62,22 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
     );
   }
 
+  const renderEmptyState = () => (
+    <EmptyState
+      icon={<Layers size={28} />}
+      title={t('dashboard.recentTasks.empty')}
+      description="Submit a new multi-agent task to begin orchestration on the AI Network."
+      primaryAction={{
+        label: t('landing.hero.startTask', { defaultValue: 'Create New Task' }),
+        to: '/tasks/new',
+        icon: <Plus size={16} />,
+      }}
+      variant="compact"
+    />
+  );
+
   if (tasks.length === 0) {
-    return <div className={styles.empty}>{t('dashboard.recentTasks.empty')}</div>;
+    return renderEmptyState();
   }
 
   const columns: DataTableColumn<TaskResponse>[] = [
@@ -77,7 +95,7 @@ export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) =>
       maxHeight={420}
       stickyHeader
       rowClassName={() => styles.row}
-      emptyState={<div className={styles.empty}>{t('dashboard.recentTasks.empty')}</div>}
+      emptyState={renderEmptyState()}
     />
   );
 };

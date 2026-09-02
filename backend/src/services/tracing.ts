@@ -25,6 +25,9 @@ export class TracingService {
   /** Secondary index: spanId → span object (same reference as in `traces`). */
   private readonly spanIndex = new Map<string, TraceSpan>();
 
+  /** Tertiary index: requestId → correlationId for admin lookup by requestId. */
+  private readonly requestIndex = new Map<string, string>();
+
   /**
    * Start a new span and associate it with `correlationId`.
    *
@@ -56,6 +59,12 @@ export class TracingService {
 
     // Index by spanId for O(1) endSpan lookups.
     this.spanIndex.set(span.spanId, span);
+
+    // Index requestId → correlationId when present, so admins can query
+    // traces by requestId.
+    if (metadata?.requestId && typeof metadata.requestId === 'string') {
+      this.requestIndex.set(metadata.requestId, correlationId);
+    }
 
     return span;
   }
@@ -133,9 +142,20 @@ export class TracingService {
     if (spans) {
       for (const span of spans) {
         this.spanIndex.delete(span.spanId);
+        if (span.metadata?.requestId && typeof span.metadata.requestId === 'string') {
+          this.requestIndex.delete(span.metadata.requestId);
+        }
       }
       this.traces.delete(correlationId);
     }
+  }
+
+  /**
+   * Resolve a requestId to its correlationId (trace ID).
+   * Returns undefined when no span with that requestId has been recorded.
+   */
+  resolveRequestId(requestId: string): string | undefined {
+    return this.requestIndex.get(requestId);
   }
 
   /** Total number of active trace buckets (useful for monitoring). */

@@ -3,7 +3,7 @@ import { createLogger } from "../../utils/logger";
 import { AppError } from "../../errors";
 
 const log = createLogger();
-
+const isProduction = process.env.NODE_ENV === "production";
 const isDevelopment = process.env.NODE_ENV === "development";
 
 /**
@@ -24,32 +24,83 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
-  // Resolve the correlationId from the error (preferred) or from the request.
-  const correlationId: string =
+  const isDevelopment = getConfig().NODE_ENV === "development";
+  const traceId: string =
     err instanceof AppError
       ? err.correlationId
-      : (res.locals.correlationId as string | undefined) ??
-        (res.locals.requestId as string | undefined) ??
+      : (res.locals.traceId as string | undefined) ??
+        (res.locals.correlationId as string | undefined) ??
         "unknown";
+  const requestId = (res.locals.requestId as string | undefined) ?? "unknown";
+  const log = createLogger({
+    ...(res.locals.logContext as Record<string, unknown> | undefined),
+    requestId,
+    traceId,
+    route: req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path,
+  });
+  const statusCode =
+    err instanceof AppError
+      ? err.statusCode
+      : (err as any)?.statusCode ?? (err as any)?.status ?? 500;
+  const errorCode =
+    err instanceof AppError
+      ? err.code
+      : isDevelopment
+        ? (err as any)?.code ?? "INTERNAL_SERVER_ERROR"
+        : "INTERNAL_SERVER_ERROR";
 
   if (err instanceof AppError) {
-    // ── Structured AppError ──────────────────────────────────────────────────
-    log.error(
-      {
-        err,
+    if (!err.isOperational) {
+      log.error(
+        {
+          err,
+          error: err.message,
+          code: err.code,
+          statusCode: err.statusCode,
+          stack: err.stack,
+          method: req.method,
+          path: req.path,
+          requestId: res.locals.requestId,
+          correlationId,
+        },
+        "non-operational error",
+      );
+    } else {
+      log.warn(
+        {
+          err,
+          error: err.message,
+          code: err.code,
+          statusCode: err.statusCode,
+          method: req.method,
+          path: req.path,
+          requestId: res.locals.requestId,
+          correlationId,
+        },
+        "operational error",
+      );
+    }
+
+    const body: {
+      error: {
+        code: string;
+        message: string;
+        details?: unknown;
+        correlationId: string;
+      };
+    } = {
+      error: {
         code: err.code,
-        statusCode: err.statusCode,
+        message: err.message,
         correlationId,
-        requestId: res.locals.requestId,
-        path: req.path,
-        method: req.method,
       },
-      `AppError: ${err.code}`,
-    );
+    };
 
-    const serialized = err.serialize(isDevelopment);
+    if (err.details !== undefined) {
+      body.error.details = err.details;
+    }
 
-    res.status(err.statusCode).json({ error: serialized });
+    res.status(err.statusCode).json(body);
     return;
   }
 
@@ -57,30 +108,31 @@ export function errorHandler(
   // Always log the full stack so it can be investigated.
   log.error(
     {
+      event: "http.error",
       err,
-      correlationId,
-      requestId: res.locals.requestId,
+      code: errorCode,
+      statusCode,
+      traceId,
+      requestId,
       path: req.path,
       method: req.method,
+      payload: req.body,
       stack: err instanceof Error ? err.stack : undefined,
     },
     "unhandled error",
   );
 
-  const statusCode =
-    (err as any)?.statusCode ?? (err as any)?.status ?? 500;
-
   const response: Record<string, unknown> = {
     error: {
-      code:
-        isDevelopment
-          ? (err as any)?.code ?? "INTERNAL_SERVER_ERROR"
-          : "INTERNAL_SERVER_ERROR",
-      message: isDevelopment
-        ? (err instanceof Error ? err.message : "An unexpected error occurred")
-        : "An unexpected error occurred. Please try again later.",
+      message: isProduction
+        ? "Internal server error"
+        : err instanceof Error
+          ? err.message || "Internal server error"
+          : "An unexpected error occurred",
+      code: "INTERNAL_ERROR",
       correlationId,
       timestamp: new Date().toISOString(),
+      path: req.path,
       ...(isDevelopment && err instanceof Error
         ? { stack: err.stack }
         : {}),
@@ -88,7 +140,7 @@ export function errorHandler(
     // Legacy fields kept for backward-compatibility with existing tests
     statusCode,
     path: req.path,
-    requestId: res.locals.requestId,
+    requestId,
   };
 
   res.status(statusCode).json(response);
