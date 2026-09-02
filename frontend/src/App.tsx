@@ -1,13 +1,11 @@
-import React from 'react'
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import React, { Suspense, lazy } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
 import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
-import { RouteProgressProvider } from './context/RouteProgressContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
 import LandingPage from './pages/LandingPage'
@@ -15,6 +13,7 @@ import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
+import { SkeletonCard } from './components/common/Skeleton'
 import './components/common/Toast.css'
 
 // Lazy-loaded pages
@@ -47,7 +46,7 @@ const RouteLoadingFallback: React.FC = () => (
  * `<Router>` rather than beside it.
  */
 const AppContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches } = useCommandPalette()
+  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
 
   return (
     <>
@@ -57,60 +56,62 @@ const AppContent: React.FC = () => {
           path="/*"
           element={
             <AppShell>
-              <Routes>
-                <Route
-                  path="/dashboard"
-                  element={
-                    <ProtectedRoute>
-                      <DashboardPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/wallet"
-                  element={
-                    <ProtectedRoute>
-                      <WalletPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/agents"
-                  element={
-                    <ProtectedRoute>
-                      <AgentsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/tasks/new"
-                  element={
-                    <ProtectedRoute>
-                      <NewTaskPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/tasks/history"
-                  element={
-                    <ProtectedRoute>
-                      <TaskHistoryPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/tasks/:id"
-                  element={
-                    <ProtectedRoute>
-                      <TaskDetailPage />
-                    </ProtectedRoute>
-                  }
-                />
-                {import.meta.env.DEV && (
-                  <Route path="/renderer-demo" element={<RendererDemoPage />} />
-                )}
-                <Route path="*" element={<NotFoundPage />} />
-              </Routes>
+              <Suspense fallback={<RouteLoadingFallback />}>
+                <Routes>
+                  <Route
+                    path="/dashboard"
+                    element={
+                      <ProtectedRoute>
+                        <DashboardPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/wallet"
+                    element={
+                      <ProtectedRoute>
+                        <WalletPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/agents"
+                    element={
+                      <ProtectedRoute>
+                        <AgentsPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/tasks/new"
+                    element={
+                      <ProtectedRoute>
+                        <NewTaskPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/tasks/history"
+                    element={
+                      <ProtectedRoute>
+                        <TaskHistoryPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/tasks/:id"
+                    element={
+                      <ProtectedRoute>
+                        <TaskDetailPage />
+                      </ProtectedRoute>
+                    }
+                  />
+                  {import.meta.env.DEV && (
+                    <Route path="/renderer-demo" element={<RendererDemoPage />} />
+                  )}
+                  <Route path="*" element={<NotFoundPage />} />
+                </Routes>
+              </Suspense>
             </AppShell>
           }
         />

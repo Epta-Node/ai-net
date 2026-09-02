@@ -1,7 +1,7 @@
 import { useContext } from 'react';
-import { ToastContext } from '../context/ToastContext';
+import { ToastContext, type ToastContextValue } from '../context/ToastContext';
 
-export function useToast() {
+export function useToast(): ToastContextValue {
   const context = useContext(ToastContext);
 
   if (!context) {
@@ -11,7 +11,7 @@ export function useToast() {
       toasts: [],
       showToast: () => '',
       dismissToast: () => {},
-    } as unknown as ReturnType<typeof useContext<typeof ToastContext>> extends infer T ? T : never
+    };
   }
 
   return context;

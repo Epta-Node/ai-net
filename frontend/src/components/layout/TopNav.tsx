@@ -1,10 +1,8 @@
-import React, { useState, useRef } from 'react'
+import React from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
-import { useNotifications } from '../../hooks/useNotifications'
-import { NotificationCenter } from '../notifications/NotificationCenter'
+import { NotificationBell } from '../notifications/NotificationBell'
 import { SUPPORTED_LANGUAGES } from '../../i18n/options'
 import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
@@ -43,9 +41,6 @@ const TopNav: React.FC<TopNavProps> = ({
   isDrawerOpen = false,
 }) => {
   const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
-  const { unreadCount } = useNotifications()
-  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
-  const bellButtonRef = useRef<HTMLButtonElement>(null)
   const { t, i18n } = useTranslation()
   const location = useLocation()
   const { mode, setMode } = useTheme()
@@ -108,31 +103,7 @@ const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       <div className="nav-right">
-        <div className="notification-wrapper">
-          <button
-            ref={bellButtonRef}
-            type="button"
-            className={`notification-bell-btn ${isNotificationOpen ? 'active' : ''}`}
-            onClick={() => setIsNotificationOpen(prev => !prev)}
-            aria-label="Notifications"
-            aria-expanded={isNotificationOpen}
-            id="btn-notifications"
-            data-testid="notification-bell-btn"
-          >
-            <Bell size={20} />
-            {unreadCount > 0 && (
-              <span className="notification-badge" data-testid="notification-badge">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </button>
-
-          <NotificationCenter
-            isOpen={isNotificationOpen}
-            onClose={() => setIsNotificationOpen(false)}
-            anchorRef={bellButtonRef}
-          />
-        </div>
+        <NotificationBell />
 
         {/* Theme toggle: cycles light -> dark -> system */}
         <button

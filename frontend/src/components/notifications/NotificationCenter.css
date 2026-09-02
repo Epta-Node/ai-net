@@ -53,6 +53,12 @@
   letter-spacing: 0.04em;
 }
 
+.notification-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .mark-all-read-btn {
   display: inline-flex;
   align-items: center;
@@ -82,6 +88,24 @@
 .mark-all-read-btn:focus-visible {
   outline: 2px solid var(--accent, #38bdf8);
   outline-offset: 2px;
+}
+
+.clear-all-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #8a93a3);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+}
+
+.clear-all-btn:hover {
+  color: var(--error-red, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 /* Body / List */
@@ -181,28 +205,57 @@
   transition: all 0.2s ease;
 }
 
-.notification-icon-wrapper.task {
-  background: var(--status-success-surface-muted);
-  border-color: var(--status-success-border);
-  color: var(--status-success);
+.notification-icon-wrapper.task,
+.notification-icon-wrapper.task_completed {
+  background: var(--status-success-surface-muted, rgba(52, 211, 153, 0.12));
+  border-color: var(--status-success-border, rgba(52, 211, 153, 0.3));
+  color: var(--status-success, #34d399);
 }
 
-.notification-icon-wrapper.payment {
+.notification-icon-wrapper.task_failed {
+  background: var(--status-error-surface-muted, rgba(239, 68, 68, 0.12));
+  border-color: var(--status-error-border, rgba(239, 68, 68, 0.3));
+  color: var(--status-error, #ef4444);
+}
+
+.notification-icon-wrapper.payment,
+.notification-icon-wrapper.payment_received {
   background: rgba(251, 191, 36, 0.12);
   border-color: rgba(251, 191, 36, 0.3);
   color: #fcd34d;
 }
 
-.notification-icon-wrapper.agent {
-  background: var(--accent-surface-muted);
-  border-color: var(--accent-border);
-  color: var(--accent-text-strong);
+.notification-icon-wrapper.agent,
+.notification-icon-wrapper.agent_registered {
+  background: var(--accent-surface-muted, rgba(139, 92, 246, 0.12));
+  border-color: var(--accent-border, rgba(139, 92, 246, 0.3));
+  color: var(--accent-text-strong, #a78bfa);
 }
 
 .notification-icon-wrapper.system {
   background: var(--info-surface);
   border-color: var(--info-border);
   color: var(--accent-info);
+}
+
+.notification-icon-task {
+  color: #34d399;
+}
+
+.notification-icon-error {
+  color: #ef4444;
+}
+
+.notification-icon-payment {
+  color: #fbbf24;
+}
+
+.notification-icon-agent {
+  color: #a78bfa;
+}
+
+.notification-icon-system {
+  color: #38bdf8;
 }
 
 .notification-content {

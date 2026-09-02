@@ -24,8 +24,11 @@ const Hero: React.FC = () => {
   const { canvasRef, prefersReducedMotion } = useParticles()
 
   return (
-    <section
+    <motion.section
       className={`flex flex-col items-center text-center pt-24 pb-20 px-4 max-w-4xl mx-auto ${styles.heroContainer}`}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
     >
       {!prefersReducedMotion ? (
         <canvas ref={canvasRef} className={styles.particleCanvas} />
@@ -56,7 +59,7 @@ const Hero: React.FC = () => {
       >
         <div className="w-1.5 h-1.5 rounded-full bg-accent-green shadow-success-glow animate-pulse" />
         <span className="text-xs font-semibold text-accent-green tracking-wide">{t('landing.hero.badge')}</span>
-      </div>
+      </motion.div>
 
       {/* Headline */}
       <motion.h1
@@ -72,7 +75,7 @@ const Hero: React.FC = () => {
             </span>,
           ]}
         />
-      </h1>
+      </motion.h1>
 
       {/* Subtext */}
       <motion.p
@@ -80,7 +83,7 @@ const Hero: React.FC = () => {
         className="text-base sm:text-lg text-text-secondary max-w-[540px] mx-auto mb-10 leading-[1.6]"
       >
         {t('landing.hero.subtitle')}
-      </p>
+      </motion.p>
 
       {/* CTAs */}
       <motion.div
