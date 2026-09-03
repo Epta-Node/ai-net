@@ -1,294 +1,263 @@
-﻿import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import React from 'react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { CommandPalette } from './CommandPalette';
-
-vi.mock('framer-motion', async () => {
-  const actual = await vi.importActual<typeof import('framer-motion')>('framer-motion');
-  return {
-    ...actual,
-    AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    motion: {
-      div: React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-        ({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>
-      ),
-      button: React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement>>(
-        ({ children, ...props }, ref) => <button ref={ref} {...props}>{children}</button>
-      ),
-    },
-  };
-});
+import { CommandPalette, type Command } from './CommandPalette';
 
 describe('CommandPalette', () => {
-  const mockResults = [
+  const makeCommands = (): Command[] => [
     {
-      id: 'page-1',
-      title: 'Dashboard',
-      subtitle: 'Overview',
-      category: 'page' as const,
+      id: 'dashboard',
+      label: 'Go to Dashboard',
+      category: 'navigation',
       action: vi.fn(),
     },
     {
-      id: 'agent-1',
-      title: 'Research Agent',
-      subtitle: 'research, data',
-      category: 'agent' as const,
-      metadata: '0.5 XLM',
+      id: 'new-task',
+      label: 'New Task',
+      category: 'navigation',
+      action: vi.fn(),
+    },
+    {
+      id: 'agents',
+      label: 'Browse Agents',
+      category: 'navigation',
+      action: vi.fn(),
+    },
+    {
+      id: 'wallet',
+      label: 'Open Wallet',
+      category: 'navigation',
+      action: vi.fn(),
+    },
+    {
+      id: 'toggle-theme',
+      label: 'Toggle Theme',
+      category: 'settings',
+      action: vi.fn(),
+    },
+    {
+      id: 'disconnect-wallet',
+      label: 'Disconnect Wallet',
+      category: 'settings',
       action: vi.fn(),
     },
   ];
 
-  const mockOnSearch = vi.fn().mockResolvedValue(mockResults);
+  let commands: Command[];
   const mockOnClose = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    commands = makeCommands();
   });
 
   test('renders nothing when isOpen is false', () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={false}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
-
+    render(<CommandPalette isOpen={false} onClose={mockOnClose} commands={commands} />);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  test('renders when isOpen is true', () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
-
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Search agents, tasks, or pages...')).toBeInTheDocument();
-  });
-
-  test('has correct accessibility attributes', () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
+  test('renders a dialog with correct accessibility attributes when open', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
 
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(dialog).toHaveAttribute('aria-label', 'Command palette');
+
+    const input = screen.getByRole('combobox');
+    expect(input).toHaveAttribute('role', 'combobox');
+    expect(input).toHaveAttribute('aria-controls', 'command-palette-listbox');
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-0');
   });
 
-  test('focuses input when opened', async () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
-
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
+  test('focuses the search input when opened', async () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
     await waitFor(() => {
       expect(document.activeElement).toBe(input);
     });
   });
 
-  test('displays recent searches when no query', () => {
-    const recentSearches = ['agent', 'task', 'dashboard'];
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-          recentSearches={recentSearches}
-          onRecentSearchClick={vi.fn()}
-        />
-      </MemoryRouter>
-    );
+  test('shows all commands grouped by category when there is no query', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
 
-    expect(screen.getByText('Recent Searches')).toBeInTheDocument();
-    expect(screen.getByText('agent')).toBeInTheDocument();
-    expect(screen.getByText('task')).toBeInTheDocument();
-    expect(screen.getByText('dashboard')).toBeInTheDocument();
+    expect(screen.getByText('Navigate')).toBeInTheDocument();
+    expect(screen.getByText('Settings')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Go to Dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'New Task' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Toggle Theme' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Disconnect Wallet' })).toBeInTheDocument();
   });
 
-  test('debounces search (300ms)', async () => {
-    vi.useFakeTimers();
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
+  test('filters commands by fuzzy match on label', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
-    fireEvent.change(input, { target: { value: 'test' } });
+    fireEvent.change(input, { target: { value: 'dsh' } });
 
-    expect(mockOnSearch).not.toHaveBeenCalled();
-
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-
-    expect(mockOnSearch).toHaveBeenCalledWith('test');
-    vi.useRealTimers();
+    expect(screen.getByRole('option', { name: 'Go to Dashboard' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'New Task' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Disconnect Wallet' })).not.toBeInTheDocument();
   });
 
-  test('displays search results grouped by category', async () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
+  test('filters commands by fuzzy match on category', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
-    fireEvent.change(input, { target: { value: 'test' } });
+    fireEvent.change(input, { target: { value: 'setting' } });
 
-    await waitFor(() => {
-      expect(screen.getByText('Pages')).toBeInTheDocument();
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
-      expect(screen.getByText('Agents')).toBeInTheDocument();
-      expect(screen.getByText('Research Agent')).toBeInTheDocument();
-    });
+    expect(screen.getByRole('option', { name: 'Toggle Theme' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Disconnect Wallet' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Go to Dashboard' })).not.toBeInTheDocument();
   });
 
-  test('closes on Escape key', () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
+  test('arrow keys move the highlighted selection', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(mockOnClose).toHaveBeenCalled();
-  });
-
-  test('closes when clicking overlay', () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
-
-    const overlay = document.querySelector('.overlay');
-    if (overlay) {
-      fireEvent.click(overlay);
-      expect(mockOnClose).toHaveBeenCalled();
-    }
-  });
-
-  test('arrow key navigation works', async () => {
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={mockOnSearch}
-        />
-      </MemoryRouter>
-    );
-
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
-    fireEvent.change(input, { target: { value: 'test' } });
-
-    await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    });
-
-    const items = screen.getAllByRole('button');
-    expect(items.length).toBeGreaterThan(0);
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-0');
 
     fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-1');
+
     fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-2');
+
     fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-1');
   });
 
-  test('Enter selects highlighted result', async () => {
-    const mockAction = vi.fn();
-    const resultsWithAction = [
-      {
-        id: 'page-1',
-        title: 'Dashboard',
-        subtitle: 'Overview',
-        category: 'page' as const,
-        action: mockAction,
-      },
-    ];
+  test('arrow keys wrap around the result list', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
-    const onSearch = vi.fn().mockResolvedValue(resultsWithAction);
+    // Jump to the end, then wrap to the first.
+    for (let i = 0; i < commands.length; i++) {
+      fireEvent.keyDown(input, { key: 'ArrowDown' });
+    }
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-0');
 
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={onSearch}
-        />
-      </MemoryRouter>
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input).toHaveAttribute(
+      'aria-activedescendant',
+      `command-palette-option-${commands.length - 1}`
     );
+  });
 
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
-    fireEvent.change(input, { target: { value: 'test' } });
-
-    await waitFor(() => {
-      expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    });
+  test('Enter executes the selected command and closes the palette', () => {
+    const dashboardAction = commands[0].action;
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(mockAction).toHaveBeenCalled();
-    expect(mockOnClose).toHaveBeenCalled();
+
+    expect(dashboardAction).toHaveBeenCalledTimes(1);
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 
-  test('shows empty state when no results found', async () => {
-    const onSearch = vi.fn().mockResolvedValue([]);
+  test('Enter executes the command highlighted after arrow navigation', () => {
+    const themeAction = commands[4].action;
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
 
-    render(
-      <MemoryRouter>
-        <CommandPalette
-          isOpen={true}
-          onClose={mockOnClose}
-          onSearch={onSearch}
-        />
-      </MemoryRouter>
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(themeAction).toHaveBeenCalledTimes(1);
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('Escape closes the palette without executing', () => {
+    const dashboardAction = commands[0].action;
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+    expect(dashboardAction).not.toHaveBeenCalled();
+  });
+
+  test('closes when clicking the overlay backdrop', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+
+    // The dialog element is the overlay backdrop itself.
+    fireEvent.click(screen.getByRole('dialog'));
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('clicking a result executes it and closes the palette', () => {
+    const walletAction = commands[3].action;
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+
+    fireEvent.click(screen.getByRole('option', { name: 'Open Wallet' }));
+
+    expect(walletAction).toHaveBeenCalledTimes(1);
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows an empty state when no command matches', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.change(input, { target: { value: 'zzz-no-match' } });
+
+    expect(screen.getByText('No commands found')).toBeInTheDocument();
+    expect(screen.queryByRole('option')).not.toBeInTheDocument();
+  });
+
+  test('Escape closes from the search input when no commands match', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.change(input, { target: { value: 'zzz-no-match' } });
+    fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(mockOnClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('shows keyboard shortcut hints', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+
+    expect(screen.getByText('navigate')).toBeInTheDocument();
+    expect(screen.getByText('select')).toBeInTheDocument();
+    expect(screen.getByText('close')).toBeInTheDocument();
+  });
+
+  test('returns focus to the previously focused element after closing', async () => {
+    const { rerender } = render(
+      <div>
+        <button>Trigger</button>
+        <CommandPalette isOpen={false} onClose={mockOnClose} commands={commands} />
+      </div>
     );
 
-    const input = screen.getByPlaceholderText('Search agents, tasks, or pages...');
-    fireEvent.change(input, { target: { value: 'nonexistent' } });
+    const trigger = screen.getByText('Trigger');
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    rerender(
+      <div>
+        <button>Trigger</button>
+        <CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />
+      </div>
+    );
+
+    const input = screen.getByRole('combobox');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
+    });
+
+    rerender(
+      <div>
+        <button>Trigger</button>
+        <CommandPalette isOpen={false} onClose={mockOnClose} commands={commands} />
+      </div>
+    );
 
     await waitFor(() => {
-      expect(screen.getByText('No results found')).toBeInTheDocument();
-      expect(screen.getByText('Try adjusting your search')).toBeInTheDocument();
+      expect(document.activeElement).toBe(trigger);
     });
   });
 });

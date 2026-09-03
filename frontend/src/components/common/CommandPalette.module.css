@@ -320,6 +320,20 @@
   text-align: center;
 }
 
+.resultItem:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.6);
+  outline-offset: -2px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(15, 23, 42, 0.4);
+}
+
 @media (max-width: 640px) {
   .overlay {
     padding-top: 4vh;

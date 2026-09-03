@@ -4,7 +4,6 @@ import { I18nextProvider } from 'react-i18next'
 import i18n from './i18n'
 import { WalletProvider } from './context/WalletContext'
 import { ToastProvider } from './context/ToastContext'
-import { NotificationProvider } from './context/NotificationContext'
 import { ThemeProvider } from './context/ThemeContext'
 import { NotFoundPage } from './pages/NotFoundPage'
 import AppShell from './components/layout/AppShell'
@@ -13,40 +12,13 @@ import ErrorBoundary from './components/common/ErrorBoundary'
 import { ProtectedRoute } from './components/auth/ProtectedRoute'
 import { CommandPalette } from './components/common/CommandPalette'
 import { useCommandPalette } from './hooks/useCommandPalette'
-import { SkeletonCard } from './components/common/Skeleton'
 import './components/common/Toast.css'
 
-// Lazy-loaded pages
-const DashboardPage = lazy(() => import('./pages/dashboard'))
-const AgentsPage = lazy(() => import('./pages/AgentsPage'))
-const WalletPage = lazy(() => import('./pages/WalletPage'))
-const TaskDetailPage = lazy(() => import('./pages/TaskDetailPage'))
-const NewTaskPage = lazy(() => import('./pages/tasks/NewTaskPage'))
-const TaskHistoryPage = lazy(() => import('./pages/tasks/TaskHistoryPage'))
-const RendererDemoPage = lazy(() => import('./pages/RendererDemoPage'))
-
-const RouteLoadingFallback: React.FC = () => (
-  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-    {Array.from({ length: 3 }).map((_, i) => (
-      <SkeletonCard key={i} style={{ height: '100px' }} />
-    ))}
-  </div>
-)
-
-/**
- * Everything below the router.
- *
- * `/` is the public landing page and renders bare. **Every other route** —
- * including 404 — renders inside a single `<AppShell>`, so the top nav,
- * sidebar, drawer, and breadcrumb are assembled once rather than per route.
- *
- * The command palette is mounted here, once, outside the route tree: it is
- * reachable with Ctrl/Cmd+K from any page and must not remount on navigation.
- * `useCommandPalette` calls `useNavigate`, so this component has to sit inside
- * `<Router>` rather than beside it.
- */
-const AppContent: React.FC = () => {
-  const { isOpen, closePalette, search, recentSearches, runRecentSearch } = useCommandPalette()
+// Lives INSIDE <Router> and the theme/wallet providers: useCommandPalette()
+// calls useNavigate(), useTheme() and useWallet(), which all require their
+// context providers to be mounted above this component.
+const RoutedContent: React.FC = () => {
+  const { isOpen, closePalette, commands } = useCommandPalette()
 
   return (
     <>
@@ -120,9 +92,7 @@ const AppContent: React.FC = () => {
       <CommandPalette
         isOpen={isOpen}
         onClose={closePalette}
-        onSearch={search}
-        recentSearches={recentSearches}
-        onRecentSearchClick={runRecentSearch}
+        commands={commands}
       />
     </>
   )
@@ -135,11 +105,9 @@ const App: React.FC = () => {
         <ThemeProvider>
           <WalletProvider>
             <ToastProvider>
-              <NotificationProvider>
-                <Router>
-                  <AppContent />
-                </Router>
-              </NotificationProvider>
+              <Router>
+                <RoutedContent />
+              </Router>
             </ToastProvider>
           </WalletProvider>
         </ThemeProvider>
