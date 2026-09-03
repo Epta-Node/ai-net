@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
-import { CircuitBreaker } from '../../venice/circuitBreaker.js';
-import { CircuitOpenError, TokenBudgetExceededError } from '../../venice/errors.js';
+import { CircuitBreaker } from './circuitBreaker.js';
+import { CircuitOpenError, TokenBudgetExceededError } from './errors.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
 import { getConfig } from '../../config/index.js';

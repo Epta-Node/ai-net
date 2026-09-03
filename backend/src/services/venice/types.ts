@@ -1,4 +1,4 @@
-import type { CircuitBreaker } from '../../venice/circuitBreaker.js';
+import type { CircuitBreaker } from './circuitBreaker.js';
 import type { VeniceResponseCache } from './cache.js';
 import type { RequestDeduplicator } from './dedup.js';
 
