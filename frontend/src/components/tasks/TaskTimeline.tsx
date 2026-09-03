@@ -21,6 +21,7 @@ import {
   formatDuration,
 } from '../../hooks/useTaskHistory';
 import styles from './TaskTimeline.module.css';
+import { Skeleton, SkeletonCard } from '../common/Skeleton';
 
 // ─── Agent icon colours ───────────────────────────────────────────────────────
 
@@ -455,10 +456,10 @@ const SkeletonEntry: React.FC = () => (
       <div className={`${styles.dot} ${styles.dotSkeleton}`} aria-hidden="true" />
       <div className={styles.line} aria-hidden="true" />
     </div>
-    <div className={`${styles.card} ${styles.skeletonCard}`}>
-      <div className={styles.skeletonLine} style={{ width: '60%' }} />
-      <div className={styles.skeletonLine} style={{ width: '40%', marginTop: 6 }} />
-    </div>
+    <SkeletonCard className={`${styles.card} ${styles.skeletonCard}`}>
+      <Skeleton width="60%" height="1rem" />
+      <Skeleton width="40%" height="0.75rem" />
+    </SkeletonCard>
   </div>
 );
 

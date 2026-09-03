@@ -4,6 +4,7 @@ import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
 import styles from './KpiCard.module.css';
 import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
+import { Skeleton } from '../common/Skeleton';
 
 interface KpiCardProps {
   title: string;
@@ -26,7 +27,7 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, l
   if (loading) {
     return (
       <div className={`${styles.card} ${styles.loadingCard}`}>
-        <div className={styles.skeleton} />
+        <Skeleton width="100%" height="100%" variant="card" />
       </div>
     );
   }
