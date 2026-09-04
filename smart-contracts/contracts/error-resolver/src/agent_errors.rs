@@ -12,7 +12,11 @@ const CONTRACT_VERSION: &str = "1.0.0";
 #[contracttype]
 pub enum DataKey {
     Admin,
+<<<<<<< HEAD
+    Paused,
+=======
     Version,
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     AuthorizedCallers,
     AgentErrorCount(Symbol),
     Signers,
@@ -62,11 +66,15 @@ pub enum ContractError {
     AlreadyInitialized = 1,
     NotInitialized = 2,
     Unauthorized = 3,
+<<<<<<< HEAD
+    ContractPaused = 4,
+=======
     QuorumNotMet = 4,
     TimelockNotExpired = 5,
     AlreadyApproved = 6,
     OpNotFound = 7,
     SignerNotFound = 8,
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 }
 
 #[contract]
@@ -80,6 +88,18 @@ fn require_admin(env: &Env) -> Result<Address, ContractError> {
         .ok_or(ContractError::NotInitialized)?;
     admin.require_auth();
     Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(ContractError::ContractPaused);
+    }
+    Ok(())
 }
 
 /// Authorizes a cross-contract caller against the allowlist.
@@ -187,12 +207,17 @@ impl ErrorResolverContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
         env.storage()
             .instance()
             .set(&DataKey::Version, &String::from_str(&env, CONTRACT_VERSION));
         env.storage()
             .instance()
             .set(&DataKey::AuthorizedCallers, &Vec::<Address>::new(&env));
+<<<<<<< HEAD
+        env.events()
+            .publish((symbol_short!("errres"), symbol_short!("init")), admin);
+=======
         let mut signers = Vec::<Address>::new(&env);
         signers.push_back(admin.clone());
         env.storage().instance().set(&DataKey::Signers, &signers);
@@ -203,6 +228,7 @@ impl ErrorResolverContract {
         env.storage()
             .instance()
             .set(&DataKey::AuditLog, &Vec::<AuditEntry>::new(&env));
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
         Ok(())
     }
 
@@ -210,6 +236,32 @@ impl ErrorResolverContract {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+<<<<<<< HEAD
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), ContractError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("errres"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), ContractError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("errres"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+=======
     pub fn get_quorum(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::Quorum).unwrap_or(1)
     }
@@ -411,11 +463,13 @@ impl ErrorResolverContract {
         };
         record_audit(&env, &executor, audit_op, &op.target);
         Ok(())
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     }
 
     /// Allowlists a contract address (e.g. agent-registry) to call
     /// `record_error` and `clear_agent_errors`. Admin only.
     pub fn add_authorized_caller(env: Env, caller: Address) -> Result<(), ContractError> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
         let mut allowlist: Vec<Address> = env
             .storage()
@@ -434,6 +488,7 @@ impl ErrorResolverContract {
 
     /// Revokes a previously allowlisted caller. Admin only.
     pub fn remove_authorized_caller(env: Env, caller: Address) -> Result<(), ContractError> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
         let allowlist: Vec<Address> = env
             .storage()
@@ -466,6 +521,7 @@ impl ErrorResolverContract {
     /// allowlisted contract (see `add_authorized_caller`) and must be the
     /// genuine direct invoker of this call.
     pub fn record_error(env: Env, caller: Address, agent_id: Symbol) -> Result<u32, ContractError> {
+        require_not_paused(&env)?;
         require_authorized_caller(&env, &caller)?;
         let key = DataKey::AgentErrorCount(agent_id.clone());
         let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
@@ -494,6 +550,7 @@ impl ErrorResolverContract {
         caller: Address,
         agent_id: Symbol,
     ) -> Result<(), ContractError> {
+        require_not_paused(&env)?;
         require_authorized_caller(&env, &caller)?;
         env.storage()
             .persistent()
@@ -700,6 +757,56 @@ mod test {
         assert_eq!(client.get_agent_error_count(&agent_id), 0);
     }
 
+<<<<<<< HEAD
+    // ── Pause / unpause ───────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_sets_unpaused() {
+        let (env, client, _admin) = setup();
+        assert!(!client.is_paused());
+        let _ = env;
+    }
+
+    #[test]
+    fn pause_blocks_record_error() {
+        let (env, client, _admin) = setup();
+        let registry = Address::generate(&env);
+        client.add_authorized_caller(&registry);
+        let agent_id = Symbol::new(&env, "agent5");
+
+        client.pause();
+
+        let result = client.try_record_error(&registry, &agent_id);
+        assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
+    }
+
+    #[test]
+    fn unpause_allows_record_error() {
+        let (env, client, _admin) = setup();
+        let registry = Address::generate(&env);
+        client.add_authorized_caller(&registry);
+        let agent_id = Symbol::new(&env, "agent6");
+
+        client.pause();
+        client.unpause();
+
+        let count = client.record_error(&registry, &agent_id);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn get_agent_error_count_still_works_when_paused() {
+        let (env, client, _admin) = setup();
+        let registry = Address::generate(&env);
+        client.add_authorized_caller(&registry);
+        let agent_id = Symbol::new(&env, "agent7");
+        client.record_error(&registry, &agent_id);
+
+        client.pause();
+
+        // Reads should still work when paused.
+        assert_eq!(client.get_agent_error_count(&agent_id), 1);
+=======
     #[test]
     fn audit_log_records_operations() {
         let (env, client, _admin) = setup();
@@ -708,5 +815,6 @@ mod test {
         client.add_authorized_caller(&registry);
         let log = client.get_audit_log();
         assert!(log.len() >= 1);
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     }
 }

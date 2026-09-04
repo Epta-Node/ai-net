@@ -5,6 +5,7 @@
   },
   "auth": [
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
@@ -97,7 +98,11 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
+<<<<<<< HEAD
+                  "bytes": "49b9f64182e1024964030dad18ece784081bd1f2e2d5cbbddfa1d0e08718303b"
+=======
                   "bytes": "a820d94288b3dec4e320f43300ddf8956414f391f76324744c4895a63814e868"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                 },
                 {
                   "i128": {
@@ -426,6 +431,9 @@
                         "symbol": "commitment"
                       },
                       "val": {
+<<<<<<< HEAD
+                        "bytes": "49b9f64182e1024964030dad18ece784081bd1f2e2d5cbbddfa1d0e08718303b"
+=======
                         "bytes": "a820d94288b3dec4e320f43300ddf8956414f391f76324744c4895a63814e868"
                       }
                     },
@@ -435,6 +443,7 @@
                       },
                       "val": {
                         "bool": false
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                       }
                     },
                     {
@@ -616,7 +625,32 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Admin"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Paused"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      }
+                    ]
                   }
                 }
               }
@@ -629,7 +663,7 @@
       [
         {
           "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
             "key": {
               "ledger_key_nonce": {
                 "nonce": 4837995959683129791
@@ -644,7 +678,7 @@
             "data": {
               "contract_data": {
                 "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 4837995959683129791

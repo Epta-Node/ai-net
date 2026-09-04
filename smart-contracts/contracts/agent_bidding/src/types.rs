@@ -246,10 +246,17 @@ pub struct Escrow {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
+<<<<<<< HEAD
+    /// Contract admin address.
+    Admin,
+    /// Whether the contract is paused.
+    Paused,
+=======
     /// Admin address allowed to upgrade this contract.
     Admin,
     /// Current semantic contract version.
     Version,
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     /// Stores the root [`Auction`] record for a task.
     Auction(Symbol),
     /// Stores a single [`SealedBid`] for a given (task, bidder) pair.

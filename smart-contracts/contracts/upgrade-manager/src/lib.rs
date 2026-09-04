@@ -110,6 +110,8 @@ pub struct RollbackRecord {
 pub enum DataKey {
     /// Current admin address
     Admin,
+    /// Whether the contract is paused
+    Paused,
     /// Current contract version
     CurrentVersion,
     /// Version history (version_string -> ContractVersion)
@@ -153,6 +155,8 @@ pub enum UpgradeError {
     InsufficientGasBudget = 11,
     /// Version downgrade not allowed without explicit rollback
     DowngradeNotAllowed = 12,
+    /// The contract is paused and cannot accept mutations
+    ContractPaused = 13,
 }
 
 /// Main upgrade manager contract
@@ -177,6 +181,18 @@ fn require_admin(env: &Env) -> Result<Address, UpgradeError> {
         .ok_or(UpgradeError::Unauthorized)?;
     admin.require_auth();
     Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), UpgradeError> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(UpgradeError::ContractPaused);
+    }
+    Ok(())
 }
 
 fn get_current_version(env: &Env) -> Option<ContractVersion> {
@@ -210,6 +226,7 @@ impl UpgradeManager {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         let initial = ContractVersion {
             version: initial_version.clone(),
@@ -244,6 +261,7 @@ impl UpgradeManager {
 
     /// Set a new admin for the upgrade manager
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let old_admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Admin, &new_admin);
 
@@ -261,6 +279,32 @@ impl UpgradeManager {
     /// Get the current admin
     pub fn get_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), UpgradeError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("upgrade"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), UpgradeError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("upgrade"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Get the current contract version
@@ -281,6 +325,7 @@ impl UpgradeManager {
         description: String,
         migration_plan: MigrationPlan,
     ) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         // Check if version is valid and newer
@@ -322,6 +367,7 @@ impl UpgradeManager {
 
     /// Validate the current upgrade proposal (pre-upgrade hook)
     pub fn validate_proposal(env: Env) -> Result<u64, UpgradeError> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
 
         let mut proposal: UpgradeProposal = env
@@ -358,6 +404,7 @@ impl UpgradeManager {
 
     /// Execute the validated upgrade proposal
     pub fn execute_upgrade(env: Env) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         let proposal: UpgradeProposal = env
@@ -436,6 +483,7 @@ impl UpgradeManager {
 
     /// Rollback to the previous version (within 48h window)
     pub fn rollback_upgrade(env: Env) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         let rollback_record: RollbackRecord = env
@@ -706,4 +754,159 @@ mod tests {
         let expected = GAS_UPGRADE_BASE + (GAS_MIGRATION_PER_ITEM * 100) + (3 * 5000);
         assert_eq!(gas_estimate, expected);
     }
+<<<<<<< HEAD
+
+    #[test]
+    fn test_initialize_sets_unpaused() {
+        let (env, client, _admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        client.initialize(&_admin, &String::from_str(&env, "1.0.0"), &hash);
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_pause_blocks_propose_upgrade() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        client.pause();
+
+        let new_hash = test_wasm_hash(&env, 2);
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+        let result = client.try_propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "Upgrade"),
+            &migration_plan,
+        );
+        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
+    }
+
+    #[test]
+    fn test_unpause_allows_propose_upgrade() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        client.pause();
+        client.unpause();
+
+        let new_hash = test_wasm_hash(&env, 2);
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+        let result = client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "Upgrade"),
+            &migration_plan,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_pause_blocks_validate_proposal() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "Upgrade"),
+            &migration_plan,
+        );
+
+        client.pause();
+
+        let result = client.try_validate_proposal();
+        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
+    }
+
+    #[test]
+    fn test_pause_blocks_execute_upgrade() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "Upgrade"),
+            &migration_plan,
+        );
+        client.validate_proposal();
+
+        client.pause();
+
+        let result = client.try_execute_upgrade();
+        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
+    }
+
+    #[test]
+    fn test_pause_blocks_rollback_upgrade() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        let new_hash = test_wasm_hash(&env, 2);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &new_hash,
+            &String::from_str(&env, "Upgrade"),
+            &migration_plan,
+        );
+        client.validate_proposal();
+        client.execute_upgrade();
+
+        client.pause();
+
+        let result = client.try_rollback_upgrade();
+        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
+    }
+
+    #[test]
+    fn test_get_version_still_works_when_paused() {
+        let (env, client, admin) = create_test_env();
+        let hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
+
+        client.pause();
+
+        // Reads should still work when paused.
+        let version = client.get_current_version().unwrap();
+        assert_eq!(version.version, String::from_str(&env, "1.0.0"));
+    }
 }
+=======
+}
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25

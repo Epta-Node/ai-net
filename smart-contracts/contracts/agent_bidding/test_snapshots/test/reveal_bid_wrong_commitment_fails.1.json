@@ -5,6 +5,7 @@
   },
   "auth": [
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
@@ -97,7 +98,11 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
+<<<<<<< HEAD
+                  "bytes": "0e6fba6a97df1a8322eaec438fe9dbefe8305c81c5d35a9754c10ffa70afc47e"
+=======
                   "bytes": "63dab5412027515068fccd0ad7f1a41356ee3aa0b791dfc41d1d39760f980456"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                 },
                 {
                   "i128": {
@@ -371,6 +376,9 @@
                         "symbol": "commitment"
                       },
                       "val": {
+<<<<<<< HEAD
+                        "bytes": "0e6fba6a97df1a8322eaec438fe9dbefe8305c81c5d35a9754c10ffa70afc47e"
+=======
                         "bytes": "63dab5412027515068fccd0ad7f1a41356ee3aa0b791dfc41d1d39760f980456"
                       }
                     },
@@ -380,6 +388,7 @@
                       },
                       "val": {
                         "bool": false
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                       }
                     },
                     {
@@ -516,7 +525,32 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Admin"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Paused"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      }
+                    ]
                   }
                 }
               }

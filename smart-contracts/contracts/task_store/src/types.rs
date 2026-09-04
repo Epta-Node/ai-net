@@ -48,7 +48,11 @@ pub struct TaskMetadata {
 #[derive(Clone)]
 pub enum DataKey {
     Admin,
+<<<<<<< HEAD
+    Paused,
+=======
     Version,
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     Task(BytesN<32>),
     /// Admin address — the only address permitted to call `set_oracle_manager`.
     Admin,
@@ -123,8 +127,12 @@ pub enum Error {
     NotAssignedAgent = 7,
     InvalidStatusTransition = 8,
     Expired = 9,
+<<<<<<< HEAD
+    ContractPaused = 10,
+=======
     AlreadyInitialized = 10,
     NotInitialized = 11,
     Unauthorized = 12,
     UpgradeFailed = 13,
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 }

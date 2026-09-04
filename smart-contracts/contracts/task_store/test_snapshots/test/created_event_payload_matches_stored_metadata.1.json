@@ -35,8 +35,12 @@
                 },
                 {
                   "u32": 1
+<<<<<<< HEAD
+                }
+=======
                 },
                 "void"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
               ]
             }
           },
@@ -131,12 +135,15 @@
                     },
                     {
                       "key": {
+<<<<<<< HEAD
+=======
                         "symbol": "price_pair"
                       },
                       "val": "void"
                     },
                     {
                       "key": {
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                         "symbol": "prompt_hash"
                       },
                       "val": {
@@ -145,12 +152,15 @@
                     },
                     {
                       "key": {
+<<<<<<< HEAD
+=======
                         "symbol": "quoted_price_stroops"
                       },
                       "val": "void"
                     },
                     {
                       "key": {
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                         "symbol": "status"
                       },
                       "val": {
