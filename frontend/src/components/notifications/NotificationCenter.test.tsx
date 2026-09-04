@@ -36,8 +36,9 @@ vi.mock('react-router-dom', async () => {
 const sampleNotifications: AppNotification[] = [
   {
     id: 'notif-1',
-    type: 'task',
+    type: 'task_completed',
     title: 'Task Completed',
+    message: 'Task #101 execution has completed.',
     description: 'Task #101 execution has completed.',
     timestamp: new Date(Date.now() - 60000).toISOString(), // 1 min ago
     read: false,
@@ -45,8 +46,9 @@ const sampleNotifications: AppNotification[] = [
   },
   {
     id: 'notif-2',
-    type: 'payment',
+    type: 'payment_received',
     title: 'Payment Released',
+    message: 'Payment of 5 XLM released.',
     description: 'Payment of 5 XLM released.',
     timestamp: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
     read: false,
@@ -54,8 +56,9 @@ const sampleNotifications: AppNotification[] = [
   },
   {
     id: 'notif-3',
-    type: 'agent',
+    type: 'agent_registered',
     title: 'Agent Status Changed',
+    message: 'Research agent is now online.',
     description: 'Research agent is now online.',
     timestamp: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
     read: true,
@@ -209,6 +212,28 @@ describe('NotificationCenter Component', () => {
     expect(stored.every((n: AppNotification) => n.read)).toBe(true);
   });
 
+  test('"Clear all" button clears all notifications from list and localStorage', async () => {
+    renderTopNavWithProvider(sampleNotifications);
+
+    const bellBtn = screen.getByTestId('notification-bell-btn');
+    await act(async () => {
+      fireEvent.click(bellBtn);
+    });
+
+    const clearAllBtn = screen.getByTestId('clear-all-btn');
+    expect(clearAllBtn).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(clearAllBtn);
+    });
+
+    expect(screen.getByTestId('notification-empty-state')).toBeInTheDocument();
+    expect(screen.queryByTestId('notification-badge')).not.toBeInTheDocument();
+
+    const stored = JSON.parse(localStorage.getItem(NOTIFICATIONS_STORAGE_KEY) || '[]');
+    expect(stored).toEqual([]);
+  });
+
   test('closes panel when pressing Escape key', async () => {
     renderTopNavWithProvider(sampleNotifications);
 
@@ -258,10 +283,13 @@ describe('NotificationCenter Component', () => {
     expect(found2.read).toBe(true);
   });
 
-  test('real-time events add new notifications to the top of the list', async () => {
+  test('real-time events add new notifications to the top of the list and trigger toast events', async () => {
+    const toastSpy = vi.fn();
+    window.addEventListener('app-toast', toastSpy);
+
     renderTopNavWithProvider([]);
 
-    // Trigger a simulated real-time event via window custom event
+    // Trigger a simulated real-time task_completed event via window custom event
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent('ai-net-notification', {
@@ -279,6 +307,9 @@ describe('NotificationCenter Component', () => {
     const badge = screen.getByTestId('notification-badge');
     expect(badge).toHaveTextContent('1');
 
+    // Toast event should have been dispatched
+    expect(toastSpy).toHaveBeenCalled();
+
     // Open panel
     const bellBtn = screen.getByTestId('notification-bell-btn');
     await act(async () => {
@@ -287,5 +318,31 @@ describe('NotificationCenter Component', () => {
 
     expect(screen.getByText('Task Completed')).toBeInTheDocument();
     expect(screen.getByText('Task task-live-999 completed successfully.')).toBeInTheDocument();
+
+    window.removeEventListener('app-toast', toastSpy);
+  });
+
+  test('real-time payment_received events trigger toast notifications', async () => {
+    const toastSpy = vi.fn();
+    window.addEventListener('app-toast', toastSpy);
+
+    renderTopNavWithProvider([]);
+
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent('ai-net-notification', {
+          detail: {
+            type: 'payment_received',
+            taskId: 'task-pay-123',
+            payload: { amount: '10.5', txHash: 'abc12345678' },
+            timestamp: new Date().toISOString(),
+          },
+        })
+      );
+    });
+
+    expect(toastSpy).toHaveBeenCalled();
+
+    window.removeEventListener('app-toast', toastSpy);
   });
 });

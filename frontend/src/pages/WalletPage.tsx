@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
-import { Wallet, Copy, Check, ExternalLink, Download } from 'lucide-react'
+import { Wallet, Copy, ExternalLink, Download } from 'lucide-react'
 import { useWallet } from '../context/WalletContext'
 import { useWalletBalance } from '../hooks/useWalletBalance'
+import { useToast } from '../hooks/useToast'
 import { useTransactionHistory } from '../hooks/useTransactionHistory'
 import { SendXLMForm } from '../components/wallet/SendXLMForm'
 import { PaymentChart } from '../components/wallet/PaymentChart'
@@ -60,9 +61,9 @@ export function WalletPageSkeleton() {
 function WalletPage() {
   const { t } = useTranslation()
   const { publicKey, connected, ready, connectionMethod, freighterAvailable, connect, connectFreighter, disconnect, hasCompletedWizard } = useWallet()
-  const { balance, loading: balanceLoading, error: balanceError } = useWalletBalance(publicKey)
+  const { balance, balances, loading: balanceLoading, error: balanceError } = useWalletBalance(publicKey)
+  const { showToast } = useToast()
   const { transactions, loading: txLoading, error: txError } = useTransactionHistory(publicKey)
-  const [copied, setCopied] = React.useState(false)
   const [secretInput, setSecretInput] = React.useState('')
   const [connectError, setConnectError] = React.useState<string | null>(null)
   const [connecting, setConnecting] = React.useState(false)
@@ -70,22 +71,25 @@ function WalletPage() {
   const [freighterError, setFreighterError] = React.useState<string | null>(null)
 
   const handleCopyAddress = async () => {
-    if (publicKey) {
-      try {
-        await navigator.clipboard.writeText(publicKey)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      } catch {
-        const textArea = document.createElement('textarea')
-        textArea.value = publicKey
-        document.body.appendChild(textArea)
-        textArea.select()
-        document.execCommand('copy')
-        document.body.removeChild(textArea)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      }
+    if (!publicKey) return
+    const fallbackCopy = () => {
+      const textArea = document.createElement('textarea')
+      textArea.value = publicKey!
+      document.body.appendChild(textArea)
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
     }
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(publicKey)
+      } else {
+        fallbackCopy()
+      }
+    } catch {
+      fallbackCopy()
+    }
+    showToast(t('wallet.copyAddress'), 'success')
   }
 
   const handleConnect = async (e: React.FormEvent) => {
@@ -130,6 +134,40 @@ function WalletPage() {
       </span>
     )
   }, [balance, balanceLoading, balanceError])
+
+  const balanceChips = useMemo(() => {
+    const tokenBalances = balances.filter((entry) => entry.asset_type !== 'native')
+    if (balanceLoading) {
+      return <div className={styles.balanceChips} aria-busy="true"><Skeleton variant="pill" width="7rem" height="1.75rem" /></div>
+    }
+    const chips = balances.map((entry) => {
+      const code = entry.asset_type === 'native' ? 'XLM' : (entry.asset_code ?? '')
+      return (
+        <span
+          key={code}
+          className={`${styles.balanceChip} ${entry.asset_type === 'native' ? styles.balanceChipNative : ''}`}
+          title={t('a11y.balanceChip', { code })}
+        >
+          <span className={styles.balanceChipAmount} aria-label={`${parseFloat(entry.balance)} ${code}`}>
+            {new Intl.NumberFormat(undefined, { maximumFractionDigits: 7 }).format(parseFloat(entry.balance) || 0)}
+          </span>
+          <span className={styles.balanceChipCode}>{code}</span>
+        </span>
+      )
+    })
+    if (chips.length > 1 && tokenBalances.length > 0) {
+      return (
+        <div className={styles.tokensSection}>
+          <p className={styles.tokensHeading}>{t('wallet.tokens.heading')}</p>
+          <div className={styles.balanceChips}>{chips}</div>
+        </div>
+      )
+    }
+    if (chips.length > 0) {
+      return <div className={styles.balanceChips}>{chips}</div>
+    }
+    return null
+  }, [balances, balanceLoading, t])
 
   if (!hasCompletedWizard) {
     return (
@@ -306,6 +344,8 @@ function WalletPage() {
           {balanceDisplay}
         </div>
 
+        {balanceChips}
+
         <div className={styles.publicKeySection}>
           <div className={styles.qrCode}>
             <QRCodeSVG value={publicKey} size={100} level="M" />
@@ -319,9 +359,10 @@ function WalletPage() {
               <button
                 className={styles.iconButton}
                 onClick={handleCopyAddress}
-                title={copied ? t('wallet.copied') : t('wallet.copyAddress')}
+                title={t('wallet.copyAddress')}
+                aria-label={t('a11y.copyPublicKey')}
               >
-                {copied ? <Check size={16} /> : <Copy size={16} />}
+                <Copy size={16} />
               </button>
               <a
                 href={`${STELLAR_EXPLORER}/account/${publicKey}`}

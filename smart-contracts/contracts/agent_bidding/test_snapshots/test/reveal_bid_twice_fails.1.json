@@ -19,22 +19,60 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                 },
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 },
                 {
-                  "u64": 3600
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000000
-                  }
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 500000
-                  }
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "bond"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 500000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "duration_secs"
+                      },
+                      "val": {
+                        "u64": 3600
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "max_price"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 0
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reserve_price"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reveal_duration_secs"
+                      },
+                      "val": {
+                        "u64": 3600
+                      }
+                    }
+                  ]
                 }
               ]
             }
@@ -43,6 +81,7 @@
         }
       ]
     ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
@@ -53,13 +92,17 @@
               "function_name": "submit_bid",
               "args": [
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
+<<<<<<< HEAD
                   "bytes": "fcc6d32fc3aaba721545d754cb7c5d9cd6c07fb92f1bc2a4f9bfc696832433d1"
+=======
+                  "bytes": "34d734f2fc78b639fbfa4ca7c1b0f31f2ec8140b6570436914fb145412d44572"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                 },
                 {
                   "i128": {
@@ -68,7 +111,7 @@
                   }
                 },
                 {
-                  "u32": 80
+                  "u32": 60
                 }
               ]
             }
@@ -77,6 +120,7 @@
         }
       ]
     ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
@@ -87,7 +131,7 @@
               "function_name": "reveal_bid",
               "args": [
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -99,7 +143,7 @@
                   }
                 },
                 {
-                  "string": "Twice"
+                  "string": "Once"
                 },
                 {
                   "bytes": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a"
@@ -111,6 +155,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -133,7 +178,7 @@
                   "symbol": "Auction"
                 },
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 }
               ]
             },
@@ -153,13 +198,21 @@
                       "symbol": "Auction"
                     },
                     {
-                      "symbol": "twice_rev"
+                      "symbol": "double_rev"
                     }
                   ]
                 },
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "bid_count"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "config"
@@ -187,6 +240,17 @@
                           },
                           {
                             "key": {
+                              "symbol": "max_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 100000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "reserve_price"
                             },
                             "val": {
@@ -194,6 +258,14 @@
                                 "hi": 0,
                                 "lo": 1000000
                               }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "reveal_duration_secs"
+                            },
+                            "val": {
+                              "u64": 3600
                             }
                           }
                         ]
@@ -241,10 +313,26 @@
                     },
                     {
                       "key": {
+                        "symbol": "reveal_deadline"
+                      },
+                      "val": {
+                        "u64": 7200
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "revealed_count"
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "task_id"
                       },
                       "val": {
-                        "symbol": "twice_rev"
+                        "symbol": "double_rev"
                       }
                     }
                   ]
@@ -266,7 +354,7 @@
                   "symbol": "Bid"
                 },
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -289,7 +377,7 @@
                       "symbol": "Bid"
                     },
                     {
-                      "symbol": "twice_rev"
+                      "symbol": "double_rev"
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
@@ -323,7 +411,19 @@
                         "symbol": "commitment"
                       },
                       "val": {
+<<<<<<< HEAD
                         "bytes": "fcc6d32fc3aaba721545d754cb7c5d9cd6c07fb92f1bc2a4f9bfc696832433d1"
+=======
+                        "bytes": "34d734f2fc78b639fbfa4ca7c1b0f31f2ec8140b6570436914fb145412d44572"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "forfeited"
+                      },
+                      "val": {
+                        "bool": false
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                       }
                     },
                     {
@@ -350,7 +450,7 @@
                         "symbol": "reputation"
                       },
                       "val": {
-                        "u32": 80
+                        "u32": 60
                       }
                     },
                     {
@@ -377,7 +477,7 @@
                         "symbol": "terms"
                       },
                       "val": {
-                        "string": "Twice"
+                        "string": "Once"
                       }
                     }
                   ]
@@ -399,7 +499,7 @@
                   "symbol": "Bidders"
                 },
                 {
-                  "symbol": "twice_rev"
+                  "symbol": "double_rev"
                 }
               ]
             },
@@ -419,7 +519,7 @@
                       "symbol": "Bidders"
                     },
                     {
-                      "symbol": "twice_rev"
+                      "symbol": "double_rev"
                     }
                   ]
                 },

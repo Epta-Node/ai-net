@@ -18,6 +18,7 @@
 
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { getCacheClient, buildCacheKey } from '../../cache/index';
+import { recordHit, recordMiss, recordBypass } from '../../cache/metrics';
 import { logger } from '../logger';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
     // ── 0. Short-circuit when TTL is 0 ───────────────────────────────────
     if (ttl === 0) {
       res.setHeader(CACHE_STATUS_HEADER, 'BYPASS');
+      recordBypass();
       next();
       return;
     }
@@ -69,6 +71,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
     // ── 1. Bypass header check ────────────────────────────────────────────
     if (req.headers[CACHE_BYPASS_HEADER]) {
       res.setHeader(CACHE_STATUS_HEADER, 'BYPASS');
+      recordBypass();
       logger.debug({ path: req.path }, '[cache] bypass via header');
       next();
       return;
@@ -76,7 +79,8 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
 
     // ── 2. Build cache key ────────────────────────────────────────────────
     const extra = keyExtra ? keyExtra(req) : '';
-    const baseKey = buildCacheKey(req.method, req.path, req.query as Record<string, unknown>);
+    const fullPath = req.baseUrl + req.path;
+    const baseKey = buildCacheKey(req.method, fullPath, req.query as Record<string, unknown>);
     const cacheKey = extra ? `${baseKey}:${extra}` : baseKey;
 
     // ── 3. Cache lookup ───────────────────────────────────────────────────
@@ -92,6 +96,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
       // ── HIT ──────────────────────────────────────────────────────────
       res.setHeader(CACHE_STATUS_HEADER, 'HIT');
       res.setHeader('Content-Type', 'application/json');
+      recordHit(cacheKey);
       logger.debug({ cacheKey }, '[cache] HIT');
       res.send(cached);
       return;
@@ -99,6 +104,7 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
 
     // ── 4. MISS — run handler, intercept response ─────────────────────────
     res.setHeader(CACHE_STATUS_HEADER, 'MISS');
+    recordMiss();
     logger.debug({ cacheKey }, '[cache] MISS');
 
     // Patch res.json to capture the body before it's flushed
@@ -109,11 +115,16 @@ export function cacheMiddleware(options: CacheMiddlewareOptions): RequestHandler
 
       // Serialise and cache asynchronously — do not block the response
       const serialised = JSON.stringify(body);
-      getCacheClient()
-        .set(cacheKey, serialised, ttl)
-        .catch((err) =>
-          logger.warn({ err, cacheKey }, '[cache] set error — response served uncached'),
-        );
+      try {
+        getCacheClient()
+          .set(cacheKey, serialised, ttl)
+          .catch((err) =>
+            logger.warn({ err, cacheKey }, '[cache] set error — response served uncached'),
+          );
+      } catch (err) {
+        // Cache not initialised or other sync error — serve response uncached
+        logger.warn({ err, cacheKey }, '[cache] set error — response served uncached');
+      }
 
       return originalJson(body);
     };

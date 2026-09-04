@@ -1,10 +1,12 @@
 import { useTranslation } from 'react-i18next'
-import { Inbox } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
 import type { SortDir, SortKey } from '../../utils/agentRegistry'
 import { ReputationStars } from './ReputationStars'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
+import { EmptyState } from '../common/EmptyState'
+import { Users, Plus } from 'lucide-react'
 import styles from './AgentTable.module.css'
+import { SkeletonTable } from '../common/Skeleton'
 
 interface AgentTableProps {
   agents: AgentRecord[]
@@ -23,20 +25,11 @@ function truncateId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`
 }
 
-function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
-  if (!active) return <ArrowUpDown size={12} aria-hidden="true" />
-  return dir === 'asc' ? (
-    <ArrowUp size={12} aria-hidden="true" />
-  ) : (
-    <ArrowDown size={12} aria-hidden="true" />
-  )
-}
-
 export function AgentTable({
   agents,
   loading,
-  sortKey,
-  sortDir,
+  sortKey: _sortKey,
+  sortDir: _sortDir,
   onSort,
   onRowClick,
 }: AgentTableProps) {
@@ -66,11 +59,7 @@ export function AgentTable({
   if (loading) {
     return (
       <div className={styles.tableWrap}>
-        {Array.from({ length: SKELETON_ROWS }, (_, i) => (
-          <div key={i} className={styles.skeletonRow} data-testid="agent-skeleton-row">
-            {Array.from({ length: 6 }, (_, c) => <span key={c} className={styles.skeletonCell} />)}
-          </div>
-        ))}
+        <SkeletonTable rows={SKELETON_ROWS} columns={6} rowTestId="agent-skeleton-row" />
       </div>
     )
   }
@@ -78,18 +67,26 @@ export function AgentTable({
   return (
     <div className={styles.tableWrap}>
       {agents.length === 0 ? (
-        <div className={styles.emptyState} data-testid="agents-empty">
-          <Inbox size={32} className={styles.emptyIcon} aria-hidden="true" />
-          <p className={styles.emptyTitle}>{t('agent.table.emptyTitle')}</p>
-          <p className={styles.emptySubtext}>{t('agent.table.emptySubtext')}</p>
-        </div>
+        <EmptyState
+          icon={<Users size={32} />}
+          title={t('agent.table.emptyTitle')}
+          description={t('agent.table.emptySubtext')}
+          primaryAction={{
+            label: t('landing.hero.startTask', { defaultValue: 'Submit Task' }),
+            to: '/tasks/new',
+            icon: <Plus size={16} />,
+          }}
+          data-testid="agents-empty"
+        />
       ) : (
         <DataTable
           columns={columns}
           rows={agents}
           getRowKey={(agent) => agent.id}
+          getRowTestId={(agent) => `agent-row-${agent.id}`}
           maxHeight={540}
           stickyHeader
+          onSort={(key) => onSort(key as SortKey)}
           onRowClick={onRowClick}
           rowClassName={() => styles.row}
         />

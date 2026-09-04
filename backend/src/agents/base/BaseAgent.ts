@@ -1,6 +1,7 @@
 import { z } from 'zod';
-import { VeniceClient, type AgentType, type VeniceClientLike } from '../../venice/index.js';
+import { VeniceClient, type AgentType, type VeniceClientLike } from '../../services/venice/index.js';
 import { HeartbeatClient } from '../heartbeat.js';
+import { getConfig } from '../../config/index.js';
 
 export interface BaseAgentConfig {
   veniceClient?: VeniceClientLike;
@@ -30,14 +31,7 @@ export abstract class BaseAgent {
     if (config.veniceClient) {
       this.venice = config.veniceClient;
     } else {
-      const apiKey = process.env['VENICE_API_KEY'];
-      if (!apiKey) {
-        console.warn(
-          `[${this.constructor.name}] WARNING: VENICE_API_KEY is not set. ` +
-            'Venice calls will fail. Set this env var before running in production.'
-        );
-      }
-      this.venice = new VeniceClient({ apiKey: apiKey ?? '' });
+      this.venice = new VeniceClient({ apiKey: getConfig().VENICE_API_KEY });
     }
     this.apiBaseUrl = config.apiBaseUrl ?? 'http://127.0.0.1:3001';
     this.agentId = config.agentId ?? `${this.getCapability()}-agent-1`;
@@ -73,7 +67,7 @@ export abstract class BaseAgent {
       capabilities: [this.getCapability()],
       pricingXLM: 0.5,
       endpoint: `${this.apiBaseUrl}/agents/${this.getCapability()}`,
-      stellarPublicKey: process.env['STELLAR_PUBLIC_KEY'] ?? '',
+      stellarPublicKey: getConfig().STELLAR_PUBLIC_KEY ?? '',
     });
 
     try {

@@ -31,10 +31,10 @@
   gap: 16px;
   flex-wrap: wrap;
   padding: 16px 20px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 12px;
-  color: #fca5a5;
+  background: var(--status-danger-surface);
+  border: 1px solid var(--status-danger-surface-strong);
+  border-radius: var(--radius-xl);
+  color: var(--status-danger-text);
 }
 
 .errorBox p {
@@ -42,19 +42,29 @@
 }
 
 .retryButton {
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #fecaca;
+  background: var(--status-danger-surface-strong);
+  border: 1px solid var(--status-danger-border-strong);
+  color: var(--status-danger-text);
   padding: 8px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-weight: 600;
   box-shadow: none;
 }
 
 .retryButton:hover {
-  background: rgba(239, 68, 68, 0.3);
+  background: var(--status-danger-surface-strong);
   transform: none;
   box-shadow: none;
+}
+
+.retryButton:active {
+  background: rgba(239, 68, 68, 0.4);
+  transform: scale(0.96);
+}
+
+.retryButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* Page skeleton */
@@ -65,9 +75,9 @@
   gap: 24px;
   padding: 16px;
   margin-bottom: 16px;
-  background: rgba(15, 23, 42, 0.4);
+  background: var(--surface-glass-subtle);
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
 }
 
 .filterGroupSkeleton {

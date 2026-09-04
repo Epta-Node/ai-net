@@ -1,4 +1,4 @@
-import type { CircuitBreaker } from '../../venice/circuitBreaker.js';
+import type { CircuitBreaker } from './circuitBreaker.js';
 import type { VeniceResponseCache } from './cache.js';
 import type { RequestDeduplicator } from './dedup.js';
 
@@ -30,10 +30,24 @@ export interface VeniceChatOptions extends CompleteOptions {
   model?: string;
 }
 
+export interface VeniceProviderConfig {
+  apiKey: string;
+  baseUrl?: string;
+  name?: string;
+}
+
 export interface VeniceClientConfig {
   apiKey: string;
   baseUrl?: string;
   circuitBreaker?: CircuitBreaker;
+  /** Ordered fallback providers; first is primary. When supplied, overrides apiKey/baseUrl. */
+  providers?: VeniceProviderConfig[];
+  /** Per-call timeout in ms. Default: 10_000. */
+  timeoutMs?: number;
+  /** Retries per provider with exponential backoff. Default: 3. */
+  maxRetries?: number;
+  /** When true, stale cache is returned if all providers fail. Default: true. */
+  enableCacheFallback?: boolean;
   /** Model version used as part of the cache key; changing it invalidates entries. */
   modelVersion?: string;
   /** Cache behaviour; built-in defaults are used when omitted. */

@@ -10,10 +10,15 @@
   background-size: 200% 100%;
   background-repeat: no-repeat;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: transparent;
   user-select: none;
   pointer-events: none;
+}
+
+.static {
+  animation: none;
+  background-image: none;
 }
 
 @keyframes shimmer {
@@ -27,26 +32,30 @@
 
 /* Variants */
 .text {
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .pill {
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 .circular {
-  border-radius: 50%;
+  border-radius: var(--radius-round);
 }
 
 .rectangular {
   border-radius: 0;
 }
 
+.cardVariant {
+  border-radius: 8px;
+}
+
 /* Composable primitives */
 .card {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 1rem;
 }
 
@@ -65,6 +74,43 @@
 .tableRow {
   display: grid;
   gap: 1rem;
+}
+
+.dashboard,
+.taskDetail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.dashboardKpis,
+.taskPanels {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dagSkeleton {
+  min-height: 280px;
+}
+
+.dagNodes {
+  display: flex;
+  align-items: center;
+  gap: 3rem;
+  min-height: 220px;
+  overflow: hidden;
+}
+
+.taskPanels {
+  grid-template-columns: 3fr 2fr;
+}
+
+@media (max-width: 700px) {
+  .dashboardKpis,
+  .taskPanels {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Fade-in helper so loaded content eases in over a skeleton. */

@@ -1,0 +1,137 @@
+name: Lighthouse CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/lighthouse.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  lighthouse:
+    name: Lighthouse CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npx vite build
+
+      - name: Run Lighthouse CI
+        id: lhci
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          working-directory: frontend
+          configPath: ./lighthouserc.cjs
+
+      - name: Post Lighthouse scores to PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Read all Lighthouse result files
+            const resultsDir = path.join('frontend', '.lighthouseci');
+            let results = [];
+
+            try {
+              const files = fs.readdirSync(resultsDir).filter(f => f.startsWith('lhr-') && f.endsWith('.json'));
+              for (const file of files) {
+                const content = JSON.parse(fs.readFileSync(path.join(resultsDir, file), 'utf8'));
+                results.push({
+                  url: content.finalUrl || content.requestedUrl,
+                  scores: {
+                    performance: Math.round((content.categories?.performance?.score || 0) * 100),
+                    accessibility: Math.round((content.categories?.accessibility?.score || 0) * 100),
+                    seo: Math.round((content.categories?.seo?.score || 0) * 100),
+                    bestPractices: Math.round((content.categories?.best-practices?.score || 0) * 100),
+                  },
+                });
+              }
+            } catch (err) {
+              core.warning(`Could not read Lighthouse results: ${err.message}`);
+            }
+
+            if (results.length === 0) {
+              core.warning('No Lighthouse results found. Skipping PR comment.');
+              return;
+            }
+
+            // Build markdown table
+            let body = '## 🔍 Lighthouse CI Results\n\n';
+            body += '| Route | Performance | Accessibility | SEO | Best Practices |\n';
+            body += '|-------|-------------|---------------|-----|----------------|\n';
+
+            let allPassed = true;
+            for (const r of results) {
+              const route = new URL(r.url).pathname || '/';
+              const perf = r.scores.performance;
+              const a11y = r.scores.accessibility;
+              const seo = r.scores.seo;
+              const bp = r.scores.bestPractices;
+
+              const perfIcon = perf >= 80 ? '✅' : '❌';
+              const a11yIcon = a11y >= 95 ? '✅' : '❌';
+              const seoIcon = seo >= 80 ? '✅' : '⚠️';
+
+              if (perf < 80 || a11y < 95) allPassed = false;
+
+              body += `| \`${route}\` | ${perfIcon} ${perf}/100 | ${a11yIcon} ${a11y}/100 | ${seoIcon} ${seo}/100 | ${bp}/100 |\n`;
+            }
+
+            body += '\n### Thresholds\n';
+            body += '- **Performance**: ≥ 80\n';
+            body += '- **Accessibility**: ≥ 95\n';
+            body += '- **SEO**: ≥ 80 (budget)\n\n';
+
+            if (allPassed) {
+              body += '✅ All Lighthouse gates passed.\n';
+            } else {
+              body += '❌ **One or more Lighthouse gates failed.** Please fix the issues above before merging.\n';
+            }
+
+            // Find existing bot comment to update instead of creating duplicates
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('🔍 Lighthouse CI Results')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

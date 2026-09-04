@@ -39,6 +39,21 @@
   cursor: pointer;
   font: inherit;
   text-align: left;
+  border-radius: 6px;
+  transition: color 0.15s ease, transform 0.1s ease;
+}
+
+.sortButton:hover {
+  color: var(--accent);
+}
+
+.sortButton:active {
+  transform: scale(0.96);
+}
+
+.sortButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .row {
@@ -48,6 +63,10 @@
 
 .row:hover {
   background: rgba(148, 163, 184, 0.08);
+}
+
+.row:active {
+  background: rgba(148, 163, 184, 0.14);
 }
 
 .selectedRow {

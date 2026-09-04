@@ -1,200 +1,288 @@
-﻿import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
+import { CornerDownLeft, Search } from 'lucide-react';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import styles from './CommandPalette.module.css';
 
-export interface CommandPaletteResult {
+export interface Command {
   id: string;
-  title: string;
-  subtitle?: string;
-  category: 'page' | 'agent' | 'task' | 'recent';
+  label: string;
+  shortcut?: string;
+  icon?: LucideIcon;
   action: () => void;
-  metadata?: string;
+  category: string;
 }
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-  onSearch: (query: string) => Promise<CommandPaletteResult[]>;
+  commands: Command[];
   placeholder?: string;
-  recentSearches?: string[];
-  onRecentSearchClick?: (query: string) => void;
 }
 
-type PaletteItem = {
-  id: string;
-  title: string;
-  category: 'page' | 'agent' | 'task' | 'recent';
-  action: () => void;
-  subtitle?: string;
-  metadata?: string;
+const LISTBOX_ID = 'command-palette-listbox';
+
+/** Category display order; unknown categories fall through to the end. */
+const CATEGORY_ORDER = ['navigation', 'actions', 'settings'];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  navigation: 'Navigate',
+  actions: 'Actions',
+  settings: 'Settings',
 };
+
+interface CategoryGroup {
+  category: string;
+  label: string;
+  startIndex: number;
+  items: Command[];
+}
+
+/**
+ * Lightweight fuzzy matcher. Returns a match score for `query` inside `text`
+ * (higher is better) or -1 when there is no subsequence match. Consecutive
+ * runs and word-start matches score higher.
+ */
+function fuzzyScore(query: string, text: string): number {
+  if (!query) return 0;
+
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  let qi = 0;
+  let score = 0;
+  let prevIndex = -2;
+
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] !== q[qi]) continue;
+
+    if (ti === prevIndex + 1) {
+      score += 3; // consecutive run
+    } else if (ti === 0 || t[ti - 1] === ' ' || t[ti - 1] === '-') {
+      score += 2; // start of a word
+    } else {
+      score += 1;
+    }
+    prevIndex = ti;
+    qi++;
+  }
+
+  return qi === q.length ? score : -1;
+}
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   isOpen,
   onClose,
-  onSearch,
-  placeholder = 'Search agents, tasks, or pages...',
-  recentSearches = [],
-  onRecentSearchClick,
+  commands,
+  placeholder = 'Search commands...',
 }) => {
-  const [query, setQuery] = React.useState('');
-  const [selectedIndex, setSelectedIndex] = React.useState(0);
-  const [searchResults, setSearchResults] = React.useState<CommandPaletteResult[]>([]);
-  const [isSearching, setIsSearching] = React.useState(false);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [query, setQuery] = useState('');
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
-  React.useEffect(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (!query.trim()) {
-      setSearchResults([]);
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
-    timeoutRef.current = setTimeout(async () => {
-      try {
-        const result = await onSearch(query);
-        setSearchResults(result);
-      } catch {
-        setSearchResults([]);
-      }
-      setIsSearching(false);
-    }, 300);
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    };
-  }, [query, onSearch]);
+  const overlayRef = useFocusTrap<HTMLDivElement>(isOpen);
 
-  React.useEffect(() => {
-    if (isOpen && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
-  }, [isOpen]);
-
-  React.useEffect(() => {
-    if (!isOpen) {
+  // Reset state every time the palette opens/closes.
+  useEffect(() => {
+    if (isOpen) {
       setQuery('');
-      setSearchResults([]);
       setSelectedIndex(0);
     }
   }, [isOpen]);
 
-  React.useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  // Keep the selection within bounds as the result set changes.
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [query]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    const items = query.trim() ? searchResults : recentSearches.map((s) => ({
-      id: s,
-      title: s,
-      category: 'recent' as const,
-      action: () => onRecentSearchClick?.(s),
-    }));
-    if (items.length === 0) return;
+  const filtered = useMemo(() => {
+    const q = query.trim();
+    if (!q) return commands;
+
+    return commands
+      .map((command) => {
+        const labelScore = fuzzyScore(q, command.label);
+        const categoryScore = fuzzyScore(q, command.category);
+
+        if (labelScore < 0 && categoryScore < 0) return null;
+
+        // Label matches rank above category-only matches.
+        const score = labelScore >= 0 ? labelScore + 100 : categoryScore;
+        return { command, score };
+      })
+      .filter((entry): entry is { command: Command; score: number } => entry !== null)
+      .sort((a, b) => b.score - a.score)
+      .map((entry) => entry.command);
+  }, [commands, query]);
+
+  const groups = useMemo<CategoryGroup[]>(() => {
+    const categories = Array.from(new Set(filtered.map((c) => c.category)));
+    const ordered = [
+      ...CATEGORY_ORDER.filter((cat) => categories.includes(cat)),
+      ...categories.filter((cat) => !CATEGORY_ORDER.includes(cat)),
+    ];
+
+    const result: CategoryGroup[] = [];
+    let startIndex = 0;
+    for (const category of ordered) {
+      const items = filtered.filter((c) => c.category === category);
+      if (items.length === 0) continue;
+      result.push({
+        category,
+        label: CATEGORY_LABELS[category] ?? category,
+        startIndex,
+        items,
+      });
+      startIndex += items.length;
+    }
+    return result;
+  }, [filtered]);
+
+  const safeIndex = Math.min(selectedIndex, Math.max(0, filtered.length - 1));
+
+  const executeCommand = (command: Command) => {
+    command.action();
+    onClose();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      return;
+    }
+
+    if (filtered.length === 0) return;
+
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setSelectedIndex((i) => (i + 1) % items.length);
+        setSelectedIndex((i) => (i + 1) % filtered.length);
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setSelectedIndex((i) => (i - 1 + items.length) % items.length);
+        setSelectedIndex((i) => (i - 1 + filtered.length) % filtered.length);
         break;
       case 'Enter':
         e.preventDefault();
-        items[selectedIndex]?.action();
-        onClose();
-        break;
-      case 'Escape':
-        e.preventDefault();
-        onClose();
+        executeCommand(filtered[safeIndex]);
         break;
     }
   };
 
-  const allItems: PaletteItem[] = query.trim()
-    ? searchResults
-    : recentSearches.map((s) => ({
-        id: s,
-        title: s,
-        category: 'recent' as const,
-        action: () => onRecentSearchClick?.(s),
-      }));
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+
+      e.preventDefault();
+      onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
-  const hasItems = allItems.length > 0;
-
-  const categories = query.trim()
-    ? ['page', 'agent', 'task']
-    : ['recent'];
-
-  const categoryLabels: Record<string, string> = {
-    page: 'Pages',
-    agent: 'Agents',
-    task: 'Tasks',
-    recent: 'Recent Searches',
-  };
-
-  const getItemsForCategory = (category: string) => {
-    return allItems.filter(item => item.category === category);
-  };
+  const selectedId =
+    filtered.length > 0 ? `command-palette-option-${safeIndex}` : undefined;
 
   return (
-    <div className={styles.overlay} onClick={onClose} role='dialog' aria-modal='true' aria-label='Command palette'>
+    <div
+      ref={overlayRef}
+      className={styles.overlay}
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
+    >
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
         <div className={styles.inputWrapper}>
+          <Search size={16} className={styles.searchIcon} aria-hidden="true" />
           <input
-            ref={inputRef}
-            type='text'
+            type="text"
             className={styles.input}
             placeholder={placeholder}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
+            role="combobox"
+            aria-expanded={isOpen}
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={selectedId}
+            aria-autocomplete="list"
+            autoComplete="off"
+            spellCheck={false}
           />
-          <button className={styles.closeButton} onClick={onClose}>✕</button>
+          <span className={styles.shortcutHint}>
+            <kbd className={styles.keyHint}>esc</kbd>
+          </span>
         </div>
-        {isSearching && <div>Loading...</div>}
-        {!isSearching && query.trim() && allItems.length === 0 && (
-          <div>
-            <div>No results found</div>
-            <div>Try adjusting your search</div>
+
+        {filtered.length > 0 ? (
+          <div className={styles.resultsWrapper} id={LISTBOX_ID} role="listbox" aria-label="Commands">
+            {groups.map((group) => (
+              <div key={group.category} className={styles.categoryGroup}>
+                <div className={styles.categoryLabel}>{group.label}</div>
+                {group.items.map((command, i) => {
+                  const globalIndex = group.startIndex + i;
+                  const Icon = command.icon;
+                  return (
+                    <button
+                      key={command.id}
+                      id={`command-palette-option-${globalIndex}`}
+                      role="option"
+                      aria-selected={globalIndex === safeIndex}
+                      className={`${styles.resultItem} ${
+                        globalIndex === safeIndex ? styles.selected : ''
+                      }`}
+                      onClick={() => executeCommand(command)}
+                      onMouseEnter={() => setSelectedIndex(globalIndex)}
+                    >
+                      {Icon && (
+                        <span className={styles.resultIcon}>
+                          <Icon size={16} aria-hidden="true" />
+                        </span>
+                      )}
+                      <span className={styles.resultContent}>
+                        <span className={styles.resultTitle}>{command.label}</span>
+                      </span>
+                      {command.shortcut && (
+                        <span className={styles.resultShortcut}>
+                          <kbd className={styles.keyHint}>{command.shortcut}</kbd>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className={styles.emptyState}>
+            <p className={styles.emptyText}>No commands found</p>
+            <p className={styles.emptySubtext}>Try a different search</p>
           </div>
         )}
-        {!isSearching && hasItems && (
-          <div>
-            {categories.map((cat) => {
-              const items = getItemsForCategory(cat);
-              if (items.length === 0) return null;
-              return (
-                <div key={cat}>
-                  <div>{categoryLabels[cat]}</div>
-                  {items.map((item) => {
-                    const globalIndex = allItems.indexOf(item);
-                    return (
-                      <button
-                        key={item.id}
-                        className={globalIndex === selectedIndex ? 'selected' : ''}
-                        onClick={() => { item.action(); onClose(); }}
-                        onMouseEnter={() => setSelectedIndex(globalIndex)}
-                      >
-                        {item.title}
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        )}
+
+        <div className={styles.footer}>
+          <span className={styles.shortcutHint}>
+            <kbd className={styles.keyHint}>↑</kbd>
+            <kbd className={styles.keyHint}>↓</kbd>
+            navigate
+          </span>
+          <span className={styles.shortcutHint}>
+            <kbd className={styles.keyHint}>
+              <CornerDownLeft size={10} aria-hidden="true" />
+            </kbd>
+            select
+          </span>
+          <span className={styles.shortcutHint}>
+            <kbd className={styles.keyHint}>esc</kbd>
+            close
+          </span>
+        </div>
       </div>
     </div>
   );

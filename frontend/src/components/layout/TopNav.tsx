@@ -1,11 +1,10 @@
-import React, { useState, useRef } from 'react'
+import React from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
-import { useNotifications } from '../../hooks/useNotifications'
-import { NotificationCenter } from '../notifications/NotificationCenter'
+import { NotificationBell } from '../notifications/NotificationBell'
 import { SUPPORTED_LANGUAGES } from '../../i18n/options'
+import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
 import './TopNav.css'
 import useTheme from '../../hooks/useTheme'
@@ -42,27 +41,24 @@ const TopNav: React.FC<TopNavProps> = ({
   isDrawerOpen = false,
 }) => {
   const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
-  const { unreadCount } = useNotifications()
-  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
-  const bellButtonRef = useRef<HTMLButtonElement>(null)
   const { t, i18n } = useTranslation()
   const location = useLocation()
   const { mode, setMode } = useTheme()
 
   const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
 
+  // The title mirrors the sidebar's labels via the shared nav config, so the
+  // page heading and the highlighted nav entry can never disagree.
   const getTitle = () => {
     const path = location.pathname
-    switch (path) {
-      case '/': return t('nav.dashboard')
-      case '/agents': return t('nav.agentRegistry')
-      case '/tasks/new': return t('nav.newTask')
-      case '/tasks/history': return t('nav.taskHistory')
-      case '/wallet': return t('nav.wallet')
-      default:
-        if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
-        return t('nav.dashboard')
-    }
+    // The registry page gets a fuller heading than its terse nav label.
+    if (path === '/agents') return t('nav.agentRegistry')
+
+    const navItem = NAV_ITEMS.find((item) => item.path === path)
+    if (navItem) return t(navItem.labelKey)
+
+    if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
+    return t('nav.dashboard')
   }
 
   const truncateKey = (key: string) => {
@@ -107,31 +103,7 @@ const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       <div className="nav-right">
-        <div className="notification-wrapper">
-          <button
-            ref={bellButtonRef}
-            type="button"
-            className={`notification-bell-btn ${isNotificationOpen ? 'active' : ''}`}
-            onClick={() => setIsNotificationOpen(prev => !prev)}
-            aria-label="Notifications"
-            aria-expanded={isNotificationOpen}
-            id="btn-notifications"
-            data-testid="notification-bell-btn"
-          >
-            <Bell size={20} />
-            {unreadCount > 0 && (
-              <span className="notification-badge" data-testid="notification-badge">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </button>
-
-          <NotificationCenter
-            isOpen={isNotificationOpen}
-            onClose={() => setIsNotificationOpen(false)}
-            anchorRef={bellButtonRef}
-          />
-        </div>
+        <NotificationBell />
 
         {/* Theme toggle: cycles light -> dark -> system */}
         <button
@@ -197,7 +169,7 @@ const TopNav: React.FC<TopNavProps> = ({
               <span className="wallet-chip connected" id="wallet-pubkey-display" style={{ opacity: 0.6 }}>
                 {truncateKey(publicKey)}
               </span>
-              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: '#fef3c7', color: '#92400e' }}>
+              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--status-warning-surface-strong)', color: 'var(--status-warning-text)' }}>
                 {t('wallet.reconnectRequired')}
               </span>
             </>

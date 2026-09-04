@@ -154,6 +154,29 @@ export interface PaymentMetrics {
   refunded: PaymentAmount;
 }
 
+/**
+ * Registry cache activity counters exposed in the health dashboard.
+ *
+ * Issue #427 — acceptance criterion: "Cache hit rate reported in metrics."
+ */
+export interface RegistryCacheMetrics {
+  /** Total cache hits since process start. */
+  hits: number;
+  /** Total cache misses since process start. */
+  misses: number;
+  /** Requests that bypassed the cache (bypass header or TTL=0). */
+  bypasses: number;
+  /** Hits served from a stale (invalidated but not yet evicted) entry. */
+  staleHits: number;
+  /** Number of explicit cache invalidation sweeps. */
+  invalidations: number;
+  /**
+   * Fraction of (hits / (hits + misses)) in `[0, 1]`.
+   * `0` until the first request has been served.
+   */
+  hitRate: number;
+}
+
 /** The full payload returned by `GET /health/dashboard`. */
 export interface HealthDashboard {
   status: DashboardStatus;
@@ -171,6 +194,8 @@ export interface HealthDashboard {
   agents: AgentMetrics;
   tasks: TaskMetrics;
   payments: PaymentMetrics;
+  /** Registry cache hit-rate and staleness counters (Issue #427). */
+  registryCache: RegistryCacheMetrics;
 }
 
 /**
@@ -200,4 +225,20 @@ export interface MetricsSources {
   collectAgents?: () => Promise<AgentMetrics> | AgentMetrics;
   collectTasks?: () => Promise<TaskMetrics> | TaskMetrics;
   collectPayments?: () => Promise<PaymentMetrics> | PaymentMetrics;
+}
+
+/** Prometheus histogram bucket definition and counts. */
+export interface PrometheusHistogram {
+  buckets: Record<number, number>; // upper bound (le) -> cumulative count
+  sum: number;
+  count: number;
+}
+
+/** Scrape health verdict for Prometheus endpoint. */
+export interface ScrapeHealth {
+  status: "ok" | "degraded" | "error";
+  uptimeSeconds: number;
+  lastScrapeTimestamp: string;
+  metricFamiliesCount: number;
+  registeredOnce: boolean;
 }

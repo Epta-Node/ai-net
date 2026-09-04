@@ -2,6 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { formatNumber } from '../../utils/format'
+import { cardEntrance } from '../../utils/animationPresets'
 import { Star } from 'lucide-react'
 
 export interface AgentData {
@@ -82,10 +83,10 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
   return (
     <motion.div
       className="bg-background-surface border border-border-subtle rounded-2xl p-5 flex flex-col cursor-pointer group relative overflow-hidden"
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      variants={cardEntrance(index)}
+      initial="hidden"
+      whileInView="visible"
       viewport={{ once: true, margin: '-30px' }}
-      transition={{ duration: 0.4, delay: index * 0.08 }}
       whileHover={{ y: -4 }}
     >
       <div className="absolute inset-0 bg-gradient-primary opacity-0 group-hover:opacity-[0.03] transition-opacity duration-500" />
@@ -93,7 +94,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
 
       <div className="flex items-start justify-between mb-3 relative">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-[0_0_12px_rgba(56,189,248,0.15)] transition-all duration-300">
+          <div className="w-10 h-10 rounded-xl bg-background-surface-alt border border-border-subtle flex items-center justify-center group-hover:border-accent-cyan/30 group-hover:shadow-info-glow transition-all duration-300">
             {agent.icon}
           </div>
           <div className="flex flex-col">

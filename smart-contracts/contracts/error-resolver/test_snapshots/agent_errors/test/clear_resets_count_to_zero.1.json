@@ -143,6 +143,55 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AuditLog"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "actor"
+                                  },
+                                  "val": {
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "op"
+                                  },
+                                  "val": {
+                                    "symbol": "caller_ok"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "target"
+                                  },
+                                  "val": {
+                                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "timestamp"
+                                  },
+                                  "val": {
+                                    "u64": 0
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "AuthorizedCallers"
                             }
                           ]
@@ -159,12 +208,48 @@
                         "key": {
                           "vec": [
                             {
+<<<<<<< HEAD
                               "symbol": "Paused"
+=======
+                              "symbol": "PendingOps"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                             }
                           ]
                         },
                         "val": {
+<<<<<<< HEAD
                           "bool": false
+=======
+                          "vec": []
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Quorum"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Signers"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            }
+                          ]
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                         }
                       }
                     ]
