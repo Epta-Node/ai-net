@@ -398,6 +398,11 @@ export class Coordinator {
       'node execution started'
     );
 
+    this.log.info(
+      { taskId, nodeId: node.nodeId, event: 'task.execution_trace', phase: 'start' },
+      'task.execution_trace'
+    );
+
     try {
       const { agentId, result } = await this.dispatchWithRetry(taskId, node, this.contextFor(node, nodeById));
 
@@ -422,6 +427,17 @@ export class Coordinator {
       this.log.info(
         { taskId, nodeId: node.nodeId, agentType: node.type, score: node.quality?.score },
         'node completed'
+      );
+
+      this.log.info(
+        {
+          taskId,
+          nodeId: node.nodeId,
+          event: 'task.execution_trace',
+          phase: 'completed',
+          score: node.quality?.score,
+        },
+        'task.execution_trace'
       );
 
       const txHash = await this.paymentService.release(taskId, node.nodeId);
@@ -456,6 +472,17 @@ export class Coordinator {
       this.log.error(
         { taskId, nodeId: node.nodeId, agentType: node.type, err },
         'node failed'
+      );
+
+      this.log.info(
+        {
+          taskId,
+          nodeId: node.nodeId,
+          event: 'task.execution_trace',
+          phase: 'failed',
+          error: node.error,
+        },
+        'task.execution_trace'
       );
 
       if (nodeSpan) tracingService.endSpan(nodeSpan.spanId, 'failed', { error: asErrorMessage(err) });
