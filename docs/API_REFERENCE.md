@@ -46,11 +46,16 @@ All error responses return a standardized JSON error envelope:
 | HTTP Status | Error Code | Description | Recommended Resolution |
 |---|---|---|---|
 | `400 Bad Request` | `VALIDATION_ERROR` | Request payload fails schema validation or missing required fields | Inspect `details` object and correct query parameters or JSON body |
-| `401 Unauthorized` | `AUTHENTICATION_ERROR` | Missing, expired, or malformed JWT token or API key | Refresh JWT token via auth endpoint or supply valid `X-API-Key` |
-| `402 Payment Required`| `PAYMENT_REQUIRED` | Insufficient XLM/USDC balance or missing Soroban fee authorization | Fund account or sign Soroban payment contract invocation |
+| `401 Unauthorized` | `UNAUTHORIZED` | Missing, expired, or malformed JWT token or API key | Refresh JWT token via auth endpoint or supply valid `X-API-Key` |
+| `402 Payment Required`| `PAYMENT_ERROR` | Insufficient XLM/USDC balance or missing Soroban fee authorization | Fund account or sign Soroban payment contract invocation |
+| `403 Forbidden` | `FORBIDDEN` | Authenticated caller lacks permission for the requested resource | Verify wallet/API key ownership or contact admin |
 | `404 Not Found` | `NOT_FOUND` | Requested agent, task, or resource does not exist | Verify UUID / address in URL parameters |
-| `429 Too Many Requests`| `RATE_LIMIT_EXCEEDED`| Request rate exceeded client tier quota | Respect `Retry-After` header before re-sending requests |
+| `409 Conflict` | `CONFLICT` | Request conflicts with current resource state | Resolve the conflict and retry |
+| `429 Too Many Requests`| `RATE_LIMITED`| Request rate exceeded client tier quota | Respect `Retry-After` header before re-sending requests |
 | `500 Internal Error` | `INTERNAL_ERROR` | Unhandled backend exception | Check correlation ID in server logs |
+| `502 Bad Gateway` | `UPSTREAM_UNAVAILABLE` | Upstream service returned an invalid response | Retry or contact operations |
+| `503 Service Unavailable` | `STELLAR_UNAVAILABLE` | Stellar Horizon or RPC unavailable | Retry after a short delay |
+| `504 Gateway Timeout` | `PROVIDER_TIMEOUT` | Upstream provider timed out | Retry with backoff |
 
 ---
 

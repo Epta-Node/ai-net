@@ -85,8 +85,11 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     if (useCursor) {
       const parse = AgentCursorListSchema.safeParse(req.query);
       if (!parse.success) {
-        res.status(400).json({ error: parse.error.flatten() });
-        return;
+        throw new ValidationError(
+          "Invalid query parameters",
+          { issues: parse.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        );
       }
       const { cursor, limit, capability, minReputation, maxPriceXLM, status } = parse.data;
       try {
@@ -108,7 +111,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
           },
         });
       } catch (err) {
-        res.status(500).json({ error: "Internal Server Error" });
+        next(new AppError("Internal Server Error", 500, "INTERNAL_ERROR", undefined, res.locals.correlationId as string | undefined));
       }
       return;
     }
@@ -161,8 +164,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     try {
       const agent = getDb().findById(req.params.id);
       if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
+        throw new NotFoundError("Agent", req.params.id, res.locals.correlationId as string | undefined);
       }
       res.json(agent);
     } catch (error) {
@@ -195,8 +197,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
     try {
       const agent = getDb().findById(req.params.id);
       if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
+        throw new NotFoundError("Agent", req.params.id, res.locals.correlationId as string | undefined);
       }
 
       const startedAt = Date.now();
@@ -268,18 +269,20 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
           await horizon.loadAccount(data.stellarPublicKey);
         } catch (error: any) {
           if (error?.response?.status === 404) {
-            res.status(400).json({
-              error: "Stellar account not found",
-              code: "StellarAccountNotFound",
-            });
-            return;
+            throw new ValidationError(
+              "Stellar account not found",
+              { stellarPublicKey: data.stellarPublicKey },
+              correlationId,
+            );
           }
           if (process.env.NODE_ENV !== "test") {
-            res.status(400).json({
-              error: "Failed to verify Stellar account",
-              code: "StellarVerificationFailed",
-            });
-            return;
+            throw new AppError(
+              "Failed to verify Stellar account",
+              503,
+              "STELLAR_UNAVAILABLE",
+              { stellarPublicKey: data.stellarPublicKey, reason: error?.message },
+              correlationId,
+            );
           }
         }
       }
@@ -351,8 +354,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       const db = getDb();
       const agent = db.findById(req.params.id);
       if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
+        throw new NotFoundError("Agent", req.params.id, res.locals.correlationId as string | undefined);
       }
 
       db.upsert({ ...agent, lastSeenAt: new Date().toISOString(), status: "online" });
@@ -431,8 +433,7 @@ export function createAgentsRouter(options: AgentsRouterOptions = {}): Router {
       const db = getDb();
       const agent = db.findById(req.params.id);
       if (!agent) {
-        res.status(404).json({ error: "Agent not found" });
-        return;
+        throw new NotFoundError("Agent", req.params.id, correlationId);
       }
 
       const signature = req.headers["x-signature"] as string | undefined;

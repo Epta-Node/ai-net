@@ -229,11 +229,22 @@ export function createApp(opts: AppOptions = {}): {
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
 
-  app.use((_req: Request, res: Response) => {
+  app.use((req: Request, res: Response) => {
+    const correlationId =
+      (res.locals.traceId as string | undefined) ??
+      (res.locals.correlationId as string | undefined) ??
+      "unknown";
     res.status(404).json({
-      error: { message: "Not found", code: "NOT_FOUND" },
-      requestId: res.locals.requestId,
-      traceId: res.locals.traceId,
+      error: {
+        code: "NOT_FOUND",
+        message: "Not found",
+        path: req.path,
+        correlationId,
+        timestamp: new Date().toISOString(),
+      },
+      statusCode: 404,
+      path: req.path,
+      requestId: res.locals.requestId ?? "unknown",
     });
   });
 

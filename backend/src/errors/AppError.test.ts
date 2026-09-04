@@ -129,11 +129,11 @@ describe("ValidationError", () => {
 // ── AuthenticationError ───────────────────────────────────────────────────────
 
 describe("AuthenticationError", () => {
-  it("has statusCode 401 and code AUTHENTICATION_ERROR", () => {
+  it("has statusCode 401 and code UNAUTHORIZED", () => {
     const err = new AuthenticationError();
 
     expect(err.statusCode).toBe(401);
-    expect(err.code).toBe("AUTHENTICATION_ERROR");
+    expect(err.code).toBe("UNAUTHORIZED");
     expect(err.message).toBe("Authentication required");
     expect(err.name).toBe("AuthenticationError");
   });
@@ -151,11 +151,11 @@ describe("AuthenticationError", () => {
 // ── RateLimitError ────────────────────────────────────────────────────────────
 
 describe("RateLimitError", () => {
-  it("has statusCode 429 and code RATE_LIMIT_EXCEEDED", () => {
+  it("has statusCode 429 and code RATE_LIMITED", () => {
     const err = new RateLimitError();
 
     expect(err.statusCode).toBe(429);
-    expect(err.code).toBe("RATE_LIMIT_EXCEEDED");
+    expect(err.code).toBe("RATE_LIMITED");
     expect(err.message).toBe("Too many requests");
     expect(err.name).toBe("RateLimitError");
   });
