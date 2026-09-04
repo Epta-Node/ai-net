@@ -7,6 +7,8 @@ import { currentTraceContext } from '../services/traceContext';
 
 const REDACTED = "[REDACTED]";
 const REDACTED_ADDRESS = "[REDACTED_ADDRESS]";
+/** Maximum length for a single log field value before it is truncated. */
+export const MAX_LOG_FIELD_LEN = 500;
 const DEFAULT_LOG_CONTEXT = {
   requestId: "system",
   traceId: "system",
@@ -36,6 +38,13 @@ function redactString(value: string): string {
     .replace(BEARER_RE, `Bearer ${REDACTED}`)
     .replace(KEY_VALUE_SECRET_RE, (_match, key) => `${key}=${REDACTED}`)
     .replace(STELLAR_ADDRESS_RE, REDACTED_ADDRESS);
+}
+
+function truncateField(value: string): string {
+  if (value.length > MAX_LOG_FIELD_LEN) {
+    return `${value.slice(0, MAX_LOG_FIELD_LEN)}...`;
+  }
+  return value;
 }
 
 function redactByKey(key: string | undefined, value: unknown): unknown {
@@ -77,7 +86,7 @@ export function sanitizeLogPayload(
   const keyed = redactByKey(key, value);
   if (keyed !== value) return keyed;
 
-  if (typeof value === "string") return redactString(value);
+  if (typeof value === "string") return truncateField(redactString(value));
   if (typeof value !== "object" || value === null) return value;
   if (value instanceof Error) return serializeError(value);
   if (seen.has(value)) return "[Circular]";
@@ -141,15 +150,34 @@ function createBaseLogger(destination?: DestinationStream): Logger {
       },
     },
     timestamp: pino.stdTimeFunctions.isoTime,
-    // Auto-inject traceId / spanId from the active AsyncLocalStorage trace
-    // context (Issue #407) so every log line in a traced flow carries the
-    // correlation IDs without the caller having to pass them explicitly.
+    // Hide sensitive fields at the serializer level (Issue #494) before the
+    // custom recursive sanitizer runs. This covers keys nested at any depth.
+    redact: {
+      censor: REDACTED,
+      paths: [
+        '*.apiKey',
+        '*.secret',
+        '*.password',
+        '*.token',
+        '*.authorization',
+        '*.privateKey',
+        '*.seed',
+        '*.cookie',
+        '*.api_key',
+        '*.secretKey',
+      ],
+    },
+    // Auto-inject traceId / spanId / parentSpanId from the active
+    // AsyncLocalStorage trace context (Issue #407 / #494) so every log line in
+    // a traced flow carries the correlation IDs without the caller having to
+    // pass them explicitly.
     mixin() {
       const ctx = currentTraceContext();
       if (!ctx) return {};
       const bindings: Record<string, unknown> = { traceId: ctx.traceId, spanId: ctx.spanId };
       if (ctx.taskId) bindings.taskId = ctx.taskId;
       if (ctx.requestId) bindings.requestId = ctx.requestId;
+      if (ctx.parentSpanId) bindings.parentSpanId = ctx.parentSpanId;
       return bindings;
     },
     hooks: {

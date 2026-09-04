@@ -40,9 +40,12 @@ function deriveRoute(req: Request): string {
 }
 
 function buildLogContext(req: Request, res: Response): Record<string, unknown> {
+  const correlationId =
+    res.locals.traceId ?? res.locals.correlationId ?? req.traceId ?? req.correlationId;
   return {
     requestId: res.locals.requestId ?? req.requestId,
-    traceId: res.locals.traceId ?? res.locals.correlationId ?? req.traceId ?? req.correlationId,
+    traceId: correlationId,
+    correlationId,
     userId: deriveUserId(req),
     taskId: deriveTaskId(req) ?? "none",
     route: deriveRoute(req),
@@ -61,16 +64,21 @@ export function requestLogger(req: Request, res: Response, next: NextFunction): 
       res.locals.logContext = logContext;
       updateLogContext(logContext);
 
-      createLogger().info(
-        {
-          method: req.method,
-          path: req.path,
-          statusCode: res.statusCode,
-          durationMs,
-          ip: req.ip,
-        },
-        "request completed",
-      );
+      const fields = {
+        method: req.method,
+        path: req.path,
+        statusCode: res.statusCode,
+        durationMs,
+        ip: req.ip,
+      };
+
+      // Slow requests (>10s) are flagged at warn level so they can be alerted
+      // on independently from the normal info-level request logs.
+      if (durationMs > 10000) {
+        createLogger().warn({ ...fields, slow: true }, "request completed");
+      } else {
+        createLogger().info(fields, "request completed");
+      }
     });
 
     next();
