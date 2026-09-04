@@ -15,22 +15,25 @@ export const ErrorCode = {
   CONFLICT: "CONFLICT",
 
   // ── Auth ───────────────────────────────────────────────────────────────────
-  AUTHENTICATION_ERROR: "AUTHENTICATION_ERROR",
-  AUTHORIZATION_ERROR: "AUTHORIZATION_ERROR",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  FORBIDDEN: "FORBIDDEN",
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
-  RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
+  RATE_LIMITED: "RATE_LIMITED",
 
   // ── Payment / Stellar ─────────────────────────────────────────────────────
   PAYMENT_ERROR: "PAYMENT_ERROR",
+  STELLAR_UNAVAILABLE: "STELLAR_UNAVAILABLE",
 
   // ── Upstream AI/provider ──────────────────────────────────────────────────
+  UPSTREAM_UNAVAILABLE: "UPSTREAM_UNAVAILABLE",
+  VENICE_UNAVAILABLE: "VENICE_UNAVAILABLE",
   PROVIDER_ERROR: "PROVIDER_ERROR",
   PROVIDER_TIMEOUT: "PROVIDER_TIMEOUT",
   PROVIDER_RATE_LIMITED: "PROVIDER_RATE_LIMITED",
 
   // ── Server internals ───────────────────────────────────────────────────────
-  INTERNAL_SERVER_ERROR: "INTERNAL_SERVER_ERROR",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
   UNSUPPORTED_API_VERSION: "UNSUPPORTED_API_VERSION",
 } as const;
 
@@ -45,14 +48,17 @@ export const HTTP_STATUS_FOR_CODE: Record<ErrorCode, number> = {
   VALIDATION_ERROR: 400,
   NOT_FOUND: 404,
   CONFLICT: 409,
-  AUTHENTICATION_ERROR: 401,
-  AUTHORIZATION_ERROR: 403,
-  RATE_LIMIT_EXCEEDED: 429,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  RATE_LIMITED: 429,
   PAYMENT_ERROR: 402,
+  STELLAR_UNAVAILABLE: 503,
+  UPSTREAM_UNAVAILABLE: 502,
+  VENICE_UNAVAILABLE: 503,
   PROVIDER_ERROR: 502,
   PROVIDER_TIMEOUT: 504,
   PROVIDER_RATE_LIMITED: 429,
-  INTERNAL_SERVER_ERROR: 500,
+  INTERNAL_ERROR: 500,
   UNSUPPORTED_API_VERSION: 400,
 };
 
@@ -64,13 +70,16 @@ export const DEFAULT_MESSAGE_FOR_CODE: Record<ErrorCode, string> = {
   VALIDATION_ERROR: "Request input is invalid.",
   NOT_FOUND: "The requested resource was not found.",
   CONFLICT: "The request conflicts with the current state of the resource.",
-  AUTHENTICATION_ERROR: "Authentication required.",
-  AUTHORIZATION_ERROR: "You do not have permission to perform this action.",
-  RATE_LIMIT_EXCEEDED: "Too many requests. Please slow down.",
+  UNAUTHORIZED: "Authentication required.",
+  FORBIDDEN: "You do not have permission to perform this action.",
+  RATE_LIMITED: "Too many requests. Please slow down.",
   PAYMENT_ERROR: "Payment operation failed.",
+  STELLAR_UNAVAILABLE: "Stellar network unavailable.",
+  UPSTREAM_UNAVAILABLE: "An upstream service is unavailable.",
+  VENICE_UNAVAILABLE: "Venice API unavailable.",
   PROVIDER_ERROR: "An upstream AI provider returned an error.",
   PROVIDER_TIMEOUT: "The AI provider did not respond in time.",
   PROVIDER_RATE_LIMITED: "The AI provider is currently rate-limiting requests.",
-  INTERNAL_SERVER_ERROR: "An unexpected error occurred. Please try again later.",
+  INTERNAL_ERROR: "An unexpected error occurred. Please try again later.",
   UNSUPPORTED_API_VERSION: "The requested API version is not supported.",
 };

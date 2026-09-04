@@ -1,4 +1,4 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import { getTaskDb, createTaskDb } from "../../../db/tasks";
@@ -9,8 +9,10 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { idempotencyMiddleware } from "../../middleware/idempotency";
 import { currentTraceId } from "../../../services/traceContext";
 import { getConfig } from "../../../config";
+import { RateLimitError, NotFoundError, ForbiddenError, ConflictError } from "../../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
@@ -24,6 +26,7 @@ const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 // of `createTaskSchema` working.
 export { createTaskSchema } from "../../../schemas/task";
 import { createTaskSchema, listTasksQuerySchema } from "../../../schemas/task";
+import { TaskListSchema as LegacyTaskListSchema } from "../../schemas/task.schema";
 
 const TaskCursorListSchema = z.object({
   cursor: z.string().optional(),
@@ -46,7 +49,8 @@ export function createV2TasksRouter(
   const jobQueue = queue ?? getGlobalJobQueue();
 
   // POST /api/tasks — v2 format with enhanced response, idempotent
-  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+    try {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
@@ -59,17 +63,12 @@ export function createV2TasksRouter(
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
       if (total >= dailyTaskLimit) {
-        res.status(429).json({
-          error: {
-            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
-            code: "DAILY_LIMIT_EXCEEDED",
-          },
-          _meta: {
-            version: "2.0",
-            timestamp: new Date().toISOString(),
-          },
-        });
-        return;
+        const correlationId = res.locals.correlationId as string | undefined;
+        throw new RateLimitError(
+          `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
+          { limit: dailyTaskLimit, window: "24h" },
+          correlationId,
+        );
       }
     }
 
@@ -116,10 +115,14 @@ export function createV2TasksRouter(
         stream: `/api/tasks/${task.id}/stream`,
       },
     });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // GET /api/tasks — v2 format: cursor pagination when ?cursor or ?limit present, offset otherwise
-  tasksRouter.get("/", (req: Request, res: Response): void => {
+  tasksRouter.get("/", (req: Request, res: Response, next: NextFunction): void => {
+    try {
     const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
     const now = new Date().toISOString();
 
@@ -129,11 +132,11 @@ export function createV2TasksRouter(
     if (useCursor) {
       const parse = TaskCursorListSchema.safeParse(req.query);
       if (!parse.success) {
-        res.status(400).json({
-          error: parse.error.flatten(),
-          _meta: { version: "2.0", timestamp: now },
-        });
-        return;
+        throw new ValidationError(
+          "Invalid query parameters",
+          { issues: parse.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        );
       }
 
       const { cursor, limit, status, sort, q } = parse.data;
@@ -172,13 +175,13 @@ export function createV2TasksRouter(
     }
 
     // Offset fallback (backward-compatible)
-    const parse = TaskListSchema.safeParse(req.query);
+    const parse = LegacyTaskListSchema.safeParse(req.query);
     if (!parse.success) {
-      res.status(400).json({
-        error: parse.error.flatten(),
-        _meta: { version: "2.0", timestamp: now },
-      });
-      return;
+      throw new ValidationError(
+        "Invalid query parameters",
+        { issues: parse.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      );
     }
 
     const { page, pageSize, status, sort, q } = parse.data;
@@ -208,32 +211,26 @@ export function createV2TasksRouter(
         apiVersion: res.locals.apiVersion || "2.0",
       },
     });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // GET /api/tasks/:id — v2 format with enhanced response
-  tasksRouter.get("/:id", (req: Request, res: Response): void => {
+  tasksRouter.get("/:id", (req: Request, res: Response, next: NextFunction): void => {
+    try {
     const db = createTaskDb(getTaskDb());
     const task = db.findById(req.params.id);
     if (!task) {
-      res.status(404).json({
-        error: "Task not found",
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      return;
+      throw new NotFoundError("Task", req.params.id, res.locals.correlationId as string | undefined);
     }
     const requesterKey = req.headers["walletpublickey"] as string;
     if (!requesterKey || requesterKey !== task.walletPublicKey) {
-      res.status(403).json({
-        error: "Access denied",
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      return;
+      throw new ForbiddenError(
+        "Access denied",
+        { taskId: req.params.id, walletPublicKey: requesterKey },
+        res.locals.correlationId as string | undefined,
+      );
     }
 
     const now = new Date().toISOString();
@@ -253,44 +250,35 @@ export function createV2TasksRouter(
         cancel: `/api/tasks/${task.id}`,
       },
     });
+    } catch (err) {
+      next(err);
+    }
   });
 
   // DELETE /api/tasks/:id — v2 format with enhanced response
-  tasksRouter.delete("/:id", (req: Request, res: Response): void => {
+  tasksRouter.delete("/:id", (req: Request, res: Response, next: NextFunction): void => {
+    try {
     const db = createTaskDb(getTaskDb());
     const task = db.findById(req.params.id);
     if (!task) {
-      res.status(404).json({
-        error: "Task not found",
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      return;
+      throw new NotFoundError("Task", req.params.id, res.locals.correlationId as string | undefined);
     }
 
     const requesterKey = req.headers["walletpublickey"] as string;
     if (!requesterKey || requesterKey !== task.walletPublicKey) {
-      res.status(403).json({
-        error: "Not authorized to cancel this task",
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      return;
+      throw new ForbiddenError(
+        "Not authorized to cancel this task",
+        { taskId: req.params.id, walletPublicKey: requesterKey },
+        res.locals.correlationId as string | undefined,
+      );
     }
 
     if (task.status !== "queued") {
-      res.status(409).json({
-        error: `Cannot cancel task in '${task.status}' status`,
-        _meta: {
-          version: "2.0",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      return;
+      throw new ConflictError(
+        `Cannot cancel task in '${task.status}' status`,
+        { taskId: req.params.id, status: task.status },
+        res.locals.correlationId as string | undefined,
+      );
     }
 
     db.updateStatus(req.params.id, "cancelled");
@@ -313,6 +301,9 @@ export function createV2TasksRouter(
         self: `/api/tasks/${req.params.id}`,
       },
     });
+    } catch (err) {
+      next(err);
+    }
   });
 
   return tasksRouter;
