@@ -74,4 +74,14 @@ pub enum Error {
     AuctionNotAbortable = 25,
     /// An arithmetic operation overflowed while scoring bids.
     ArithmeticOverflow = 26,
+    /// Contract is already initialized.
+    AlreadyInitialized = 27,
+    /// Winning bidder cannot claim a bond refund.
+    WinnerCannotClaimRefund = 28,
+    /// Refund for this bid has already been claimed.
+    RefundAlreadyClaimed = 29,
+    /// The claim refund window has expired.
+    ClaimWindowExpired = 30,
+    /// The bond has already been refunded.
+    AlreadyRefunded = 31,
 }

@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::too_many_arguments)]
 
 //! # Agent Marketplace Contract
 //!
@@ -11,9 +12,7 @@ mod types;
 pub use errors::Error;
 pub use types::*;
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 #[contracttype]
 #[derive(Clone)]
@@ -146,11 +145,7 @@ impl AgentMarketplaceContract {
         let mut results = Vec::new(&env);
         for id in ids.iter() {
             let key = DataKey::ServiceListing(id);
-            if let Some(listing) = env
-                .storage()
-                .persistent()
-                .get::<_, ServiceListing>(&key)
-            {
+            if let Some(listing) = env.storage().persistent().get::<_, ServiceListing>(&key) {
                 if !listing.active {
                     continue;
                 }
@@ -252,9 +247,7 @@ impl AgentMarketplaceContract {
         listing.owner.require_auth();
 
         booking.completed = true;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         env.events().publish(
             (symbol_short!("market"), symbol_short!("svc_comp")),
@@ -286,9 +279,7 @@ impl AgentMarketplaceContract {
         booking.client.require_auth();
 
         booking.cancelled = true;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         env.events().publish(
             (symbol_short!("market"), symbol_short!("svc_canc")),
@@ -302,12 +293,8 @@ impl AgentMarketplaceContract {
     }
 
     /// Rate a completed booking (1-5 stars).
-    pub fn rate_booking(
-        env: Env,
-        booking_id: Symbol,
-        rating: u32,
-    ) -> Result<(), Error> {
-        if rating < 1 || rating > 5 {
+    pub fn rate_booking(env: Env, booking_id: Symbol, rating: u32) -> Result<(), Error> {
+        if !(1..=5).contains(&rating) {
             return Err(Error::InvalidPrice);
         }
 
@@ -328,27 +315,23 @@ impl AgentMarketplaceContract {
         booking.client.require_auth();
 
         booking.rating = rating;
-        env.storage()
-            .persistent()
-            .set(&booking_key, &booking);
+        env.storage().persistent().set(&booking_key, &booking);
 
         // Update agent rating aggregate
         let rating_key = DataKey::AgentRating(booking.agent_id.clone());
-        let mut agent_rating: AgentRating = env
-            .storage()
-            .persistent()
-            .get(&rating_key)
-            .unwrap_or(AgentRating {
-                agent_id: booking.agent_id.clone(),
-                total_ratings: 0,
-                rating_sum: 0,
-            });
+        let mut agent_rating: AgentRating =
+            env.storage()
+                .persistent()
+                .get(&rating_key)
+                .unwrap_or(AgentRating {
+                    agent_id: booking.agent_id.clone(),
+                    total_ratings: 0,
+                    rating_sum: 0,
+                });
 
         agent_rating.total_ratings += 1;
         agent_rating.rating_sum += rating as u64;
-        env.storage()
-            .persistent()
-            .set(&rating_key, &agent_rating);
+        env.storage().persistent().set(&rating_key, &agent_rating);
 
         Ok(())
     }

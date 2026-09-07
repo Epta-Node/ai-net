@@ -16,13 +16,15 @@ use soroban_sdk::{
 };
 
 /// Evidence submission phase: 3 days (259,200 seconds).
-const EVIDENCE_PHASE: u64 = 259_200;
+pub const EVIDENCE_PHASE: u64 = 259_200;
 /// Voting phase: 2 days (172,800 seconds).
-const VOTING_PHASE: u64 = 172_800;
+pub const VOTING_PHASE: u64 = 172_800;
 /// Appeal window: 2 days (172,800 seconds).
-const APPEAL_WINDOW: u64 = 172_800;
+pub const APPEAL_WINDOW: u64 = 172_800;
+/// Total dispute lifecycle window.
+pub const DISPUTE_WINDOW: u64 = EVIDENCE_PHASE + VOTING_PHASE + APPEAL_WINDOW;
 /// Number of jurors randomly selected.
-const JUROR_COUNT: u32 = 5;
+pub const JUROR_COUNT: u32 = 5;
 
 #[contracttype]
 #[derive(Clone)]
@@ -113,7 +115,7 @@ impl DisputeResolutionContract {
             .get(&DataKey::ActiveJurors)
             .unwrap_or_else(|| Vec::new(&env));
 
-        if jurors.len() == 0 {
+        if jurors.is_empty() {
             return Err(Error::NoJurorsAvailable);
         }
 
@@ -268,10 +270,7 @@ impl DisputeResolutionContract {
     }
 
     /// Resolve a dispute after voting period ends (admin or automated).
-    pub fn resolve_dispute(
-        env: Env,
-        dispute_id: Symbol,
-    ) -> Result<(), Error> {
+    pub fn resolve_dispute(env: Env, dispute_id: Symbol) -> Result<(), Error> {
         let key = DataKey::Dispute(dispute_id.clone());
         let mut dispute: Dispute = env
             .storage()
@@ -294,11 +293,7 @@ impl DisputeResolutionContract {
 
         for juror in dispute.jurors.iter() {
             let vote_key = DataKey::JurorVote(dispute_id.clone(), juror);
-            if let Some(vote) = env
-                .storage()
-                .persistent()
-                .get::<_, JurorVote>(&vote_key)
-            {
+            if let Some(vote) = env.storage().persistent().get::<_, JurorVote>(&vote_key) {
                 match vote.side {
                     VoteSide::Client => client_votes += 1,
                     VoteSide::Agent => agent_votes += 1,
@@ -325,11 +320,7 @@ impl DisputeResolutionContract {
     }
 
     /// Appeal a resolved dispute (must be within appeal window).
-    pub fn appeal_dispute(
-        env: Env,
-        dispute_id: Symbol,
-        appellant: Address,
-    ) -> Result<(), Error> {
+    pub fn appeal_dispute(env: Env, dispute_id: Symbol, appellant: Address) -> Result<(), Error> {
         appellant.require_auth();
 
         let key = DataKey::Dispute(dispute_id.clone());
@@ -377,10 +368,7 @@ impl DisputeResolutionContract {
     /// Get evidence count for a dispute.
     pub fn get_evidence_count(env: Env, dispute_id: Symbol) -> u32 {
         let count_key = DataKey::Evidence(dispute_id, 0);
-        env.storage()
-            .persistent()
-            .get(&count_key)
-            .unwrap_or(0)
+        env.storage().persistent().get(&count_key).unwrap_or(0)
     }
 }
 

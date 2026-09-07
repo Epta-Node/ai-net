@@ -346,3 +346,5 @@ pub struct RefundClaimedEvent {
     pub bidder: Address,
     pub bond: i128,
 }
+
+pub type BondRefundClaimedEvent = RefundClaimedEvent;

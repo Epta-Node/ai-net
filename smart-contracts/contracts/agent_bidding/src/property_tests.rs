@@ -9,12 +9,14 @@
 //! All tests use a counter-based deterministic PRNG (LCG).  To reproduce a
 //! failure, record the `iters` constant and the failing iteration index; the
 //! inputs are `seed + iters * index`.
+#![cfg(test)]
+#![allow(unused, deprecated, clippy::all)]
 
 extern crate alloc;
 extern crate std;
 
 use super::{
-    AgentBiddingContract, AgentBiddingContractClient, MAX_REPUTATION, PRICE_WEIGHT,
+    AgentBiddingContract, AgentBiddingContractClient, AuctionConfig, MAX_REPUTATION, PRICE_WEIGHT,
     REPUTATION_WEIGHT, SCORE_SCALE,
 };
 
@@ -38,29 +40,27 @@ fn create_test_auction(
     client.create_auction(
         creator,
         task_id,
-        &duration_secs,
-        &1_000_000, // reserve price: 0.1 XLM in stroops
-        &500_000,   // bond: 0.05 XLM
+        &AuctionConfig {
+            duration_secs,
+            reveal_duration_secs: 3600,
+            reserve_price: 1_000_000,
+            max_price: 0,
+            bond: 500_000,
+        },
     );
 }
 
 /// Recompute the commitment hash from plaintext fields.
-/// Mirrors `compute_commitment` in the contract and `test_commitment` in the
-/// test module.
+/// Mirrors `compute_commitment` in the contract and `commitment_of`.
 fn test_commitment(
-    env: &Env,
+    client: &AgentBiddingContractClient<'_>,
+    task_id: &Symbol,
     bidder: &Address,
     price: i128,
     terms: &String,
     salt: &BytesN<32>,
 ) -> BytesN<32> {
-    use soroban_sdk::xdr::ToXdr;
-    let mut preimage = soroban_sdk::Bytes::new(env);
-    preimage.append(&bidder.to_xdr(env));
-    preimage.append(&price.to_xdr(env));
-    preimage.append(&terms.clone().to_xdr(env));
-    preimage.append(&salt.to_xdr(env));
-    env.crypto().sha256(&preimage).into()
+    client.commitment_of(task_id, bidder, &price, terms, salt)
 }
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
@@ -143,7 +143,7 @@ fn setup_bid(
 ) {
     let salt = BytesN::<32>::from_array(env, &[salt_byte; 32]);
     let terms = String::from_str(env, "");
-    let comm = test_commitment(env, bidder, price, &terms, &salt);
+    let comm = test_commitment(client, task_id, bidder, price, &terms, &salt);
     client.submit_bid(task_id, bidder, &comm, &500_000, &(reputation as u32));
     env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
     client.reveal_bid(task_id, bidder, &price, &terms, &salt);
@@ -173,7 +173,7 @@ fn prop_reputation_bounds_within_valid_range() {
         let salt = BytesN::<32>::from_array(&env, &[rng.next_u32() as u8; 32]);
         let price: i128 = 2_000_000 + rng.next_i128(8_000_000);
         let terms = String::from_str(&env, "");
-        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        let commitment = test_commitment(&client, &task_id, &bidder, price, &terms, &salt);
 
         let result = client.try_submit_bid(&task_id, &bidder, &commitment, &500_000, &rep);
         assert!(
@@ -210,7 +210,7 @@ fn prop_reputation_above_max_always_rejected() {
         let salt = BytesN::<32>::from_array(&env, &[rng.next_u32() as u8; 32]);
         let price: i128 = 2_000_000;
         let terms = String::from_str(&env, "");
-        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        let commitment = test_commitment(&client, &task_id, &bidder, price, &terms, &salt);
 
         let result = client.try_submit_bid(&task_id, &bidder, &commitment, &500_000, &rep);
         assert!(result.is_err(), "reputation {} should be rejected", rep);
@@ -307,7 +307,7 @@ fn submit_only(
 ) {
     let salt = BytesN::<32>::from_array(env, &[salt_byte; 32]);
     let terms = String::from_str(env, "");
-    let comm = test_commitment(env, bidder, price, &terms, &salt);
+    let comm = test_commitment(client, task_id, bidder, price, &terms, &salt);
     client.submit_bid(task_id, bidder, &comm, &500_000, &(reputation as u32));
 }
 
@@ -357,7 +357,7 @@ fn prop_escrow_amount_matches_winning_price() {
         reveal_only(&env, &client, &task_id, &a, price_a, 1);
         reveal_only(&env, &client, &task_id, &b, price_b, 2);
 
-        client.reveal_bids(&task_id);
+        client.reveal_bids(&creator, &task_id);
 
         // Score comparison mirrors contract logic.
         let (score_a, score_b) = compute_score(price_a, price_b, rep_a, rep_b);
@@ -372,7 +372,7 @@ fn prop_escrow_amount_matches_winning_price() {
             winning_price = price_b;
         }
 
-        client.award_contract(&task_id);
+        client.award_contract(&creator, &task_id);
 
         let escrow = client.get_escrow(&task_id).unwrap();
         assert_eq!(
@@ -408,7 +408,7 @@ fn prop_escrow_not_created_before_award() {
         let rep = (rng.next_u32() % (MAX_REPUTATION + 1)) as u32;
 
         setup_bid(&env, &client, &task_id, &bidder, price, rep, 3);
-        client.reveal_bids(&task_id);
+        client.reveal_bids(&creator, &task_id);
 
         let escrow = client.get_escrow(&task_id);
         assert!(
@@ -416,7 +416,7 @@ fn prop_escrow_not_created_before_award() {
             "escrow should not exist before award_contract"
         );
 
-        client.award_contract(&task_id);
+        client.award_contract(&creator, &task_id);
 
         let escrow = client.get_escrow(&task_id).unwrap();
         assert_eq!(escrow.amount, price);
@@ -431,7 +431,6 @@ fn prop_escrow_not_created_before_award() {
 #[test]
 fn prop_unique_auction_ids() {
     let iters = 200;
-    let mut rng = Rng::new(0xAAAA_BBBB);
 
     let (env, client) = setup();
     let creator = Address::generate(&env);
@@ -441,7 +440,17 @@ fn prop_unique_auction_ids() {
         let task_id_str = alloc::format!("auc_{}", i);
         let task_id = Symbol::new(&env, &task_id_str);
 
-        let result = client.try_create_auction(&creator, &task_id, &3600, &1_000_000, &500_000);
+        let result = client.try_create_auction(
+            &creator,
+            &task_id,
+            &AuctionConfig {
+                duration_secs: 3600,
+                reveal_duration_secs: 3600,
+                reserve_price: 1_000_000,
+                max_price: 0,
+                bond: 500_000,
+            },
+        );
         assert!(
             result.is_ok(),
             "auction {} should be created without collision",
@@ -479,7 +488,7 @@ fn prop_unique_bidder_entries() {
         let rep = (rng.next_u32() % (MAX_REPUTATION + 1)) as u32;
         let salt = BytesN::<32>::from_array(&env, &[(i % 256) as u8; 32]);
         let terms = String::from_str(&env, "");
-        let comm = test_commitment(&env, &bidder, price, &terms, &salt);
+        let comm = test_commitment(&client, &task_id, &bidder, price, &terms, &salt);
 
         let result = client.try_submit_bid(&task_id, &bidder, &comm, &500_000, &rep);
         assert!(result.is_ok(), "bidder {} should be accepted", i);
@@ -504,7 +513,17 @@ fn prop_zero_bond_no_panic() {
     let creator = Address::generate(&env);
     let task_id = Symbol::new(&env, "mp1");
 
-    let result = client.try_create_auction(&creator, &task_id, &3600, &1_000_000, &0);
+    let result = client.try_create_auction(
+        &creator,
+        &task_id,
+        &AuctionConfig {
+            duration_secs: 3600,
+            reveal_duration_secs: 3600,
+            reserve_price: 1_000_000,
+            max_price: 0,
+            bond: 0,
+        },
+    );
     assert!(result.is_err(), "zero bond should fail, not panic");
 }
 
@@ -515,7 +534,17 @@ fn prop_zero_reserve_price_no_panic() {
     let creator = Address::generate(&env);
     let task_id = Symbol::new(&env, "mp2");
 
-    let result = client.try_create_auction(&creator, &task_id, &3600, &0, &500_000);
+    let result = client.try_create_auction(
+        &creator,
+        &task_id,
+        &AuctionConfig {
+            duration_secs: 3600,
+            reveal_duration_secs: 3600,
+            reserve_price: 0,
+            max_price: 0,
+            bond: 500_000,
+        },
+    );
     assert!(result.is_err(), "zero reserve price should fail, not panic");
 }
 
@@ -526,13 +555,23 @@ fn prop_negative_bond_no_panic() {
     let creator = Address::generate(&env);
     let task_id = Symbol::new(&env, "mp3");
 
-    let result = client.try_create_auction(&creator, &task_id, &3600, &1_000_000, &-1);
+    let result = client.try_create_auction(
+        &creator,
+        &task_id,
+        &AuctionConfig {
+            duration_secs: 3600,
+            reveal_duration_secs: 3600,
+            reserve_price: 1_000_000,
+            max_price: 0,
+            bond: -1,
+        },
+    );
     assert!(result.is_err(), "negative bond should fail, not panic");
 }
 
-/// Reputation > MAX_REPUTATION always fails gracefully.
+/// Invalid reputation (> MAX_REPUTATION) always fails gracefully.
 #[test]
-fn prop_excess_reputation_no_panic() {
+fn prop_invalid_reputation_fails_gracefully() {
     let (env, client) = setup();
     let creator = Address::generate(&env);
     let bidder = Address::generate(&env);
@@ -542,7 +581,7 @@ fn prop_excess_reputation_no_panic() {
 
     let salt = BytesN::<32>::from_array(&env, &[0xAA; 32]);
     let terms = String::from_str(&env, "");
-    let comm = test_commitment(&env, &bidder, 2_000_000, &terms, &salt);
+    let comm = test_commitment(&client, &task_id, &bidder, 2_000_000, &terms, &salt);
 
     for bad_rep in [101u32, 200, 1000, u32::MAX] {
         let result = client.try_submit_bid(&task_id, &bidder, &comm, &500_000, &bad_rep);
@@ -581,7 +620,7 @@ fn prop_wrong_bond_no_panic() {
 
     let salt = BytesN::<32>::from_array(&env, &[0xBB; 32]);
     let terms = String::from_str(&env, "");
-    let comm = test_commitment(&env, &bidder, 2_000_000, &terms, &salt);
+    let comm = test_commitment(&client, &task_id, &bidder, 2_000_000, &terms, &salt);
 
     for wrong_bond in [0i128, 1, 499_999, 500_001, 1_000_000, i128::MAX] {
         let result = client.try_submit_bid(&task_id, &bidder, &comm, &wrong_bond, &50);
@@ -607,7 +646,7 @@ fn prop_invalid_reveal_price_no_panic() {
     let salt = BytesN::<32>::from_array(&env, &[0xCC; 32]);
     let terms = String::from_str(&env, "");
     let real_price: i128 = 5_000_000;
-    let comm = test_commitment(&env, &bidder, real_price, &terms, &salt);
+    let comm = test_commitment(&client, &task_id, &bidder, real_price, &terms, &salt);
     client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
@@ -639,7 +678,7 @@ fn prop_wrong_commitment_reveal_no_panic() {
 
     let salt = BytesN::<32>::from_array(&env, &[0xDD; 32]);
     let terms = String::from_str(&env, "");
-    let comm = test_commitment(&env, &bidder, 5_000_000, &terms, &salt);
+    let comm = test_commitment(&client, &task_id, &bidder, 5_000_000, &terms, &salt);
     client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
@@ -664,7 +703,7 @@ fn prop_submit_wrong_bond_no_panic() {
 
     let salt = BytesN::<32>::from_array(&env, &[0xEE; 32]);
     let terms = String::from_str(&env, "");
-    let comm = test_commitment(&env, &bidder, 3_000_000, &terms, &salt);
+    let comm = test_commitment(&client, &task_id, &bidder, 3_000_000, &terms, &salt);
 
     let result = client.try_submit_bid(&task_id, &bidder, &comm, &1, &50);
     assert!(

@@ -1,6 +1,6 @@
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    Symbol, Vec,
+    String, Symbol, Vec,
 };
 
 const CONTRACT_VERSION: &str = "1.0.0";
@@ -144,7 +144,7 @@ fn apply_allowlist_op(env: &Env, op: &PendingOp) -> Result<(), ContractError> {
             allowlist.push_back(op.target.clone());
         }
     } else {
-        let mut updated = Vec::new(&env);
+        let mut updated = Vec::new(env);
         for c in allowlist.iter() {
             if c != op.target {
                 updated.push_back(c);
@@ -234,12 +234,7 @@ impl ErrorResolverContract {
             .instance()
             .get(&DataKey::PendingOps)
             .unwrap_or_else(|| Vec::new(&env));
-        for op in ops.iter() {
-            if op.op_id == op_id {
-                return Some(op);
-            }
-        }
-        None
+        ops.into_iter().find(|op| op.op_id == op_id)
     }
 
     /// Sets the quorum threshold. Only the admin can call this.
@@ -707,6 +702,6 @@ mod test {
 
         client.add_authorized_caller(&registry);
         let log = client.get_audit_log();
-        assert!(log.len() >= 1);
+        assert!(!log.is_empty());
     }
 }

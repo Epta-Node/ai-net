@@ -46,6 +46,36 @@ pub fn starts_with(value: &String, prefix: &str) -> bool {
     buf[..plen] == *prefix.as_bytes()
 }
 
+/// Returns `true` if `value` represents a valid semantic version string (e.g. "1.0.0", "0.9.0", "99.0.0").
+pub fn is_valid_version(value: &String) -> bool {
+    let len = value.len() as usize;
+    if len == 0 || len > MAX_TAG_LEN {
+        return false;
+    }
+    let mut buf = [0u8; MAX_TAG_LEN];
+    value.copy_into_slice(&mut buf[..len]);
+    let s = &buf[..len];
+
+    let mut dot_count = 0;
+    let mut part_len = 0;
+    for &b in s {
+        if b == b'.' {
+            if part_len == 0 {
+                return false;
+            }
+            dot_count += 1;
+            part_len = 0;
+        } else if b.is_ascii_digit() {
+            part_len += 1;
+        } else if b == b'-' || b == b'+' {
+            break;
+        } else {
+            return false;
+        }
+    }
+    dot_count >= 2 && part_len > 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

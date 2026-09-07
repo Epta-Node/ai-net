@@ -90,10 +90,11 @@ mod types;
 pub use errors::Error;
 pub use types::{
     Auction, AuctionAbortedEvent, AuctionConfig, AuctionCreatedEvent, AuctionPhase,
-    BidRevealedEvent, BidSubmittedEvent, BidsRevealedEvent, ContractAwardedEvent, DataKey, Escrow,
-    SealedBid, COMMITMENT_DOMAIN, DEFAULT_BIDDING_DURATION_SECS, DEFAULT_REVEAL_DURATION_SECS,
-    MAX_BIDDERS, MAX_BID_PRICE, MAX_PHASE_DURATION_SECS, MAX_REPUTATION, MAX_TERMS_LEN,
-    MIN_PHASE_DURATION_SECS, PRICE_WEIGHT, REPUTATION_WEIGHT, SCORE_SCALE,
+    BidRevealedEvent, BidSubmittedEvent, BidsRevealedEvent, BondRefundClaimedEvent,
+    ContractAwardedEvent, DataKey, Escrow, RefundClaimedEvent, SealedBid, CLAIM_WINDOW_SECS,
+    COMMITMENT_DOMAIN, DEFAULT_BIDDING_DURATION_SECS, DEFAULT_REVEAL_DURATION_SECS, MAX_BIDDERS,
+    MAX_BID_PRICE, MAX_PHASE_DURATION_SECS, MAX_REPUTATION, MAX_TERMS_LEN, MIN_PHASE_DURATION_SECS,
+    PRICE_WEIGHT, REPUTATION_WEIGHT, SCORE_SCALE,
 };
 
 use soroban_sdk::{
@@ -113,6 +114,16 @@ const CONTRACT_VERSION: &str = "1.0.0";
 const MAX_PAGE_SIZE: u32 = 50;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::Unauthorized)?;
+    admin.require_auth();
+    Ok(admin)
+}
 
 /// Extend TTL for a single persistent key, but only when it exists.
 fn extend_ttl_for_key(env: &Env, key: &DataKey) {
@@ -235,19 +246,23 @@ impl AgentBiddingContract {
             .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
-    pub fn upgrade(
-        env: Env,
-        new_wasm_hash: BytesN<32>,
-        new_version: String,
-    ) -> Result<(), Error> {
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, new_version: String) -> Result<(), Error> {
         let admin = require_admin(&env)?;
         let old_version = Self::contract_version(env.clone());
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
         env.events().publish(
             (symbol_short!("bidding"), symbol_short!("upgraded")),
-            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+            (
+                old_version,
+                new_version,
+                new_wasm_hash,
+                admin,
+                env.ledger().sequence(),
+            ),
         );
         Ok(())
     }
@@ -1088,8 +1103,9 @@ mod test {
 
     use super::*;
     use soroban_sdk::{
+        symbol_short,
         testutils::{Address as _, Events as _, Ledger as _},
-        Address, Symbol,
+        Address, IntoVal, Symbol,
     };
 
     const RESERVE: i128 = 1_000_000; // 0.1 XLM in stroops
@@ -2172,7 +2188,7 @@ mod test {
 
     #[test]
     fn unsuccessful_bidder_can_claim_refund_after_reveal() {
-        let (env, client) = setup();
+        let (env, client, anyone) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_ref");
 
@@ -2185,8 +2201,10 @@ mod test {
         let loser_salt = BytesN::<32>::from_array(&env, &[52u8; 32]);
         let winner_price = 2_000_000i128;
         let loser_price = 5_000_000i128;
-        let winner_commitment = test_commitment(&env, &winner, winner_price, &terms, &winner_salt);
-        let loser_commitment = test_commitment(&env, &loser, loser_price, &terms, &loser_salt);
+        let winner_commitment =
+            client.commitment_of(&task_id, &winner, &winner_price, &terms, &winner_salt);
+        let loser_commitment =
+            client.commitment_of(&task_id, &loser, &loser_price, &terms, &loser_salt);
 
         client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
         client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
@@ -2194,22 +2212,26 @@ mod test {
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
         client.reveal_bid(&task_id, &winner, &winner_price, &terms, &winner_salt);
         client.reveal_bid(&task_id, &loser, &loser_price, &terms, &loser_salt);
-        client.reveal_bids(&task_id);
+        client.reveal_bids(&anyone, &task_id);
+
+        let _ = env.events().all();
 
         client.claim_bid_refund(&task_id, &loser);
 
-        let loser_bid = client.get_bid(&task_id, &loser).unwrap();
-        assert!(loser_bid.refunded);
         let events = env.events().all();
+        assert_eq!(events.len(), 1);
         assert_eq!(
             events.last().unwrap().1,
             (symbol_short!("bidding"), symbol_short!("ref_claim")).into_val(&env)
         );
+
+        let loser_bid = client.get_bid(&task_id, &loser).unwrap();
+        assert!(loser_bid.refunded);
     }
 
     #[test]
     fn winner_cannot_claim_unsuccessful_bidder_refund() {
-        let (env, client) = setup();
+        let (env, client, anyone) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "win_ref");
 
@@ -2220,8 +2242,10 @@ mod test {
         let terms = String::from_str(&env, "Terms");
         let winner_salt = BytesN::<32>::from_array(&env, &[53u8; 32]);
         let loser_salt = BytesN::<32>::from_array(&env, &[54u8; 32]);
-        let winner_commitment = test_commitment(&env, &winner, 2_000_000, &terms, &winner_salt);
-        let loser_commitment = test_commitment(&env, &loser, 5_000_000, &terms, &loser_salt);
+        let winner_commitment =
+            client.commitment_of(&task_id, &winner, &2_000_000, &terms, &winner_salt);
+        let loser_commitment =
+            client.commitment_of(&task_id, &loser, &5_000_000, &terms, &loser_salt);
 
         client.submit_bid(&task_id, &winner, &winner_commitment, &500_000, &80);
         client.submit_bid(&task_id, &loser, &loser_commitment, &500_000, &80);
@@ -2229,7 +2253,7 @@ mod test {
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
         client.reveal_bid(&task_id, &winner, &2_000_000, &terms, &winner_salt);
         client.reveal_bid(&task_id, &loser, &5_000_000, &terms, &loser_salt);
-        client.reveal_bids(&task_id);
+        client.reveal_bids(&anyone, &task_id);
 
         let err = client.try_claim_bid_refund(&task_id, &winner);
         assert_eq!(err.err(), Some(Ok(Error::WinnerCannotClaimRefund)));
@@ -2479,14 +2503,20 @@ mod test {
 
     #[test]
     fn claim_refund_before_deadline_fails() {
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_early");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
 
         let bidder = Address::generate(&env);
         let salt = BytesN::<32>::from_array(&env, &[21u8; 32]);
-        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        let comm = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &String::from_str(&env, "x"),
+            &salt,
+        );
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         // Bidding period is still open.
@@ -2496,7 +2526,7 @@ mod test {
 
     #[test]
     fn claim_refund_with_no_bid_fails() {
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_no_bid");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
@@ -2513,14 +2543,20 @@ mod test {
         // Creator never calls reveal_bids/award_contract — bidding closes and
         // the auction just sits there. Without claim_refund the bidder's
         // bond would be stuck forever.
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_stalled");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
 
         let bidder = Address::generate(&env);
         let salt = BytesN::<32>::from_array(&env, &[22u8; 32]);
-        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        let comm = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &String::from_str(&env, "x"),
+            &salt,
+        );
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
@@ -2534,14 +2570,20 @@ mod test {
 
     #[test]
     fn claim_refund_twice_fails_idempotency() {
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_twice");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
 
         let bidder = Address::generate(&env);
         let salt = BytesN::<32>::from_array(&env, &[23u8; 32]);
-        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        let comm = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &String::from_str(&env, "x"),
+            &salt,
+        );
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
@@ -2554,14 +2596,20 @@ mod test {
 
     #[test]
     fn claim_refund_after_window_expires_fails() {
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_expired");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
 
         let bidder = Address::generate(&env);
         let salt = BytesN::<32>::from_array(&env, &[24u8; 32]);
-        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        let comm = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &String::from_str(&env, "x"),
+            &salt,
+        );
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         // Past deadline + the full claim window.
@@ -2578,7 +2626,7 @@ mod test {
         // claim_refund must recognise that via the idempotency check rather
         // than re-refunding (there's nothing to "re-refund" on-chain, but the
         // point is it must not treat this as a fresh, valid claim).
-        let (env, client) = setup();
+        let (env, client, anyone) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_after_award");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
@@ -2587,13 +2635,13 @@ mod test {
         let salt = BytesN::<32>::from_array(&env, &[25u8; 32]);
         let price = 2_000_000i128;
         let terms = String::from_str(&env, "Solo");
-        let comm = test_commitment(&env, &bidder, price, &terms, &salt);
+        let comm = client.commitment_of(&task_id, &bidder, &price, &terms, &salt);
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
         client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
-        client.reveal_bids(&task_id);
-        client.award_contract(&task_id);
+        client.reveal_bids(&anyone, &task_id);
+        client.award_contract(&creator, &task_id);
 
         assert!(client.get_bid(&task_id, &bidder).unwrap().refunded);
 
@@ -2603,14 +2651,20 @@ mod test {
 
     #[test]
     fn claim_refund_emits_exactly_one_event() {
-        let (env, client) = setup();
+        let (env, client, _) = setup();
         let creator = Address::generate(&env);
         let task_id = Symbol::new(&env, "claim_event");
         create_test_auction(&env, &client, &creator, &task_id, 3600);
 
         let bidder = Address::generate(&env);
         let salt = BytesN::<32>::from_array(&env, &[26u8; 32]);
-        let comm = test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, "x"), &salt);
+        let comm = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &String::from_str(&env, "x"),
+            &salt,
+        );
         client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
 
         env.ledger().set_timestamp(env.ledger().timestamp() + 3601);

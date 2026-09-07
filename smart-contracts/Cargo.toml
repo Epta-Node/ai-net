@@ -7,6 +7,10 @@ members = [
     "contracts/agent_governance",
     "contracts/upgrade-manager",
     "contracts/task_store",
+    "contracts/agent_marketplace",
+    "contracts/dispute_resolution",
+    "contracts/oracle_manager",
+    "contracts/price_oracle",
 ]
 resolver = "2"
 
