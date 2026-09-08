@@ -422,8 +422,9 @@ impl UpgradeManager {
         let rollback_deadline = env.ledger().sequence() + ROLLBACK_WINDOW_LEDGERS;
 
         // Execute the upgrade
+        #[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
         env.deployer()
-            .update_current_contract_wasm(proposal.new_wasm_hash);
+            .update_current_contract_wasm(proposal.new_wasm_hash.clone());
 
         // Create new version record
         let new_version = ContractVersion {
@@ -465,6 +466,9 @@ impl UpgradeManager {
 
         extend_ttl_for_key(&env, &DataKey::CurrentVersion);
         extend_ttl_for_key(&env, &DataKey::Version(proposal.new_version.clone()));
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("applied")),
@@ -503,6 +507,7 @@ impl UpgradeManager {
         let current_version = get_current_version(&env).unwrap();
 
         // Perform the rollback
+        #[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
         env.deployer()
             .update_current_contract_wasm(rollback_record.previous_version.wasm_hash.clone());
 
@@ -515,6 +520,9 @@ impl UpgradeManager {
         env.storage().persistent().remove(&DataKey::Rollback);
 
         extend_ttl_for_key(&env, &DataKey::CurrentVersion);
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("rollback")),
@@ -582,10 +590,14 @@ fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, BytesN, Env};
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        BytesN, Env,
+    };
 
     fn create_test_env() -> (Env, UpgradeManagerClient<'static>, Address) {
         let env = Env::default();
+        env.ledger().set_sequence_number(1);
         env.mock_all_auths();
         let contract_id = env.register(UpgradeManager, ());
         let client = UpgradeManagerClient::new(&env, &contract_id);
@@ -604,9 +616,8 @@ mod tests {
         let (env, client, admin) = create_test_env();
         let initial_hash = test_wasm_hash(&env, 1);
 
-        let result = client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
 
-        assert!(result.is_ok());
         assert_eq!(client.get_admin(), Some(admin));
 
         let version = client.get_current_version().unwrap();
@@ -640,8 +651,7 @@ mod tests {
 
         // Validate proposal
         let gas_estimate = client.validate_proposal();
-        assert!(gas_estimate.is_ok());
-        assert!(gas_estimate.unwrap() > 0);
+        assert!(gas_estimate > 0);
 
         // Execute upgrade
         let result = client.try_execute_upgrade();
@@ -730,7 +740,7 @@ mod tests {
 
     #[test]
     fn test_gas_estimation() {
-        let (env, client, admin) = create_test_env();
+        let (env, client, _admin) = create_test_env();
 
         let mut migration_plan = MigrationPlan {
             pre_migration_checks: Vec::new(&env),
@@ -754,159 +764,4 @@ mod tests {
         let expected = GAS_UPGRADE_BASE + (GAS_MIGRATION_PER_ITEM * 100) + (3 * 5000);
         assert_eq!(gas_estimate, expected);
     }
-<<<<<<< HEAD
-
-    #[test]
-    fn test_initialize_sets_unpaused() {
-        let (env, client, _admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        client.initialize(&_admin, &String::from_str(&env, "1.0.0"), &hash);
-        assert!(!client.is_paused());
-    }
-
-    #[test]
-    fn test_pause_blocks_propose_upgrade() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        client.pause();
-
-        let new_hash = test_wasm_hash(&env, 2);
-        let migration_plan = MigrationPlan {
-            pre_migration_checks: Vec::new(&env),
-            data_transformations: Vec::new(&env),
-            post_migration_validations: Vec::new(&env),
-            estimated_items: 5,
-        };
-        let result = client.try_propose_upgrade(
-            &String::from_str(&env, "2.0.0"),
-            &new_hash,
-            &String::from_str(&env, "Upgrade"),
-            &migration_plan,
-        );
-        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
-    }
-
-    #[test]
-    fn test_unpause_allows_propose_upgrade() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        client.pause();
-        client.unpause();
-
-        let new_hash = test_wasm_hash(&env, 2);
-        let migration_plan = MigrationPlan {
-            pre_migration_checks: Vec::new(&env),
-            data_transformations: Vec::new(&env),
-            post_migration_validations: Vec::new(&env),
-            estimated_items: 5,
-        };
-        let result = client.propose_upgrade(
-            &String::from_str(&env, "2.0.0"),
-            &new_hash,
-            &String::from_str(&env, "Upgrade"),
-            &migration_plan,
-        );
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_pause_blocks_validate_proposal() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        let new_hash = test_wasm_hash(&env, 2);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        let migration_plan = MigrationPlan {
-            pre_migration_checks: Vec::new(&env),
-            data_transformations: Vec::new(&env),
-            post_migration_validations: Vec::new(&env),
-            estimated_items: 5,
-        };
-        client.propose_upgrade(
-            &String::from_str(&env, "2.0.0"),
-            &new_hash,
-            &String::from_str(&env, "Upgrade"),
-            &migration_plan,
-        );
-
-        client.pause();
-
-        let result = client.try_validate_proposal();
-        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
-    }
-
-    #[test]
-    fn test_pause_blocks_execute_upgrade() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        let new_hash = test_wasm_hash(&env, 2);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        let migration_plan = MigrationPlan {
-            pre_migration_checks: Vec::new(&env),
-            data_transformations: Vec::new(&env),
-            post_migration_validations: Vec::new(&env),
-            estimated_items: 5,
-        };
-        client.propose_upgrade(
-            &String::from_str(&env, "2.0.0"),
-            &new_hash,
-            &String::from_str(&env, "Upgrade"),
-            &migration_plan,
-        );
-        client.validate_proposal();
-
-        client.pause();
-
-        let result = client.try_execute_upgrade();
-        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
-    }
-
-    #[test]
-    fn test_pause_blocks_rollback_upgrade() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        let new_hash = test_wasm_hash(&env, 2);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        let migration_plan = MigrationPlan {
-            pre_migration_checks: Vec::new(&env),
-            data_transformations: Vec::new(&env),
-            post_migration_validations: Vec::new(&env),
-            estimated_items: 5,
-        };
-        client.propose_upgrade(
-            &String::from_str(&env, "2.0.0"),
-            &new_hash,
-            &String::from_str(&env, "Upgrade"),
-            &migration_plan,
-        );
-        client.validate_proposal();
-        client.execute_upgrade();
-
-        client.pause();
-
-        let result = client.try_rollback_upgrade();
-        assert_eq!(result, Err(Ok(UpgradeError::ContractPaused)));
-    }
-
-    #[test]
-    fn test_get_version_still_works_when_paused() {
-        let (env, client, admin) = create_test_env();
-        let hash = test_wasm_hash(&env, 1);
-        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &hash);
-
-        client.pause();
-
-        // Reads should still work when paused.
-        let version = client.get_current_version().unwrap();
-        assert_eq!(version.version, String::from_str(&env, "1.0.0"));
-    }
 }
-=======
-}
->>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25

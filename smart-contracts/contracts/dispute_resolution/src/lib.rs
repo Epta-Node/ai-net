@@ -16,13 +16,15 @@ use soroban_sdk::{
 };
 
 /// Evidence submission phase: 3 days (259,200 seconds).
-const EVIDENCE_PHASE: u64 = 259_200;
+pub const EVIDENCE_PHASE: u64 = 259_200;
 /// Voting phase: 2 days (172,800 seconds).
-const VOTING_PHASE: u64 = 172_800;
+pub const VOTING_PHASE: u64 = 172_800;
 /// Appeal window: 2 days (172,800 seconds).
-const APPEAL_WINDOW: u64 = 172_800;
+pub const APPEAL_WINDOW: u64 = 172_800;
+/// Total dispute lifecycle window.
+pub const DISPUTE_WINDOW: u64 = EVIDENCE_PHASE + VOTING_PHASE + APPEAL_WINDOW;
 /// Number of jurors randomly selected.
-const JUROR_COUNT: u32 = 5;
+pub const JUROR_COUNT: u32 = 5;
 
 #[contracttype]
 #[derive(Clone)]
@@ -133,7 +135,7 @@ impl DisputeResolutionContract {
             .get(&DataKey::ActiveJurors)
             .unwrap_or_else(|| Vec::new(&env));
 
-        if jurors.len() == 0 {
+        if jurors.is_empty() {
             return Err(Error::NoJurorsAvailable);
         }
 

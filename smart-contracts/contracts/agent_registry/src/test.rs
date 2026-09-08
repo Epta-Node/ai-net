@@ -803,7 +803,8 @@ fn gas_benchmark_average_reduction_vs_baseline() {
     let current_register_ten = client.estimate_gas(&String::from_str(&env, "register_agents"), &10);
     let current_resolve_one = client.estimate_gas(&String::from_str(&env, "resolve_error"), &1);
     let current_resolve_ten = client.estimate_gas(&String::from_str(&env, "resolve_errors"), &10);
-    let current_cleanup_ten = client.estimate_gas(&String::from_str(&env, "cleanup_expired_errors"), &10);
+    let current_cleanup_ten =
+        client.estimate_gas(&String::from_str(&env, "cleanup_expired_errors"), &10);
 
     let baselines: &[(u64, u64)] = &[
         (100_000, current_register_one),
@@ -1678,6 +1679,7 @@ fn test_non_admin_cannot_set_storage_config() {
     let id = env.register(AgentRegistryContract, ());
     let client = AgentRegistryContractClient::new(&env, &id);
     let admin = Address::generate(&env);
+    env.mock_all_auths();
     client.initialize(&admin);
 
     let cfg = StorageConfig {
@@ -1936,22 +1938,26 @@ fn check_sla_compliance_quality_violation() {
 
 #[test]
 fn sla_compliance_emits_violation_event() {
-    let (env, client) = setup();
+    let (env, client, _admin) = setup_with_admin();
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "sla_agent", "research", owner));
 
     client.set_sla(&Symbol::new(&env, "sla_agent"), &200, &95, &80);
 
-    let initial_events = env.events().all().len();
-    client.check_sla_compliance(
+    let compliant = client.check_sla_compliance(
         &Symbol::new(&env, "sla_agent"),
         &300, // violation
         &98,
         &90,
     );
-
-    let events = env.events().all();
-    assert!(events.len() > initial_events);
+    assert!(!compliant);
+    assert_eq!(env.events().all().len(), 1);
+    assert_event_topics(
+        &env,
+        0,
+        symbol_short!("registry"),
+        symbol_short!("sla_viol"),
+    );
 }
 
 #[test]

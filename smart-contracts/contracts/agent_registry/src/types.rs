@@ -12,7 +12,7 @@ use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
 pub struct AgentMetrics {
     /// Agent this metrics belongs to.
     pub agent_id: Symbol,
-    
+
     // -- SLA terms --
     /// Maximum allowed response time in milliseconds.
     pub max_response_time: u32,

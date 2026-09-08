@@ -32,7 +32,10 @@ pub use types::{
     MAX_TTL_DAYS, TASK_LIFECYCLE_EVENT_VERSION,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
+    Val, Vec,
+};
 
 const SECONDS_PER_DAY: u64 = 86_400;
 const CONTRACT_VERSION: &str = "1.0.0";
@@ -114,10 +117,10 @@ fn read_admin(env: &Env) -> Result<Address, Error> {
         .ok_or(Error::NotInitialized)
 }
 
-fn require_admin(env: &Env) -> Result<(), Error> {
+fn require_admin(env: &Env) -> Result<Address, Error> {
     let admin = read_admin(env)?;
     admin.require_auth();
-    Ok(())
+    Ok(admin)
 }
 
 /// Call `OracleManager::resolve_price(pair)` via a low-level cross-contract
@@ -214,6 +217,23 @@ impl TaskStoreContract {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+    pub fn set_oracle_manager(env: Env, oracle_manager: Option<Address>) -> Result<(), Error> {
+        require_admin(&env)?;
+        match &oracle_manager {
+            Some(addr) => env.storage().instance().set(&DataKey::OracleManager, addr),
+            None => env.storage().instance().remove(&DataKey::OracleManager),
+        }
+        env.events().publish(
+            (symbol_short!("task_str"), symbol_short!("ora_set")),
+            OracleManagerSetEvent { oracle_manager },
+        );
+        Ok(())
+    }
+
+    pub fn get_oracle_manager(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::OracleManager)
+    }
+
     pub fn contract_version(env: Env) -> String {
         env.storage()
             .instance()
@@ -221,19 +241,23 @@ impl TaskStoreContract {
             .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
-    pub fn upgrade(
-        env: Env,
-        new_wasm_hash: BytesN<32>,
-        new_version: String,
-    ) -> Result<(), Error> {
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, new_version: String) -> Result<(), Error> {
         let admin = require_admin(&env)?;
         let old_version = Self::contract_version(env.clone());
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
         env.events().publish(
             (symbol_short!("task_str"), symbol_short!("upgraded")),
-            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+            (
+                old_version,
+                new_version,
+                new_wasm_hash,
+                admin,
+                env.ledger().sequence(),
+            ),
         );
         Ok(())
 >>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25

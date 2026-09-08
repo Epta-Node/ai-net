@@ -50,10 +50,6 @@ pub enum Error {
     WinnerNotDetermined = 16,
     /// The escrow for this auction has already been created.
     EscrowAlreadyCreated = 17,
-<<<<<<< HEAD
-    /// The contract is paused and cannot accept mutations.
-    ContractPaused = 18,
-=======
 
     // ── Added by the front-running / commit-reveal hardening pass (#350) ────
     /// The reveal window has closed; this bid can no longer be revealed.
@@ -78,5 +74,4 @@ pub enum Error {
     AuctionNotAbortable = 25,
     /// An arithmetic operation overflowed while scoring bids.
     ArithmeticOverflow = 26,
->>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 }

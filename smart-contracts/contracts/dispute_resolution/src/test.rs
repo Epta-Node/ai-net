@@ -4,7 +4,7 @@ extern crate std;
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Ledger as _},
     Address, BytesN, Env, Symbol, Vec,
 };
 
@@ -50,7 +50,9 @@ fn initialize_sets_admin() {
     let (env, client) = setup();
     let admin = Address::generate(&env);
     client.initialize(&admin);
-    assert!(env.storage().instance().has(&DataKey::Admin));
+    env.as_contract(&client.address, || {
+        assert!(env.storage().instance().has(&DataKey::Admin));
+    });
 }
 
 #[test]
@@ -147,7 +149,6 @@ fn cast_vote_duplicate_fails() {
 #[test]
 fn resolve_dispute_after_voting() {
     let (env, client, _admin, jurors) = setup_with_jurors();
-    env.ledger().set_max_entry_ttl(100_000_000);
 
     let filer = Address::generate(&env);
     let dispute_id = Symbol::new(&env, "disp1");
@@ -161,8 +162,9 @@ fn resolve_dispute_after_voting() {
     client.cast_vote(&dispute_id, &jurors.get(4).unwrap(), &VoteSide::Agent);
 
     // Advance past voting deadline
-    let new_seq = env.ledger().sequence() + (VOTING_PHASE / 5) as u32 + 1;
-    env.ledger().set_sequence_number(new_seq);
+    env.ledger().with_mut(|l| {
+        l.timestamp += EVIDENCE_PHASE + VOTING_PHASE + 1;
+    });
 
     client.resolve_dispute(&dispute_id);
 
@@ -174,7 +176,6 @@ fn resolve_dispute_after_voting() {
 #[test]
 fn appeal_dispute_success() {
     let (env, client, _admin, jurors) = setup_with_jurors();
-    env.ledger().set_max_entry_ttl(100_000_000);
 
     let filer = Address::generate(&env);
     let dispute_id = Symbol::new(&env, "disp1");
@@ -183,8 +184,9 @@ fn appeal_dispute_success() {
     client.cast_vote(&dispute_id, &jurors.get(0).unwrap(), &VoteSide::Agent);
 
     // Advance past voting deadline
-    let new_seq = env.ledger().sequence() + (VOTING_PHASE / 5) as u32 + 1;
-    env.ledger().set_sequence_number(new_seq);
+    env.ledger().with_mut(|l| {
+        l.timestamp += EVIDENCE_PHASE + VOTING_PHASE + 1;
+    });
 
     client.resolve_dispute(&dispute_id);
 
@@ -199,7 +201,6 @@ fn appeal_dispute_success() {
 #[test]
 fn appeal_after_window_fails() {
     let (env, client, _admin, jurors) = setup_with_jurors();
-    env.ledger().set_max_entry_ttl(100_000_000);
 
     let filer = Address::generate(&env);
     let dispute_id = Symbol::new(&env, "disp1");
@@ -208,16 +209,16 @@ fn appeal_after_window_fails() {
     client.cast_vote(&dispute_id, &jurors.get(0).unwrap(), &VoteSide::Agent);
 
     // Advance past appeal deadline
-    let far_future = env.ledger().sequence() + (DISPUTE_WINDOW / 5) as u32 + 100;
-    env.ledger().set_sequence_number(far_future);
+    env.ledger().with_mut(|l| {
+        l.timestamp += DISPUTE_WINDOW + 100;
+    });
 
     // resolve_dispute should work since we're past voting deadline
-    // But appeal should fail since we're past appeal deadline
     let _ = client.try_resolve_dispute(&dispute_id);
 
     let appellant = Address::generate(&env);
-    // If resolve succeeded, appeal should fail due to window
-    // If resolve failed (dispute expired), that's also expected behavior
+    let res = client.try_appeal_dispute(&dispute_id, &appellant);
+    assert!(res.is_err());
 }
 
 #[test]

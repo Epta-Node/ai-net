@@ -255,19 +255,23 @@ impl ErrorRegistryContract {
             .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
     }
 
-    pub fn upgrade(
-        env: Env,
-        new_wasm_hash: BytesN<32>,
-        new_version: String,
-    ) -> Result<(), Error> {
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, new_version: String) -> Result<(), Error> {
         let admin = require_admin(&env)?;
         let old_version = Self::contract_version(env.clone());
         env.deployer()
             .update_current_contract_wasm(new_wasm_hash.clone());
-        env.storage().instance().set(&DataKey::Version, &new_version);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
         env.events().publish(
             (symbol_short!("errreg"), symbol_short!("upgraded")),
-            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+            (
+                old_version,
+                new_version,
+                new_wasm_hash,
+                admin,
+                env.ledger().sequence(),
+            ),
         );
         Ok(())
 >>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
