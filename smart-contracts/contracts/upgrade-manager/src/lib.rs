@@ -110,6 +110,8 @@ pub struct RollbackRecord {
 pub enum DataKey {
     /// Current admin address
     Admin,
+    /// Whether the contract is paused
+    Paused,
     /// Current contract version
     CurrentVersion,
     /// Version history (version_string -> ContractVersion)
@@ -153,6 +155,8 @@ pub enum UpgradeError {
     InsufficientGasBudget = 11,
     /// Version downgrade not allowed without explicit rollback
     DowngradeNotAllowed = 12,
+    /// The contract is paused and cannot accept mutations
+    ContractPaused = 13,
 }
 
 /// Main upgrade manager contract
@@ -177,6 +181,18 @@ fn require_admin(env: &Env) -> Result<Address, UpgradeError> {
         .ok_or(UpgradeError::Unauthorized)?;
     admin.require_auth();
     Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), UpgradeError> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(UpgradeError::ContractPaused);
+    }
+    Ok(())
 }
 
 fn get_current_version(env: &Env) -> Option<ContractVersion> {
@@ -210,9 +226,7 @@ impl UpgradeManager {
         }
 
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage()
-            .instance()
-            .extend_ttl(TTL_THRESHOLD, TTL_EXTEND_TO);
+        env.storage().instance().set(&DataKey::Paused, &false);
 
         let initial = ContractVersion {
             version: initial_version.clone(),
@@ -247,6 +261,7 @@ impl UpgradeManager {
 
     /// Set a new admin for the upgrade manager
     pub fn set_admin(env: Env, new_admin: Address) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let old_admin = require_admin(&env)?;
         env.storage().instance().set(&DataKey::Admin, &new_admin);
 
@@ -264,6 +279,32 @@ impl UpgradeManager {
     /// Get the current admin
     pub fn get_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), UpgradeError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("upgrade"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), UpgradeError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("upgrade"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Get the current contract version
@@ -284,6 +325,7 @@ impl UpgradeManager {
         description: String,
         migration_plan: MigrationPlan,
     ) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         // Check if version is valid and newer
@@ -325,6 +367,7 @@ impl UpgradeManager {
 
     /// Validate the current upgrade proposal (pre-upgrade hook)
     pub fn validate_proposal(env: Env) -> Result<u64, UpgradeError> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
 
         let mut proposal: UpgradeProposal = env
@@ -361,6 +404,7 @@ impl UpgradeManager {
 
     /// Execute the validated upgrade proposal
     pub fn execute_upgrade(env: Env) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         let proposal: UpgradeProposal = env
@@ -443,6 +487,7 @@ impl UpgradeManager {
 
     /// Rollback to the previous version (within 48h window)
     pub fn rollback_upgrade(env: Env) -> Result<(), UpgradeError> {
+        require_not_paused(&env)?;
         let admin = require_admin(&env)?;
 
         let rollback_record: RollbackRecord = env

@@ -22,6 +22,7 @@ import {
 import type { ReconciliationRouterOptions } from "./reconciliation";
 import type { ReconciliationTrigger } from "../../services/reconciliation.types";
 import { createLogger } from "../../utils/logger";
+import { ValidationError, NotFoundError, AppError } from "../../errors";
 
 const logger = createLogger({ module: "admin" });
 
@@ -97,10 +98,14 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     res.json(getReadOnlyState());
   });
 
-  router.put("/read-only", (req: Request, res: Response) => {
+  router.put("/read-only", (req: Request, res: Response, next: NextFunction) => {
     const parsed = readOnlySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
+      next(new ValidationError(
+        "Invalid request body",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
       return;
     }
 
@@ -112,28 +117,32 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     res.json(state);
   });
 
-  router.get("/agents", (req: Request, res: Response) => {
+  router.get("/agents", (req: Request, res: Response, next: NextFunction) => {
     const parsed = agentListSchema.safeParse(req.query);
     if (!parsed.success) {
-      res.status(400).json({ error: "INVALID_QUERY", details: parsed.error.flatten() });
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
       return;
     }
     res.json({ agents: listAgentsForAdmin(parsed.data.status) });
   });
 
-  router.post("/agents/:id/enable", (req: Request, res: Response) => {
+  router.post("/agents/:id/enable", (req: Request, res: Response, next: NextFunction) => {
     const agent = setAgentEnabled(req.params.id, true);
     if (!agent) {
-      res.status(404).json({ error: "AGENT_NOT_FOUND" });
+      next(new NotFoundError("Agent", req.params.id, res.locals.correlationId as string | undefined));
       return;
     }
     res.json({ enabled: true, agent });
   });
 
-  router.post("/agents/:id/disable", (req: Request, res: Response) => {
+  router.post("/agents/:id/disable", (req: Request, res: Response, next: NextFunction) => {
     const agent = setAgentEnabled(req.params.id, false);
     if (!agent) {
-      res.status(404).json({ error: "AGENT_NOT_FOUND" });
+      next(new NotFoundError("Agent", req.params.id, res.locals.correlationId as string | undefined));
       return;
     }
     res.json({ enabled: false, agent });
@@ -141,10 +150,14 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
 
   router.post(
     "/reconciliation/run",
-    asyncHandler(async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const parsed = reconciliationSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
+        next(new ValidationError(
+          "Invalid request body",
+          { issues: parsed.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        ));
         return;
       }
 
@@ -160,10 +173,14 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
 
   router.post(
     "/maintenance/backup",
-    asyncHandler(async (req: Request, res: Response) => {
+    asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
       const parsed = backupSchema.safeParse(req.body ?? {});
       if (!parsed.success) {
-        res.status(400).json({ error: "INVALID_BODY", details: parsed.error.flatten() });
+        next(new ValidationError(
+          "Invalid request body",
+          { issues: parsed.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        ));
         return;
       }
 
@@ -172,10 +189,14 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     }),
   );
 
-  router.get("/audit-log", (req: Request, res: Response) => {
+  router.get("/audit-log", (req: Request, res: Response, next: NextFunction) => {
     const parsed = auditLogQuerySchema.safeParse(req.query);
     if (!parsed.success) {
-      res.status(400).json({ error: "INVALID_QUERY", details: parsed.error.flatten() });
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
       return;
     }
 
@@ -191,12 +212,9 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
   router.use("/queue", createAdminQueueRouter(jobQueue));
   router.use("/", createAdminQueueRouter(jobQueue));
 
-  router.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  router.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
     logger.error({ err }, "admin operation failed");
-    res.status(500).json({
-      error: "ADMIN_OPERATION_FAILED",
-      message: err.message,
-    });
+    next(err instanceof AppError ? err : new AppError("Admin operation failed", 500, "INTERNAL_ERROR"));
   });
 
   return router;

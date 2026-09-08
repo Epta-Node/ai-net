@@ -231,11 +231,18 @@
                         "key": {
                           "vec": [
                             {
+<<<<<<< HEAD
+                              "symbol": "Paused"
+=======
                               "symbol": "PendingOps"
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                             }
                           ]
                         },
                         "val": {
+<<<<<<< HEAD
+                          "bool": false
+=======
                           "vec": []
                         }
                       },
@@ -265,6 +272,7 @@
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                             }
                           ]
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
                         }
                       }
                     ]

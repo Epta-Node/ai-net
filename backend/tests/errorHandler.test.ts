@@ -82,7 +82,7 @@ describe("errorHandler — production mode", () => {
     expect(body.stack).toBeUndefined();
   });
 
-  it("always uses INTERNAL_SERVER_ERROR code in production (no leaking err.code)", () => {
+  it("always uses INTERNAL_ERROR code in production (no leaking err.code)", () => {
     const errorHandler = freshErrorHandler("production");
     const err: any = new Error("db is down");
     err.code = "DB_UNAVAILABLE";
@@ -91,10 +91,10 @@ describe("errorHandler — production mode", () => {
     errorHandler(err, makeReq(), res as unknown as Response, jest.fn() as NextFunction);
 
     const body = res.json.mock.calls[0][0];
-    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
-  it("falls back to INTERNAL_SERVER_ERROR when err.code is absent", () => {
+  it("falls back to INTERNAL_ERROR when err.code is absent", () => {
     const errorHandler = freshErrorHandler("production");
     const err = new Error("some unknown failure");
     const res = makeRes();
@@ -102,7 +102,7 @@ describe("errorHandler — production mode", () => {
     errorHandler(err, makeReq(), res as unknown as Response, jest.fn() as NextFunction);
 
     const body = res.json.mock.calls[0][0];
-    expect(body.error.code).toBe("INTERNAL_SERVER_ERROR");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
   it("respects err.statusCode", () => {

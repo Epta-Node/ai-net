@@ -74,15 +74,35 @@ impl DisputeResolutionContract {
         Ok(())
     }
 
-    /// Admin: pause or unpause.
-    pub fn pause(env: Env, paused: bool) -> Result<(), Error> {
+    /// Admin: pause.
+    pub fn pause(env: Env) -> Result<(), Error> {
         require_admin(&env)?;
-        env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("dispute"), symbol_short!("paused")), ());
         Ok(())
+    }
+
+    /// Admin: unpause.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("dispute"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// Admin: set the active juror pool.
     pub fn set_jurors(env: Env, jurors: Vec<Address>) -> Result<(), Error> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
         env.storage()
             .instance()
@@ -221,6 +241,7 @@ impl DisputeResolutionContract {
         juror: Address,
         side: VoteSide,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         juror.require_auth();
 
         let key = DataKey::Dispute(dispute_id.clone());
@@ -271,6 +292,8 @@ impl DisputeResolutionContract {
 
     /// Resolve a dispute after voting period ends (admin or automated).
     pub fn resolve_dispute(env: Env, dispute_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         let key = DataKey::Dispute(dispute_id.clone());
         let mut dispute: Dispute = env
             .storage()
@@ -321,6 +344,7 @@ impl DisputeResolutionContract {
 
     /// Appeal a resolved dispute (must be within appeal window).
     pub fn appeal_dispute(env: Env, dispute_id: Symbol, appellant: Address) -> Result<(), Error> {
+        require_not_paused(&env)?;
         appellant.require_auth();
 
         let key = DataKey::Dispute(dispute_id.clone());

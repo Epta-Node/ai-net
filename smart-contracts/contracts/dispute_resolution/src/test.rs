@@ -30,7 +30,7 @@ fn setup_with_jurors() -> (
     Env,
     DisputeResolutionContractClient<'static>,
     Address,
-    Vec<Address>,
+    Vec<'static, Address>,
 ) {
     let (env, client, admin) = setup_with_admin();
     let jurors = soroban_sdk::vec![
@@ -224,7 +224,7 @@ fn appeal_after_window_fails() {
 #[test]
 fn pause_blocks_filing() {
     let (env, client, _admin) = setup_with_admin();
-    client.pause(&true);
+    client.pause();
 
     let filer = Address::generate(&env);
     assert_eq!(
@@ -235,4 +235,61 @@ fn pause_blocks_filing() {
         ),
         Err(Ok(Error::ContractPaused))
     );
+}
+
+#[test]
+fn unpause_allows_filing() {
+    let (env, client, _admin, _jurors) = setup_with_jurors();
+    client.pause();
+    client.unpause();
+
+    let filer = Address::generate(&env);
+    client.file_dispute(
+        &filer,
+        &Symbol::new(&env, "agent1"),
+        &Symbol::new(&env, "disp_unpause"),
+    );
+    assert!(client
+        .get_dispute(&Symbol::new(&env, "disp_unpause"))
+        .is_some());
+}
+
+#[test]
+fn is_paused_reflects_state() {
+    let (_env, client, _admin) = setup_with_admin();
+    assert!(!client.is_paused());
+    client.pause();
+    assert!(client.is_paused());
+    client.unpause();
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn pause_blocks_set_jurors() {
+    let (env, client, _admin) = setup_with_admin();
+    client.pause();
+
+    let jurors = soroban_sdk::vec![&env, Address::generate(&env)];
+    assert_eq!(
+        client.try_set_jurors(&jurors),
+        Err(Ok(Error::ContractPaused))
+    );
+}
+
+#[test]
+fn get_dispute_still_works_when_paused() {
+    let (env, client, _admin, _jurors) = setup_with_jurors();
+    let filer = Address::generate(&env);
+    client.file_dispute(
+        &filer,
+        &Symbol::new(&env, "agent1"),
+        &Symbol::new(&env, "disp_read"),
+    );
+
+    client.pause();
+
+    // Reads should still work when paused.
+    assert!(client
+        .get_dispute(&Symbol::new(&env, "disp_read"))
+        .is_some());
 }

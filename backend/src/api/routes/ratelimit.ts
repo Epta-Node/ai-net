@@ -1,6 +1,7 @@
-import { Router, Request, Response } from "express";
+import { Router, Request, Response, NextFunction } from "express";
 import { getRateLimiter } from "../middleware/rateLimit";
 import { RATE_LIMIT_RULES } from "../rateLimitRules";
+import { ValidationError, NotFoundError, AppError } from "../../errors";
 
 export function createRateLimitRouter(): Router {
   const router = Router();
@@ -30,28 +31,26 @@ export function createRateLimitRouter(): Router {
    *       404:
    *         description: Key not found in rate limiter cache
    */
-  router.get("/status", async (req: Request, res: Response) => {
-    const key = req.query.key as string;
-    const ruleName = (req.query.rule as keyof typeof RATE_LIMIT_RULES) || "GLOBAL";
-
-    if (!key) {
-      res.status(400).json({ error: { code: "VALIDATION_ERROR", message: "Missing 'key' query parameter" } });
-      return;
-    }
-
-    const rule = RATE_LIMIT_RULES[ruleName];
-    if (!rule) {
-      res.status(400).json({ error: { code: "VALIDATION_ERROR", message: `Invalid rule name: ${ruleName}` } });
-      return;
-    }
-
+  router.get("/status", async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const key = req.query.key as string;
+      const ruleName = (req.query.rule as keyof typeof RATE_LIMIT_RULES) || "GLOBAL";
+      const correlationId = res.locals.correlationId as string | undefined;
+
+      if (!key) {
+        throw new ValidationError("Missing 'key' query parameter", undefined, correlationId);
+      }
+
+      const rule = RATE_LIMIT_RULES[ruleName];
+      if (!rule) {
+        throw new ValidationError(`Invalid rule name: ${ruleName}`, { rule: ruleName }, correlationId);
+      }
+
       const limiter = getRateLimiter();
       const status = await limiter.getStatus(key, rule);
 
       if (!status) {
-        res.status(404).json({ error: { code: "NOT_FOUND", message: `Key '${key}' not found in rate limiter cache` } });
-        return;
+        throw new NotFoundError("Rate limit key", key, correlationId);
       }
 
       res.json({
@@ -63,7 +62,7 @@ export function createRateLimitRouter(): Router {
         resetTimeMs: status.resetTime,
       });
     } catch (err) {
-      res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "Failed to get rate limit status" } });
+      next(err instanceof AppError ? err : new AppError("Failed to get rate limit status", 500, "INTERNAL_ERROR"));
     }
   });
 

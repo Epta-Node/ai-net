@@ -47,6 +47,7 @@ pub struct TaskMetadata {
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
+    Admin,
     Version,
     Task(BytesN<32>),
     /// Admin address — the only address permitted to call `set_oracle_manager`.
@@ -126,6 +127,4 @@ pub enum Error {
     NotInitialized = 11,
     Unauthorized = 12,
     UpgradeFailed = 13,
-    MissingPricePair = 14,
-    OraclePriceUnavailable = 15,
 }

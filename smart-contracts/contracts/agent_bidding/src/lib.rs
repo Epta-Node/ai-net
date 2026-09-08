@@ -256,13 +256,7 @@ impl AgentBiddingContract {
             .set(&DataKey::Version, &new_version);
         env.events().publish(
             (symbol_short!("bidding"), symbol_short!("upgraded")),
-            (
-                old_version,
-                new_version,
-                new_wasm_hash,
-                admin,
-                env.ledger().sequence(),
-            ),
+            (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
         );
         Ok(())
     }
@@ -283,6 +277,7 @@ impl AgentBiddingContract {
         task_id: Symbol,
         config: AuctionConfig,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         creator.require_auth();
 
         let auct_key = DataKey::Auction(task_id.clone());
@@ -389,6 +384,7 @@ impl AgentBiddingContract {
         bond: i128,
         reputation: u32,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         bidder.require_auth();
 
         let mut auction = load_auction(&env, &task_id)?;
@@ -489,6 +485,7 @@ impl AgentBiddingContract {
         terms: String,
         salt: BytesN<32>,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         bidder.require_auth();
 
         let mut auction = load_auction(&env, &task_id)?;
@@ -2824,5 +2821,143 @@ mod test {
             rev,
             "only revealed bidder can win"
         );
+    }
+
+    // ── Pause / unpause ──────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_sets_admin_and_unpaused() {
+        let (_env, client) = setup();
+        assert!(client.get_admin().is_some());
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn pause_blocks_create_auction() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "paused_task");
+
+        client.pause();
+
+        let err = client.try_create_auction(&creator, &task_id, &0, &1_000_000, &500_000);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn unpause_allows_create_auction() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "unpaused_task");
+
+        client.pause();
+        client.unpause();
+
+        client.create_auction(&creator, &task_id, &0, &1_000_000, &500_000);
+        assert!(client.get_auction(&task_id).is_some());
+    }
+
+    #[test]
+    fn pause_blocks_submit_bid() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "bid_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        client.pause();
+
+        let salt = BytesN::<32>::from_array(&env, &[99u8; 32]);
+        let commitment =
+            test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, ""), &salt);
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &500_000, &50);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_reveal_bid() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "rev_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[98u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "terms");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+        client.pause();
+
+        let err = client.try_reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_reveal_bids() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "rvb_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[97u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+
+        client.pause();
+
+        let err = client.try_reveal_bids(&task_id);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_award_contract() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "aw_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[96u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+        client.reveal_bids(&task_id);
+
+        client.pause();
+
+        let err = client.try_award_contract(&task_id);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn get_auction_still_works_when_paused() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "read_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        client.pause();
+
+        // Reads should still work when paused.
+        assert!(client.get_auction(&task_id).is_some());
     }
 }

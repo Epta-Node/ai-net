@@ -62,11 +62,30 @@ impl AgentMarketplaceContract {
         Ok(())
     }
 
-    /// Admin: pause or unpause the marketplace.
-    pub fn pause(env: Env, paused: bool) -> Result<(), Error> {
+    /// Admin: pause.
+    pub fn pause(env: Env) -> Result<(), Error> {
         require_admin(&env)?;
-        env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("market"), symbol_short!("paused")), ());
         Ok(())
+    }
+
+    /// Admin: unpause.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("market"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     /// List a service on the marketplace.
@@ -222,6 +241,8 @@ impl AgentMarketplaceContract {
 
     /// Complete a booking and release escrow payment to the agent owner.
     pub fn complete_booking(env: Env, booking_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         let booking_key = DataKey::Booking(booking_id.clone());
         let mut booking: Booking = env
             .storage()
@@ -262,6 +283,8 @@ impl AgentMarketplaceContract {
 
     /// Cancel a booking and refund the client.
     pub fn cancel_booking(env: Env, booking_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
         let booking_key = DataKey::Booking(booking_id.clone());
         let mut booking: Booking = env
             .storage()
@@ -294,7 +317,9 @@ impl AgentMarketplaceContract {
 
     /// Rate a completed booking (1-5 stars).
     pub fn rate_booking(env: Env, booking_id: Symbol, rating: u32) -> Result<(), Error> {
-        if !(1..=5).contains(&rating) {
+        require_not_paused(&env)?;
+
+        if rating < 1 || rating > 5 {
             return Err(Error::InvalidPrice);
         }
 

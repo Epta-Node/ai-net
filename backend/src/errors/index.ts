@@ -4,5 +4,7 @@ export { ValidationError } from "./ValidationError";
 export { NotFoundError } from "./NotFoundError";
 export { UnauthorizedError } from "./UnauthorizedError";
 export { AuthenticationError } from "./AuthenticationError";
+export { ForbiddenError } from "./ForbiddenError";
 export { RateLimitError } from "./RateLimitError";
+export { ConflictError } from "./ConflictError";
 export { PaymentError } from "./PaymentError";

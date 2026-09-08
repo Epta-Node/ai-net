@@ -9,8 +9,10 @@ import { createTask, getTask } from "../../../coordinator/taskStore";
 import { createLogger } from "../../../utils/logger";
 import { validate } from "../../middleware/validate";
 import { rateLimitMiddleware } from "../../middleware/rateLimit";
+import { idempotencyMiddleware } from "../../middleware/idempotency";
 import { currentTraceId } from "../../../services/traceContext";
 import { getConfig } from "../../../config";
+import { NotFoundError, ForbiddenError, ConflictError, RateLimitError } from "../../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 
@@ -24,6 +26,8 @@ const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
 // of `createTaskSchema` working.
 export { createTaskSchema } from "../../../schemas/task";
 import { createTaskSchema, listTasksQuerySchema } from "../../../schemas/task";
+
+const log = createLogger({ module: "tasks-v1" });
 
 /**
  * Creates a v1 tasks router with the original API response format.
@@ -51,13 +55,10 @@ export function createV1TasksRouter(
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
       if (total >= dailyTaskLimit) {
-        res.status(429).json({
-          error: {
-            message: `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
-            code: "DAILY_LIMIT_EXCEEDED",
-          },
+        throw new RateLimitError(`Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`, {
+          limit: dailyTaskLimit,
+          window: "24h",
         });
-        return;
       }
     }
 
@@ -91,15 +92,9 @@ export function createV1TasksRouter(
   });
 
   // GET /api/tasks — v1 format
-  tasksRouter.get("/", (req: Request, res: Response): void => {
+  tasksRouter.get("/", validate({ query: listTasksQuerySchema }), (req: Request, res: Response): void => {
     const walletPublicKey = (req.headers["walletpublickey"] as string) ?? "";
-    const parse = listTasksQuerySchema.safeParse(req.query);
-    if (!parse.success) {
-      res.status(400).json({ error: parse.error.flatten() });
-      return;
-    }
-
-    const { page, pageSize, status, sort, q } = parse.data;
+    const { page, pageSize, status, sort, q } = req.query as unknown as z.infer<typeof listTasksQuerySchema>;
     const db = createTaskDb(getTaskDb());
     const { tasks, total } = db.list(walletPublicKey, page, pageSize, {
       status,
@@ -116,13 +111,11 @@ export function createV1TasksRouter(
     const db = createTaskDb(getTaskDb());
     const task = db.findById(req.params.id);
     if (!task) {
-      res.status(404).json({ error: "Task not found" });
-      return;
+      throw new NotFoundError("Task", req.params.id);
     }
     const requesterKey = req.headers["walletpublickey"] as string;
     if (!requesterKey || requesterKey !== task.walletPublicKey) {
-      res.status(403).json({ error: "Access denied" });
-      return;
+      throw new ForbiddenError("Access denied");
     }
     // v1 response format - raw task object
     res.json(task);
@@ -133,19 +126,16 @@ export function createV1TasksRouter(
     const db = createTaskDb(getTaskDb());
     const task = db.findById(req.params.id);
     if (!task) {
-      res.status(404).json({ error: "Task not found" });
-      return;
+      throw new NotFoundError("Task", req.params.id);
     }
 
     const requesterKey = req.headers["walletpublickey"] as string;
     if (!requesterKey || requesterKey !== task.walletPublicKey) {
-      res.status(403).json({ error: "Not authorized to cancel this task" });
-      return;
+      throw new ForbiddenError("Not authorized to cancel this task");
     }
 
     if (task.status !== "queued") {
-      res.status(409).json({ error: `Cannot cancel task in '${task.status}' status` });
-      return;
+      throw new ConflictError(`Cannot cancel task in '${task.status}' status`);
     }
 
     db.updateStatus(req.params.id, "cancelled");
