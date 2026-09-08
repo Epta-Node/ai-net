@@ -17,6 +17,8 @@ export interface TraceContextData {
   traceId: string;
   /** Per-hop span identifier (UUID v4). Fresh for each service boundary. */
   spanId: string;
+  /** Optional parent span identifier (W3C Trace Context / OpenTelemetry). */
+  parentSpanId?: string;
   /** Optional request identifier for REST requests. */
   requestId?: string;
   /** Optional task identifier when processing a task. */
@@ -82,6 +84,7 @@ export function childSpanContext(overrides?: Partial<Pick<TraceContextData, 'tas
   return {
     traceId: parent.traceId,
     spanId: randomUUID(),
+    parentSpanId: parent.spanId,
     requestId: parent.requestId,
     taskId: overrides?.taskId ?? parent.taskId,
   };

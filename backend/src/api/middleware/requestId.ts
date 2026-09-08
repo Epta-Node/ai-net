@@ -111,7 +111,7 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
   // Enter the trace context so every downstream call (route handlers,
   // coordinator, payment, logger) can access traceId/spanId implicitly.
   runWithTraceContext(
-    { traceId, spanId: span.spanId, requestId: id },
+    { traceId, spanId: span.spanId, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) },
     () => next(),
   );
 }
