@@ -69,7 +69,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       let message = `HTTP error! status: ${response.status}`;
       try {
         const errorData = await response.json();
-        message = errorData.error || errorData.message || message;
+        message = errorData.error?.message || errorData.message || errorData.error || message;
       } catch {
         try {
           const errorText = await response.text();

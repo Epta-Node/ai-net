@@ -9,6 +9,7 @@ import { createTask, getTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
+import { idempotencyMiddleware } from "../middleware/idempotency";
 import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
@@ -148,7 +149,7 @@ export function createTasksRouter(
           const correlationId = res.locals.correlationId as string | undefined;
           throw new RateLimitError(
             `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
-            { code: "DAILY_LIMIT_EXCEEDED", limit: dailyTaskLimit, window: "24h" },
+            { limit: dailyTaskLimit, window: "24h" },
             correlationId,
           );
         }

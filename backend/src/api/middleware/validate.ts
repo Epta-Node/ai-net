@@ -16,18 +16,29 @@ export interface ValidateMiddleware {
   openApiParameters: OpenApiParameter[];
 }
 
-/** 400 payload emitted when validation fails. */
+/**
+ * Standardized validation error payload.
+ *
+ * Conforms to the canonical API error envelope:
+ *   { error: { code, message, details, path, correlationId, timestamp } }
+ */
 export interface ValidationErrorBody {
-  error: "Validation failed";
-  /** Per-target field errors, e.g. `{ body: { prompt: ["Prompt is required"] } }`. */
-  details: Record<string, Record<string, string[]>>;
-  /**
-   * Flat list with full dotted paths.
-   *
-   * `details` loses the path for nested objects, so a form cannot tell which
-   * input to highlight; `fieldErrors` keeps it.
-   */
-  fieldErrors: FieldError[];
+  error: {
+    code: "VALIDATION_ERROR";
+    message: string;
+    details: {
+      /** Per-target field errors, e.g. `{ body: { prompt: ["Prompt is required"] } }`. */
+      fieldErrors: Record<string, Record<string, string[]>>;
+      /** Flat list with full dotted paths. */
+      flatErrors: FieldError[];
+    };
+    path: string;
+    correlationId: string;
+    timestamp: string;
+  };
+  statusCode: number;
+  path: string;
+  requestId: string;
 }
 
 /**
@@ -96,10 +107,26 @@ export function validate(schemaOrTargets: ZodSchema | ValidateTargets): Validate
     });
 
     if (Object.keys(errors).length > 0) {
+      const correlationId =
+        (res.locals.traceId as string | undefined) ??
+        (res.locals.correlationId as string | undefined) ??
+        "unknown";
+
       const body: ValidationErrorBody = {
-        error: "Validation failed",
-        details: errors,
-        fieldErrors,
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "Request validation failed",
+          details: {
+            fieldErrors: errors,
+            flatErrors: fieldErrors,
+          },
+          path: req.path,
+          correlationId,
+          timestamp: new Date().toISOString(),
+        },
+        statusCode: 400,
+        path: req.path,
+        requestId: (res.locals.requestId as string | undefined) ?? "unknown",
       };
       res.status(400).json(body);
       return;
