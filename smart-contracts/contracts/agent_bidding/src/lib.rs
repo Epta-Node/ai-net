@@ -190,6 +190,30 @@ fn compute_commitment(
     env.crypto().sha256(&preimage).into()
 }
 
+<<<<<<< HEAD
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+fn require_admin(env: &Env) -> Result<Address, Error> {
+    let admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .ok_or(Error::Unauthorized)?;
+    admin.require_auth();
+    Ok(admin)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(Error::ContractPaused);
+    }
+    Ok(())
+=======
 /// `SCORE_SCALE * numerator / denominator`, saturating nothing and checking
 /// every step. Returns [`Error::ArithmeticOverflow`] rather than panicking so
 /// a pathological bid set cannot wedge the auction.
@@ -201,6 +225,7 @@ fn scaled_ratio(numerator: i128, denominator: i128) -> Result<i128, Error> {
         .checked_mul(numerator)
         .and_then(|scaled| scaled.checked_div(denominator))
         .ok_or(Error::ArithmeticOverflow)
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -210,6 +235,31 @@ pub struct AgentBiddingContract;
 
 #[contractimpl]
 impl AgentBiddingContract {
+<<<<<<< HEAD
+    // ── Admin ─────────────────────────────────────────────────────────────
+
+    /// Initialise the contract with an admin. Can only be called once.
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyExists);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+
+        env.events()
+            .publish((symbol_short!("bidding"), symbol_short!("init")), admin);
+        Ok(())
+    }
+
+    /// Transfer admin to a new address. Admin only.
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        let old_admin = require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("adm_chng")),
+            (old_admin, new_admin),
+=======
     // ── Administration / Upgradeability ───────────────────────────────────
 
     pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
@@ -248,10 +298,45 @@ impl AgentBiddingContract {
         env.events().publish(
             (symbol_short!("bidding"), symbol_short!("upgraded")),
             (old_version, new_version, new_wasm_hash, admin, env.ledger().sequence()),
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
         );
         Ok(())
     }
 
+<<<<<<< HEAD
+    /// Return the current admin address, if set.
+    pub fn get_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("bidding"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("bidding"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+=======
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     // ── Creation ─────────────────────────────────────────────────────────
 
     /// Initialise a new auction for `task_id`.
@@ -268,6 +353,7 @@ impl AgentBiddingContract {
         task_id: Symbol,
         config: AuctionConfig,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         creator.require_auth();
 
         let auct_key = DataKey::Auction(task_id.clone());
@@ -374,6 +460,7 @@ impl AgentBiddingContract {
         bond: i128,
         reputation: u32,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         bidder.require_auth();
 
         let mut auction = load_auction(&env, &task_id)?;
@@ -474,6 +561,7 @@ impl AgentBiddingContract {
         terms: String,
         salt: BytesN<32>,
     ) -> Result<(), Error> {
+        require_not_paused(&env)?;
         bidder.require_auth();
 
         let mut auction = load_auction(&env, &task_id)?;
@@ -548,6 +636,19 @@ impl AgentBiddingContract {
     /// outcome is a pure function of on-chain state, but the call still carries
     /// a signature so it is attributable.
     ///
+<<<<<<< HEAD
+    /// Requires at least one revealed bid. Phase transitions to `Reveal`.
+    /// Emits `(bidding, bids_rvld)`.
+    pub fn reveal_bids(env: Env, task_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
+        let auct_key = DataKey::Auction(task_id.clone());
+        let mut auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&auct_key)
+            .ok_or(Error::NotFound)?;
+=======
     /// **Timing is the anti-front-running control.** The call is refused with
     /// [`Error::RevealPeriodActive`] while the reveal window is still open and
     /// at least one sealed bid remains unrevealed. Without that gate, an
@@ -566,6 +667,7 @@ impl AgentBiddingContract {
 
         let mut auction = load_auction(&env, &task_id)?;
         require_live(&auction)?;
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 
         if auction.phase != AuctionPhase::Bidding {
             return Err(Error::NotInBiddingPhase);
@@ -769,8 +871,20 @@ impl AgentBiddingContract {
     /// else's price.
     ///
     /// Phase transitions to `Awarded`. Emits `(bidding, cntrct_aw)`.
+<<<<<<< HEAD
+    pub fn award_contract(env: Env, task_id: Symbol) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
+        let auct_key = DataKey::Auction(task_id.clone());
+        let mut auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&auct_key)
+            .ok_or(Error::NotFound)?;
+=======
     pub fn award_contract(env: Env, caller: Address, task_id: Symbol) -> Result<(), Error> {
         caller.require_auth();
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
 
         let mut auction = load_auction(&env, &task_id)?;
 
@@ -1103,6 +1217,11 @@ mod test {
         env.mock_all_auths();
         let id = env.register(AgentBiddingContract, ());
         let client = AgentBiddingContractClient::new(&env, &id);
+<<<<<<< HEAD
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        (env, client)
+=======
         let anyone = Address::generate(&env);
         (env, client, anyone)
     }
@@ -1117,6 +1236,7 @@ mod test {
             max_price: 0, // → MAX_BID_PRICE
             bond: BOND,
         }
+>>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
     }
 
     /// Helper: create a test auction with default config.
@@ -2770,5 +2890,143 @@ mod test {
             rev,
             "only revealed bidder can win"
         );
+    }
+
+    // ── Pause / unpause ──────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_sets_admin_and_unpaused() {
+        let (_env, client) = setup();
+        assert!(client.get_admin().is_some());
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn pause_blocks_create_auction() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "paused_task");
+
+        client.pause();
+
+        let err = client.try_create_auction(&creator, &task_id, &0, &1_000_000, &500_000);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn unpause_allows_create_auction() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "unpaused_task");
+
+        client.pause();
+        client.unpause();
+
+        client.create_auction(&creator, &task_id, &0, &1_000_000, &500_000);
+        assert!(client.get_auction(&task_id).is_some());
+    }
+
+    #[test]
+    fn pause_blocks_submit_bid() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "bid_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        client.pause();
+
+        let salt = BytesN::<32>::from_array(&env, &[99u8; 32]);
+        let commitment =
+            test_commitment(&env, &bidder, 2_000_000, &String::from_str(&env, ""), &salt);
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &500_000, &50);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_reveal_bid() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "rev_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[98u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "terms");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+
+        client.pause();
+
+        let err = client.try_reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_reveal_bids() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "rvb_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[97u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+
+        client.pause();
+
+        let err = client.try_reveal_bids(&task_id);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn pause_blocks_award_contract() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, "aw_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        let salt = BytesN::<32>::from_array(&env, &[96u8; 32]);
+        let price: i128 = 3_000_000;
+        let terms = String::from_str(&env, "");
+        let commitment = test_commitment(&env, &bidder, price, &terms, &salt);
+        client.submit_bid(&task_id, &bidder, &commitment, &500_000, &70);
+
+        env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+        client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+        client.reveal_bids(&task_id);
+
+        client.pause();
+
+        let err = client.try_award_contract(&task_id);
+        assert_eq!(err.err(), Some(Ok(Error::ContractPaused)));
+    }
+
+    #[test]
+    fn get_auction_still_works_when_paused() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "read_pause");
+
+        create_test_auction(&env, &client, &creator, &task_id, 3600);
+
+        client.pause();
+
+        // Reads should still work when paused.
+        assert!(client.get_auction(&task_id).is_some());
     }
 }
