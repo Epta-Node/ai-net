@@ -129,14 +129,6 @@ pub struct JurorsSetEvent {
 #[derive(Clone, Debug, PartialEq)]
 pub struct VoteCastEvent {
     pub dispute_id: Symbol,
-    pub juror: Address,
-    pub side: VoteSide,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct VoteCastEvent {
-    pub dispute_id: Symbol,
     pub voter: Address,
     pub ruling: VoteSide,
 }
@@ -159,14 +151,4 @@ pub struct DisputeResolvedEvent {
 pub struct AdminChangedEvent {
     pub old_admin: Address,
     pub new_admin: Address,
-}
-
-/// Event: VoteCast
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct VoteCastEvent {
-    pub dispute_id: Symbol,
-    pub juror: Address,
-    pub side: VoteSide,
-    pub timestamp: u64,
 }

@@ -990,7 +990,7 @@ fn estimate_migration_gas(_env: &Env, migration_plan: &MigrationPlan) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+mod contract_tests {
     use super::*;
     use soroban_sdk::{
         testutils::{Address as _, Ledger as _},
@@ -1450,5 +1450,93 @@ mod tests {
 
         let result = client.try_rollback_upgrade();
         assert_eq!(result, Err(Ok(UpgradeError::Unauthorized)));
+    }
+
+    #[test]
+    fn test_set_admin_and_auth() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        let new_admin = Address::generate(&env);
+        client.set_admin(&new_admin);
+        assert_eq!(client.get_admin(), Some(new_admin));
+    }
+
+    #[test]
+    fn test_pause_blocks_operations() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        assert!(!client.is_paused());
+        client.pause();
+        assert!(client.is_paused());
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+
+        let res = client.try_propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &test_wasm_hash(&env, 2),
+            &String::from_str(&env, "Paused upgrade"),
+            &migration_plan,
+        );
+        assert_eq!(res, Err(Ok(UpgradeError::ContractPaused)));
+
+        client.unpause();
+        assert!(!client.is_paused());
+    }
+
+    #[test]
+    fn test_propose_downgrade_fails() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "2.0.0"), &initial_hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+
+        // Proposing 1.0.0 when current is 2.0.0 fails
+        let res = client.try_propose_upgrade(
+            &String::from_str(&env, "1.0.0"),
+            &test_wasm_hash(&env, 2),
+            &String::from_str(&env, "Downgrade"),
+            &migration_plan,
+        );
+        assert_eq!(res, Err(Ok(UpgradeError::DowngradeNotAllowed)));
+    }
+
+    #[test]
+    fn test_execute_unvalidated_proposal_fails() {
+        let (env, client, admin) = create_test_env();
+        let initial_hash = test_wasm_hash(&env, 1);
+        client.initialize(&admin, &String::from_str(&env, "1.0.0"), &initial_hash);
+
+        let migration_plan = MigrationPlan {
+            pre_migration_checks: Vec::new(&env),
+            data_transformations: Vec::new(&env),
+            post_migration_validations: Vec::new(&env),
+            estimated_items: 5,
+        };
+
+        client.propose_upgrade(
+            &String::from_str(&env, "2.0.0"),
+            &test_wasm_hash(&env, 2),
+            &String::from_str(&env, "Unvalidated"),
+            &migration_plan,
+        );
+
+        // Execute without validate_proposal fails
+        let res = client.try_execute_upgrade();
+        assert_eq!(res, Err(Ok(UpgradeError::ProposalNotValidated)));
     }
 }

@@ -86,6 +86,8 @@ mod errors;
 pub mod gas;
 #[cfg(test)]
 mod property_tests;
+#[cfg(test)]
+mod tests;
 mod types;
 
 pub use errors::Error;
@@ -109,6 +111,7 @@ use soroban_sdk::{
 
 /// Threshold (ledgers remaining) below which we extend.
 const TTL_THRESHOLD: u32 = 100_000;
+const TTL_EXTEND_TO: u32 = 535_680;
 /// Target TTL after extension (~31 days at 5s ledgers).
 const CONTRACT_VERSION: &str = "1.0.0";
 
@@ -127,18 +130,6 @@ fn require_admin(env: &Env) -> Result<Address, Error> {
         .ok_or(Error::Unauthorized)?;
     admin.require_auth();
     Ok(admin)
-}
-
-fn require_not_paused(env: &Env) -> Result<(), Error> {
-    let paused: bool = env
-        .storage()
-        .instance()
-        .get(&DataKey::Paused)
-        .unwrap_or(false);
-    if paused {
-        return Err(Error::ContractPaused);
-    }
-    Ok(())
 }
 
 /// Extend TTL for a single persistent key, but only when it exists.
@@ -237,6 +228,19 @@ fn scaled_ratio(numerator: i128, denominator: i128) -> Result<i128, Error> {
         .checked_mul(numerator)
         .and_then(|scaled| scaled.checked_div(denominator))
         .ok_or(Error::ArithmeticOverflow)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    if env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        Err(Error::ContractPaused)
+    } else {
+        Ok(())
+    }
 }
 
 // ─── Token helpers ───────────────────────────────────────────────────────────
@@ -433,11 +437,42 @@ impl AgentBiddingContract {
         env.storage().instance().get(&DataKey::Admin)
     }
 
+    pub fn set_paused(env: Env, admin: Address, paused: bool) -> Result<(), Error> {
+        let stored_admin = require_admin(&env)?;
+        if admin != stored_admin {
+            return Err(Error::Unauthorized);
+        }
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        Ok(())
+    }
+
     pub fn contract_version(env: Env) -> String {
         env.storage()
             .instance()
             .get(&DataKey::Version)
             .unwrap_or_else(|| String::from_str(&env, CONTRACT_VERSION))
+    }
+
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, new_version: String) -> Result<(), Error> {
+        let admin = require_admin(&env)?;
+        let old_version = Self::contract_version(env.clone());
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &new_version);
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("upgraded")),
+            (
+                old_version,
+                new_version,
+                new_wasm_hash,
+                admin,
+                env.ledger().sequence(),
+            ),
+        );
+        Ok(())
     }
 
     // ── Creation ─────────────────────────────────────────────────────────

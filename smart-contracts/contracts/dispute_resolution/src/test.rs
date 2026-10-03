@@ -125,7 +125,10 @@ fn filing_validates_reason_and_stores_record() {
     let dispute = fixture.client.get_dispute(&id).unwrap();
     assert_eq!(dispute.status, DisputeStatus::EvidencePhase);
     assert_eq!(dispute.evidence_deadline, dispute.filed_at + EVIDENCE_PHASE);
-    assert_eq!(dispute.voting_deadline, dispute.evidence_deadline + VOTING_PHASE);
+    assert_eq!(
+        dispute.voting_deadline,
+        dispute.evidence_deadline + VOTING_PHASE
+    );
 }
 
 #[test]
@@ -231,12 +234,17 @@ fn insufficient_votes_return_a_neutral_split_without_penalties() {
     let fixture = setup();
     file(&fixture);
     advance_to_voting(&fixture);
-    fixture
-        .client
-        .vote(&fixture.task_id, &fixture.voters[0], &VoteSide::SupportFiler);
+    fixture.client.vote(
+        &fixture.task_id,
+        &fixture.voters[0],
+        &VoteSide::SupportFiler,
+    );
     advance_to_resolution(&fixture);
 
-    assert_eq!(fixture.client.resolve(&fixture.task_id), DisputeOutcome::Tie);
+    assert_eq!(
+        fixture.client.resolve(&fixture.task_id),
+        DisputeOutcome::Tie
+    );
     advance_to_appeal_finalization(&fixture);
     fixture.client.finalize_dispute(&fixture.task_id);
     let dispute = fixture.client.get_dispute(&fixture.task_id).unwrap();
@@ -293,7 +301,9 @@ fn appeal_reopens_voting_and_reverses_provisional_slash() {
         DisputeOutcome::SupportFiler
     );
     assert_eq!(
-        fixture.client.try_appeal_dispute(&fixture.task_id, &fixture.filer),
+        fixture
+            .client
+            .try_appeal_dispute(&fixture.task_id, &fixture.filer),
         Err(Ok(Error::Unauthorized))
     );
     fixture
@@ -352,21 +362,21 @@ fn finalized_verified_dispute_slashes_registry_bond_with_reason() {
 
 #[test]
 fn negative_auth_set_admin() {
-    let (env, client, _admin) = setup_with_admin();
-    let intruder = Address::generate(&env);
-    env.mock_auths(&[]);
-    assert!(client.try_set_admin(&intruder).is_err());
+    let fixture = setup();
+    let intruder = Address::generate(&fixture.env);
+    fixture.env.mock_auths(&[]);
+    assert!(fixture.client.try_set_admin(&intruder).is_err());
 }
 
 #[test]
 fn evidence_index_zero_survives_submission() {
     let fixture = setup();
     file(&fixture);
-    
+
     let hash0 = BytesN::from_array(&fixture.env, &[1u8; 32]);
     let hash1 = BytesN::from_array(&fixture.env, &[2u8; 32]);
     let hash2 = BytesN::from_array(&fixture.env, &[3u8; 32]);
-    
+
     // Submit 3 pieces of evidence
     let id0 = fixture
         .client
@@ -377,28 +387,28 @@ fn evidence_index_zero_survives_submission() {
     let id2 = fixture
         .client
         .submit_evidence(&fixture.task_id, &fixture.filer, &hash2);
-    
+
     // Verify evidence IDs are sequential
     assert_eq!(id0, 0);
     assert_eq!(id1, 1);
     assert_eq!(id2, 2);
-    
+
     // Verify count is correct
     assert_eq!(fixture.client.get_evidence_count(&fixture.task_id), 3);
-    
+
     // CRITICAL: Verify evidence #0 is retrievable and has correct data
     let evidence0 = fixture.client.get_evidence(&fixture.task_id, &0).unwrap();
     assert_eq!(evidence0.evidence_id, 0);
     assert_eq!(evidence0.evidence_hash, hash0);
     assert_eq!(evidence0.submitter, fixture.filer);
     assert_eq!(evidence0.dispute_id, fixture.task_id);
-    
+
     // Verify evidence #1 and #2 are also retrievable
     let evidence1 = fixture.client.get_evidence(&fixture.task_id, &1).unwrap();
     assert_eq!(evidence1.evidence_id, 1);
     assert_eq!(evidence1.evidence_hash, hash1);
     assert_eq!(evidence1.submitter, fixture.agent);
-    
+
     let evidence2 = fixture.client.get_evidence(&fixture.task_id, &2).unwrap();
     assert_eq!(evidence2.evidence_id, 2);
     assert_eq!(evidence2.evidence_hash, hash2);
@@ -450,10 +460,7 @@ fn negative_auth_set_voters() {
     let (env, client, _admin) = setup_with_admin();
     let voters = soroban_sdk::vec![&env, Address::generate(&env)];
     env.mock_auths(&[]);
-    assert_eq!(
-        client.try_set_voters(&voters),
-        Err(Ok(Error::Unauthorized))
-    );
+    assert_eq!(client.try_set_voters(&voters), Err(Ok(Error::Unauthorized)));
 }
 
 #[test]

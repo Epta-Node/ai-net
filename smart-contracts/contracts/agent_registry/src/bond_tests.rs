@@ -119,5 +119,8 @@ fn slashed_agent_must_restore_bond_before_reregistration() {
         DEFAULT_MIN_BOND_STROOPS
     );
     client.register_agent(&record);
-    assert_eq!(client.get_bond(&agent_id).unwrap().amount_stroops, DEFAULT_MIN_BOND_STROOPS);
+    assert_eq!(
+        client.get_bond(&agent_id).unwrap().amount_stroops,
+        DEFAULT_MIN_BOND_STROOPS
+    );
 }

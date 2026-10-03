@@ -53,7 +53,7 @@ use events::{
     MinBondSetEvent, MultisigConfigSetEvent, MultisigConfigUpdatedEvent, OperationApproved,
     OperationCancelled, OperationExecuted, OperationProposed, RegistryInitializedEvent,
     ReputationDecayed, ReputationUpdated, SlaBonusAwardedEvent, SlaSetEvent,
-    SlaViolationDetectedEvent,
+    SlaViolationDetectedEvent, StorageConfigSetEvent,
 };
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map, String, Symbol,
@@ -2076,7 +2076,9 @@ impl AgentRegistryContract {
     /// Admin: configure the dispute-resolution contract allowed to slash bonds.
     pub fn set_dispute_resolver(env: Env, resolver: Address) -> Result<(), Error> {
         let admin = require_admin(&env)?;
-        env.storage().instance().set(&DataKey::DisputeResolver, &resolver);
+        env.storage()
+            .instance()
+            .set(&DataKey::DisputeResolver, &resolver);
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("dispute")),
             resolver.clone(),
@@ -2426,11 +2428,7 @@ impl AgentRegistryContract {
     }
 
     /// Reserve an agent's bond until its dispute is finally resolved.
-    pub fn lock_bond_for_dispute(
-        env: Env,
-        caller: Address,
-        agent_id: Symbol,
-    ) -> Result<(), Error> {
+    pub fn lock_bond_for_dispute(env: Env, caller: Address, agent_id: Symbol) -> Result<(), Error> {
         require_dispute_resolver(&env, &caller)?;
         let lock_key = DataKey::DisputeBondLock(agent_id.clone());
         if env.storage().persistent().has(&lock_key) {

@@ -239,9 +239,7 @@ impl ErrorRegistryContract {
         env.storage()
             .instance()
             .set(&DataKey::Version, &rollback_version);
-        env.storage()
-            .instance()
-            .remove(&DataKey::LastUpgradeLedger);
+        env.storage().instance().remove(&DataKey::LastUpgradeLedger);
 
         env.events().publish(
             (symbol_short!("upgrade"), symbol_short!("rollback")),
@@ -351,11 +349,7 @@ impl ErrorRegistryContract {
 
         let mut records = Vec::new(&env);
         for id in ids.iter() {
-            if let Some(record) = env
-                .storage()
-                .persistent()
-                .get(&DataKey::Record(id))
-            {
+            if let Some(record) = env.storage().persistent().get(&DataKey::Record(id)) {
                 if is_active(now, &record) {
                     records.push_back(record);
                 }
@@ -391,11 +385,7 @@ impl ErrorRegistryContract {
 
             scanned += 1;
             let error_key = DataKey::Record(id.clone());
-            match env
-                .storage()
-                .persistent()
-                .get(&error_key)
-            {
+            match env.storage().persistent().get(&error_key) {
                 Some(record) if is_active(now, &record) => {
                     kept_ids.push_back(id);
                 }

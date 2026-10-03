@@ -1,5 +1,5 @@
 use dispute_resolution::{DisputeResolutionContract, DisputeResolutionContractClient};
-use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
+use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol};
 
 #[test]
 fn dispute_estimate_is_within_twenty_percent_of_file_dispute_cost() {
@@ -9,23 +9,12 @@ fn dispute_estimate_is_within_twenty_percent_of_file_dispute_cost() {
     let client = DisputeResolutionContractClient::new(&env, &id);
     client.initialize(&Address::generate(&env));
 
-    let jurors = Vec::from_array(
-        &env,
-        [
-            Address::generate(&env),
-            Address::generate(&env),
-            Address::generate(&env),
-            Address::generate(&env),
-            Address::generate(&env),
-        ],
-    );
-    client.set_jurors(&jurors);
-
     env.cost_estimate().budget().reset_tracker();
     client.file_dispute(
+        &Symbol::new(&env, "task"),
         &Address::generate(&env),
-        &Symbol::new(&env, "agent"),
-        &Symbol::new(&env, "dispute"),
+        &Address::generate(&env),
+        &String::from_str(&env, "reason"),
     );
     let actual = env.cost_estimate().budget().cpu_instruction_cost();
     let estimate = client.estimate_gas(&Symbol::new(&env, "dispute"), &5);

@@ -63,7 +63,7 @@ fn create_test_auction(
 
 /// Recompute the commitment hash from plaintext fields.
 /// Mirrors `compute_commitment` in the contract and `commitment_of`.
-fn test_commitment(
+pub(crate) fn test_commitment(
     client: &AgentBiddingContractClient<'_>,
     task_id: &Symbol,
     bidder: &Address,

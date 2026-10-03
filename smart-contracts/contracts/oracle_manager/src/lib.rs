@@ -93,12 +93,12 @@ fn try_oracle_get_price(
     oracle: &Address,
     pair: &Symbol,
 ) -> Result<Option<(i128, u64)>, Error> {
-    use soroban_sdk::{InvokeError, Map, TryIntoVal};
+    use soroban_sdk::{ConversionError, InvokeError, Map, TryIntoVal};
 
     let fn_name = Symbol::new(env, "get_price");
     let args = soroban_sdk::vec![env, pair.into_val(env)];
 
-    let result: Result<Result<Val, InvokeError>, Result<InvokeError, InvokeError>> =
+    let result: Result<Result<Val, ConversionError>, Result<InvokeError, InvokeError>> =
         env.try_invoke_contract(oracle, &fn_name, args);
 
     match result {
@@ -124,7 +124,7 @@ fn try_oracle_get_price(
             );
             Err(Error::OracleCallFailed)
         }
-        Err(Ok(InvokeError::ContractError(code))) | Ok(Err(InvokeError::ContractError(code))) => {
+        Err(Ok(InvokeError::Contract(code))) => {
             if code == 4 {
                 // FeedNotFound = 4
                 Ok(None)
@@ -157,7 +157,6 @@ fn try_oracle_get_price(
         }
     }
 }
-
 
 /// Read the admin-set fallback price for `pair`, if any.
 fn read_fallback(env: &Env, pair: &Symbol) -> Option<i128> {
@@ -207,11 +206,6 @@ impl OracleManagerContract {
             },
         );
         Ok(())
-    }
-
-    /// Return current admin address.
-    pub fn get_admin(env: Env) -> Option<Address> {
-        env.storage().instance().get(&DataKey::Admin)
     }
 
     /// Pause the contract. Only admin can call this.
@@ -699,7 +693,7 @@ mod test {
     fn oracle_not_initialized_emits_failure_event() {
         let f = fixture();
         init(&f);
-        
+
         // Deploy oracle but DON'T initialize it
         let oracle_id = f.env.register(price_oracle::PriceOracleContract, ());
         f.client.set_oracle(&Some(oracle_id));
@@ -707,7 +701,7 @@ mod test {
 
         // Clear events from setup
         let _ = f.env.events().all();
-        
+
         // Should fall back to fallback price
         let result = f.client.resolve_price(&f.pair);
         assert_eq!(result.price, 5_000_000);
@@ -727,14 +721,14 @@ mod test {
         let f = fixture();
         init(&f);
         let oracle_id = deploy_oracle(&f);
-        
+
         let oracle_client = price_oracle::PriceOracleContractClient::new(&f.env, &oracle_id);
         let now = f.env.ledger().timestamp();
         oracle_client.submit_price(&f.pair, &10_000_000i128, &now);
-        
+
         // Pause the oracle
         oracle_client.pause();
-        
+
         f.client.set_oracle(&Some(oracle_id));
         f.client.set_fallback_price(&f.pair, &6_000_000i128);
 
@@ -760,7 +754,7 @@ mod test {
         let f = fixture();
         init(&f);
         let oracle_id = f.env.register(price_oracle::PriceOracleContract, ());
-        
+
         // Uninitialized oracle, no fallback
         f.client.set_oracle(&Some(oracle_id));
 
@@ -786,7 +780,7 @@ mod test {
         let f = fixture();
         init(&f);
         let bad_oracle = Address::generate(&f.env);
-        
+
         f.client.set_oracle(&Some(bad_oracle));
         f.client.set_fallback_price(&f.pair, &5_000_000i128);
 
@@ -801,7 +795,7 @@ mod test {
         let failure_event = events.iter().find(|(_, topics, _)| {
             topics == &(symbol_short!("mgr"), symbol_short!("ora_fail")).into_val(&f.env)
         });
-        
+
         assert!(failure_event.is_some());
         // The OracleFailureEvent struct contains pair and error_code fields
     }
@@ -860,4 +854,3 @@ mod test {
         );
     }
 }
-

@@ -481,6 +481,156 @@ fn negative_auth_initialize() {
 }
 
 #[test]
+fn search_services_filters_by_max_response_time() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+
+    client.list_service(
+        &Symbol::new(&env, "svc_fast"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "coding"),
+        &1_000_000_i128,
+        &100_u32,
+        &24_u32,
+    );
+    client.list_service(
+        &Symbol::new(&env, "svc_slow"),
+        &Symbol::new(&env, "agent2"),
+        &owner,
+        &Symbol::new(&env, "coding"),
+        &1_000_000_i128,
+        &500_u32,
+        &24_u32,
+    );
+
+    let results = client.search_services(&Symbol::new(&env, "coding"), &0_i128, &200_u32);
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results.get(0).unwrap().listing_id,
+        Symbol::new(&env, "svc_fast")
+    );
+}
+
+#[test]
+fn complete_booking_errors() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+
+    // Non-existent booking
+    assert_eq!(
+        client.try_complete_booking(&Symbol::new(&env, "non_existent")),
+        Err(Ok(Error::BookingNotFound))
+    );
+
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+
+    let bk_id = Symbol::new(&env, "bk_comp");
+    client.book_agent(
+        &Symbol::new(&env, "svc1"),
+        &client_addr,
+        &1_000_000_i128,
+        &bk_id,
+    );
+
+    client.complete_booking(&bk_id);
+
+    // Already completed
+    assert_eq!(
+        client.try_complete_booking(&bk_id),
+        Err(Ok(Error::BookingAlreadyCompleted))
+    );
+}
+
+#[test]
+fn cancel_booking_errors() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+
+    // Non-existent booking
+    assert_eq!(
+        client.try_cancel_booking(&Symbol::new(&env, "non_existent")),
+        Err(Ok(Error::BookingNotFound))
+    );
+
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+
+    let bk_id = Symbol::new(&env, "bk_canc");
+    client.book_agent(
+        &Symbol::new(&env, "svc1"),
+        &client_addr,
+        &1_000_000_i128,
+        &bk_id,
+    );
+
+    client.cancel_booking(&bk_id);
+
+    // Already cancelled
+    assert_eq!(
+        client.try_cancel_booking(&bk_id),
+        Err(Ok(Error::BookingAlreadyCancelled))
+    );
+}
+
+#[test]
+fn rate_booking_errors() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+    let client_addr = Address::generate(&env);
+
+    client.list_service(
+        &Symbol::new(&env, "svc1"),
+        &Symbol::new(&env, "agent1"),
+        &owner,
+        &Symbol::new(&env, "research"),
+        &1_000_000_i128,
+        &200_u32,
+        &24_u32,
+    );
+
+    let bk_id = Symbol::new(&env, "bk_rate");
+    client.book_agent(
+        &Symbol::new(&env, "svc1"),
+        &client_addr,
+        &1_000_000_i128,
+        &bk_id,
+    );
+
+    // Cannot rate uncompleted booking
+    assert_eq!(
+        client.try_rate_booking(&bk_id, &5),
+        Err(Ok(Error::BookingAlreadyCancelled))
+    );
+
+    client.complete_booking(&bk_id);
+    client.rate_booking(&bk_id, &5);
+
+    // Cannot rate twice
+    assert_eq!(
+        client.try_rate_booking(&bk_id, &4),
+        Err(Ok(Error::AlreadyExists))
+    );
+}
+
+#[test]
 fn negative_auth_set_admin() {
     let (env, client, _admin) = setup_with_admin();
     let intruder = Address::generate(&env);
