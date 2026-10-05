@@ -743,6 +743,6 @@ mod test {
 
         client.add_authorized_caller(&registry);
         let log = client.get_audit_log();
-        assert!(log.len() >= 1);
+        assert!(!log.is_empty());
     }
 }

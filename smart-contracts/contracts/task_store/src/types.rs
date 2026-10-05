@@ -134,10 +134,14 @@ pub struct TaskWithHistory {
 pub enum DataKey {
     /// Admin address — the only address permitted to call `set_oracle_manager`.
     Admin,
-    Paused,
+    /// Contract version string.
     Version,
+    /// Emergency-stop flag; `true` blocks all state-mutating entrypoints.
     Paused,
+    /// Legacy task metadata keyed by task ID.
     Task(BytesN<32>),
+    /// Lifecycle task record (with version-history support) keyed by task ID.
+    LifecycleTask(BytesN<32>),
     /// Optional OracleManager contract address used to resolve quoted prices.
     OracleManager,
     /// Optional coordinator address, set by the admin.
@@ -145,8 +149,6 @@ pub enum DataKey {
     /// Alongside the task creator, this is the only role permitted to drive
     /// `update_status` transitions on another party's task.
     Coordinator,
-    /// Emergency-stop flag; `true` blocks all state-mutating entrypoints.
-    Paused,
     /// Address that created a task, keyed by task id.
     ///
     /// Held separately from [`DataKey::Task`] so the existing
@@ -336,7 +338,16 @@ pub enum Error {
     NotInitialized = 11,
     Unauthorized = 12,
     UpgradeFailed = 13,
+    /// The contract is paused and cannot accept mutations.
     ContractPaused = 14,
+    /// OracleManager is configured but `price_pair` was not supplied.
     MissingPricePair = 15,
+    /// OracleManager returned no usable price (stale feed + no fallback).
     OraclePriceUnavailable = 16,
+    /// A batched request exceeded the maximum allowed size.
+    BatchTooLarge = 17,
+    /// The supplied budget/price value is invalid.
+    InvalidBudget = 18,
+    /// The caller is not an authorized updater for this task.
+    NotAuthorizedUpdater = 19,
 }

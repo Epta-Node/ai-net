@@ -13,10 +13,9 @@ mod types;
 pub use errors::Error;
 pub use types::*;
 
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN, Env,
-    String, Symbol, Vec,
+    contract, contractclient, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Map,
+    String, Symbol, Val, Vec,
 };
 
 /// Evidence phase duration: 48 hours.
@@ -150,17 +149,16 @@ fn apply_final_ruling(
     if *outcome == DisputeOutcome::SupportFiler {
         let bond_key = DataKey::AgentBond(dispute.agent_id.clone());
         let cached_bond: i128 = env.storage().persistent().get(&bond_key).unwrap_or(0);
-        let reason = String::from_str(&env, "verified dispute upheld");
+        let reason = String::from_str(env, "verified dispute upheld");
         dispute.bond_slashed = registry.slash_bond_from_dispute(
             &env.current_contract_address(),
             &dispute.registry_agent_id,
             &50,
             &reason,
         );
-        env.storage().persistent().set(
-            &bond_key,
-            &cached_bond.saturating_sub(dispute.bond_slashed),
-        );
+        env.storage()
+            .persistent()
+            .set(&bond_key, &cached_bond.saturating_sub(dispute.bond_slashed));
         let reputation_key = DataKey::AgentReputation(dispute.agent_id.clone());
         let reputation: u32 = env.storage().persistent().get(&reputation_key).unwrap_or(0);
         env.storage()
@@ -282,7 +280,9 @@ impl DisputeResolutionContract {
                 return Err(Error::InvalidVoterPool);
             }
         }
-        env.storage().instance().set(&DataKey::ActiveVoters, &voters);
+        env.storage()
+            .instance()
+            .set(&DataKey::ActiveVoters, &voters);
         env.events().publish(
             (symbol_short!("dispute"), symbol_short!("voters")),
             voters.len(),
@@ -292,11 +292,7 @@ impl DisputeResolutionContract {
 
     /// Set the registry-sourced reputation used for voter eligibility and
     /// ruling consequences. Reputation is bounded to 0..=100.
-    pub fn set_reputation(
-        env: Env,
-        account: Address,
-        reputation: u32,
-    ) -> Result<(), Error> {
+    pub fn set_reputation(env: Env, account: Address, reputation: u32) -> Result<(), Error> {
         require_not_paused(&env)?;
         require_admin(&env)?;
         if reputation > 100 {
@@ -316,11 +312,7 @@ impl DisputeResolutionContract {
 
     /// Record a bond snapshot for provisional ruling details. Final slashes
     /// are computed from the registry's live bond balance.
-    pub fn set_agent_bond(
-        env: Env,
-        agent_id: Address,
-        bond_amount: i128,
-    ) -> Result<(), Error> {
+    pub fn set_agent_bond(env: Env, agent_id: Address, bond_amount: i128) -> Result<(), Error> {
         require_not_paused(&env)?;
         require_admin(&env)?;
         if bond_amount < 0 {
@@ -337,7 +329,9 @@ impl DisputeResolutionContract {
     pub fn set_agent_registry(env: Env, registry: Address) -> Result<(), Error> {
         require_not_paused(&env)?;
         require_admin(&env)?;
-        env.storage().instance().set(&DataKey::AgentRegistry, &registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::AgentRegistry, &registry);
         Ok(())
     }
 
@@ -358,11 +352,7 @@ impl DisputeResolutionContract {
 
     /// Record escrow associated with a task. The final `resolved` event supplies
     /// destination amounts to the configured payment coordinator.
-    pub fn set_task_escrow(
-        env: Env,
-        task_id: Symbol,
-        amount: i128,
-    ) -> Result<(), Error> {
+    pub fn set_task_escrow(env: Env, task_id: Symbol, amount: i128) -> Result<(), Error> {
         require_not_paused(&env)?;
         require_admin(&env)?;
         if amount < 0 {
@@ -393,7 +383,7 @@ impl DisputeResolutionContract {
     ) -> Result<Symbol, Error> {
         require_not_paused(&env)?;
         filer.require_auth();
-        if reason.len() == 0 || reason.len() > MAX_REASON_BYTES {
+        if reason.is_empty() || reason.len() > MAX_REASON_BYTES {
             return Err(Error::InvalidReason);
         }
         let key = DataKey::Dispute(task_id.clone());
@@ -427,10 +417,8 @@ impl DisputeResolutionContract {
         if env.storage().persistent().has(&bond_key) {
             extend_ttl(&env, &bond_key);
         }
-        AgentRegistryClient::new(&env, &registry_address).lock_bond_for_dispute(
-            &env.current_contract_address(),
-            &registry_agent_id,
-        );
+        AgentRegistryClient::new(&env, &registry_address)
+            .lock_bond_for_dispute(&env.current_contract_address(), &registry_agent_id);
         let now = env.ledger().timestamp();
         let evidence_deadline = now.saturating_add(EVIDENCE_PHASE);
         let dispute = Dispute {
@@ -504,9 +492,10 @@ impl DisputeResolutionContract {
             evidence_hash: evidence_hash.clone(),
             submitted_at: now,
         };
-        env.storage()
-            .persistent()
-            .set(&DataKey::Evidence(dispute_id.clone(), evidence_id), &evidence);
+        env.storage().persistent().set(
+            &DataKey::Evidence(dispute_id.clone(), evidence_id),
+            &evidence,
+        );
         env.storage()
             .persistent()
             .set(&count_key, &evidence_id.saturating_add(1));
@@ -524,7 +513,7 @@ impl DisputeResolutionContract {
                 submitter,
                 evidence_hash,
                 submitted_at: now,
-                evidence_index: evidence_count,
+                evidence_index: evidence_id,
             },
         );
         Ok(evidence_id)
@@ -613,11 +602,11 @@ impl DisputeResolutionContract {
         let mut filer_votes = 0u32;
         let mut agent_votes = 0u32;
         for voter in dispute.voters.iter() {
-            if let Some(vote) = env
-                .storage()
-                .persistent()
-                .get::<_, Vote>(&current_vote_key(&env, &dispute_id, &voter))
-            {
+            if let Some(vote) = env.storage().persistent().get::<_, Vote>(&current_vote_key(
+                &env,
+                &dispute_id,
+                &voter,
+            )) {
                 match vote.ruling {
                     VoteSide::SupportFiler => filer_votes += 1,
                     VoteSide::SupportAgent => agent_votes += 1,
@@ -768,6 +757,12 @@ impl DisputeResolutionContract {
             .persistent()
             .get(&DataKey::EvidenceCount(dispute_id))
             .unwrap_or(0)
+    }
+
+    /// Estimate the CPU-instruction cost of `operation` for a dispute with
+    /// `juror_count` jurors. Backed by the calibrated model in [`gas`].
+    pub fn estimate_gas(_env: Env, operation: Symbol, juror_count: u32) -> u64 {
+        gas::estimate(operation, juror_count)
     }
 
     pub fn get_evidence(env: Env, dispute_id: Symbol, evidence_id: u32) -> Option<Evidence> {

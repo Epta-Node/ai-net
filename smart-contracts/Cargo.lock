@@ -503,6 +503,7 @@ dependencies = [
 name = "dispute-resolution"
 version = "0.1.0"
 dependencies = [
+ "agent_registry",
  "gas-interface",
  "soroban-sdk",
 ]
@@ -812,6 +813,21 @@ name = "indexmap-nostd"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e04e2fd2b8188ea827b32ef11de88377086d690286ab35747ef7f9bf3ccb590"
+
+[[package]]
+name = "integration-tests"
+version = "0.1.0"
+dependencies = [
+ "agent-bidding",
+ "agent-marketplace",
+ "agent_registry",
+ "dispute-resolution",
+ "oracle-manager",
+ "price-oracle",
+ "soroban-sdk",
+ "task-store",
+ "upgrade-manager",
+]
 
 [[package]]
 name = "itertools"

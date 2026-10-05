@@ -73,17 +73,17 @@ pub enum Error {
     AuctionNotAbortable = 25,
     /// An arithmetic operation overflowed while scoring bids.
     ArithmeticOverflow = 26,
-    /// Contract instance has already been initialized.
+    /// Contract already initialized.
     AlreadyInitialized = 27,
-    /// Contract is currently paused.
+    /// The contract is currently paused.
     ContractPaused = 28,
-    /// Winner cannot claim refund via bond refund path.
+    /// The winning bidder cannot claim a refund on bond.
     WinnerCannotClaimRefund = 29,
-    /// Refund has already been claimed for this bidder.
+    /// The refund has already been claimed.
     RefundAlreadyClaimed = 30,
-    /// Claim window has expired.
+    /// The claim window for bond refund has expired.
     ClaimWindowExpired = 31,
-    /// Bond has already been refunded.
+    /// Bond already refunded.
     AlreadyRefunded = 32,
     /// No payment asset (Stellar Asset Contract) has been configured.
     AssetNotConfigured = 33,
@@ -93,4 +93,8 @@ pub enum Error {
     InvalidAmount = 35,
     /// The escrow has already been released or refunded.
     EscrowAlreadySettled = 36,
+    /// The auction already has the maximum number of bidders.
+    MaxBiddersReached = 37,
+    /// The requested audit range is invalid.
+    InvalidAuditRange = 38,
 }

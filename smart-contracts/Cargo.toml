@@ -12,6 +12,7 @@ members = [
     "contracts/dispute_resolution",
     "contracts/oracle_manager",
     "contracts/price_oracle",
+    "tests/integration",
 ]
 resolver = "2"
 
