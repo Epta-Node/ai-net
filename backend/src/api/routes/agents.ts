@@ -40,14 +40,32 @@ export interface AgentsRouterOptions {
 
 const STELLAR_PUBLIC_KEY_REGEX = /^G[A-Z2-7]{55}$/;
 
-// Mirrors the RegisterAgentRequest schema documented in api/docs.ts.
-const RegisterAgentSchema = z.object({
-  agentId: z.string().min(1),
-  capabilities: z.array(z.string()).min(1),
-  pricingXLM: z.number().min(0.001),
-  endpoint: z.string().url(),
-  stellarPublicKey: z.string().regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key format"),
-});
+/** Bounds applied at the registration boundary so malformed or oversized payloads are never stored (#754). */
+const AGENT_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const CAPABILITY_REGEX = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+const MAX_CAPABILITIES = 32;
+const MAX_ENDPOINT_LENGTH = 2048;
+
+// Mirrors the RegisterAgentRequest schema documented in api/docs.ts. Strict so
+// unknown fields are rejected instead of silently dropped.
+const RegisterAgentSchema = z
+  .object({
+    agentId: z.string().regex(AGENT_ID_REGEX, "Invalid agent id format"),
+    capabilities: z
+      .array(z.string().regex(CAPABILITY_REGEX, "Invalid capability format"))
+      .min(1)
+      .max(MAX_CAPABILITIES)
+      .refine((caps) => new Set(caps).size === caps.length, "Capabilities must be unique"),
+    pricingXLM: z.number().min(0.001),
+    endpoint: z
+      .string()
+      .max(MAX_ENDPOINT_LENGTH)
+      .url()
+      .refine((value) => /^https?:\/\//i.test(value), "Endpoint must use http or https"),
+    stellarPublicKey: z.string().regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key format"),
+    bondAmountXLM: z.number().nonnegative().optional(),
+  })
+  .strict();
 
 /**
  * `POST /api/agents/challenge` body.

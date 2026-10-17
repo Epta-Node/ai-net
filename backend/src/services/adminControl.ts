@@ -154,27 +154,98 @@ export function listAdminAuditLog(limit = 200, offset = 0): AdminAuditEntry[] {
   }));
 }
 
+/** Rows fetched per query while streaming an export. */
+const AUDIT_EXPORT_BATCH_SIZE = 500;
+/** Hard upper bound on rows in a single export, regardless of the requested limit. */
+export const AUDIT_EXPORT_MAX_ROWS = 100_000;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/** Cells starting with these characters are interpreted as formulas by spreadsheet apps. */
+const CSV_FORMULA_PREFIX = /^[=+\-@\t\r]/;
+
+export const AUDIT_LOG_CSV_HEADER = [
+  "id",
+  "at",
+  "actor",
+  "action",
+  "target",
+  "statusCode",
+  "requestId",
+  "details",
+].join(",");
+
+function csvCell(value: unknown): string {
+  let text = value === undefined || value === null ? "" : String(value);
+  // Neutralise CSV/formula injection (actor, target and details are caller-controlled).
+  if (CSV_FORMULA_PREFIX.test(text)) text = `'${text}`;
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+export function auditLogEntryToCsvRow(entry: AdminAuditEntry): string {
+  return [
+    entry.id,
+    entry.at,
+    entry.actor,
+    entry.action,
+    entry.target,
+    entry.statusCode,
+    entry.requestId,
+    entry.details === undefined ? "" : JSON.stringify(entry.details),
+  ]
+    .map(csvCell)
+    .join(",");
+}
+
 export function auditLogToCsv(entries: AdminAuditEntry[]): string {
-  const escape = (value: unknown): string => {
-    const text = value === undefined || value === null ? "" : String(value);
-    return `"${text.replace(/"/g, '""')}"`;
-  };
-  const header = ["id", "at", "actor", "action", "target", "statusCode", "requestId", "details"];
-  const rows = entries.map((entry) =>
-    [
-      entry.id,
-      entry.at,
-      entry.actor,
-      entry.action,
-      entry.target,
-      entry.statusCode,
-      entry.requestId,
-      entry.details === undefined ? "" : JSON.stringify(entry.details),
-    ]
-      .map(escape)
-      .join(","),
+  return [AUDIT_LOG_CSV_HEADER, ...entries.map(auditLogEntryToCsvRow)].join("\n");
+}
+
+/**
+ * Walk the audit log newest-first in bounded batches using keyset pagination,
+ * yielding at most `maxRows` entries in total, so an export never loads the
+ * whole table into memory.
+ */
+export function* iterateAdminAuditLog(
+  maxRows = AUDIT_EXPORT_MAX_ROWS,
+  batchSize = AUDIT_EXPORT_BATCH_SIZE,
+): Generator<AdminAuditEntry[]> {
+  const statement = getAuditDb().prepare(
+    `
+      SELECT id, at, actor, action, target, statusCode, requestId, details
+      FROM admin_audit_log
+      WHERE id < ?
+      ORDER BY id DESC
+      LIMIT ?
+    `,
   );
-  return [header.join(","), ...rows].join("\n");
+  let remaining = Math.min(Math.max(maxRows, 0), AUDIT_EXPORT_MAX_ROWS);
+  let beforeId = Number.MAX_SAFE_INTEGER;
+
+  while (remaining > 0) {
+    const rows = statement.all(beforeId, Math.min(batchSize, remaining)) as Array<
+      AdminAuditEntry & { id: number; details: string | null }
+    >;
+    if (rows.length === 0) return;
+
+    yield rows.map((row) => ({
+      ...row,
+      details: row.details ? JSON.parse(row.details) : undefined,
+    }));
+
+    remaining -= rows.length;
+    beforeId = rows[rows.length - 1].id;
+  }
+}
+
+/**
+ * Delete audit entries older than `retentionDays`. A non-positive value
+ * disables pruning. Returns the number of rows removed.
+ */
+export function pruneAdminAuditLog(retentionDays: number, now: Date = new Date()): number {
+  if (!Number.isFinite(retentionDays) || retentionDays <= 0) return 0;
+  const cutoff = new Date(now.getTime() - retentionDays * MS_PER_DAY).toISOString();
+  return getAuditDb().prepare("DELETE FROM admin_audit_log WHERE at < ?").run(cutoff).changes;
 }
 
 export function listAgentsForAdmin(status?: "online" | "offline"): AgentRecord[] {

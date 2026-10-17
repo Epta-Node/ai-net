@@ -83,6 +83,7 @@ async function main() {
       vacuumThreshold: config.DB_MAINTENANCE_VACUUM_THRESHOLD,
       backupDir: config.DB_BACKUP_DIR,
       backupRetentionCount: config.DB_BACKUP_RETENTION_COUNT,
+      auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
     });
     maintenanceService.start();
 

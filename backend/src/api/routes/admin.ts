@@ -4,11 +4,15 @@ import { getGlobalJobQueue, type JobQueue, type JobStatus } from "../../queue";
 import { tracingService } from "../../services/tracing";
 import { adminAuthMiddleware } from "../middleware/auth";
 import {
+  AUDIT_EXPORT_MAX_ROWS,
+  AUDIT_LOG_CSV_HEADER,
   actorFromRequest,
+  auditLogEntryToCsvRow,
   auditLogToCsv,
   backupDatabases,
   getReadOnlyState,
   listAdminAuditLog,
+  iterateAdminAuditLog,
   listAgentsForAdmin,
   recordAdminAudit,
   setAgentEnabled,
@@ -39,6 +43,11 @@ const auditLogQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(200),
   offset: z.coerce.number().int().min(0).default(0),
   format: z.enum(["json", "csv"]).default("json"),
+});
+
+const auditLogExportQuerySchema = z.object({
+  format: z.enum(["json", "csv"]).default("json"),
+  limit: z.coerce.number().int().min(1).max(AUDIT_EXPORT_MAX_ROWS).default(AUDIT_EXPORT_MAX_ROWS),
 });
 
 const reconciliationSchema = z.object({
@@ -488,6 +497,100 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
     }
     res.json({ entries });
   });
+
+  /**
+   * @openapi
+   * /api/admin/audit-log/export:
+   *   get:
+   *     summary: Export the administrative audit log
+   *     operationId: exportAdminAuditLog
+   *     description: >
+   *       Streams the audit log newest-first in bounded batches for compliance
+   *       review. CSV cells that could be read as spreadsheet formulas are
+   *       neutralised. The export request itself is recorded in the audit log.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: format
+   *         schema: { type: string, enum: [json, csv], default: json }
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, minimum: 1, maximum: 100000, default: 100000 }
+   *         description: Maximum number of entries to export
+   *     responses:
+   *       200:
+   *         description: Streamed audit log (`{ "entries": [...] }` for JSON, or CSV)
+   *       400:
+   *         description: Invalid query parameters
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ValidationError'
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.get(
+    "/audit-log/export",
+    asyncHandler(async (req: Request, res: Response) => {
+      const parsed = auditLogExportQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw new ValidationError(
+          "Invalid query parameters",
+          { issues: parsed.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        );
+      }
+      const { format, limit } = parsed.data;
+
+      // Honour backpressure so a slow client cannot make the server buffer the export.
+      const write = async (chunk: string): Promise<void> => {
+        if (res.write(chunk)) return;
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            res.off("drain", done);
+            res.off("close", done);
+            resolve();
+          };
+          res.once("drain", done);
+          res.once("close", done);
+        });
+      };
+
+      res.setHeader(
+        "Content-Type",
+        format === "csv" ? "text/csv; charset=utf-8" : "application/json; charset=utf-8",
+      );
+      res.setHeader("Content-Disposition", `attachment; filename="audit-log.${format}"`);
+
+      try {
+        await write(format === "csv" ? `${AUDIT_LOG_CSV_HEADER}\n` : '{"entries":[');
+        let first = true;
+        for (const batch of iterateAdminAuditLog(limit)) {
+          if (res.destroyed) return;
+          const chunk =
+            format === "csv"
+              ? batch.map((entry) => `${auditLogEntryToCsvRow(entry)}\n`).join("")
+              : `${first ? "" : ","}${batch.map((entry) => JSON.stringify(entry)).join(",")}`;
+          first = false;
+          await write(chunk);
+        }
+        if (format === "json") await write("]}");
+        res.end();
+      } catch (err) {
+        if (!res.headersSent) {
+          res.removeHeader("Content-Disposition");
+          throw err;
+        }
+        // Headers are already sent once streaming starts, so abort the response.
+        logger.error({ err }, "audit log export failed");
+        res.destroy();
+      }
+    }),
+  );
 
   // The queue sub-router is mounted once, at `/api/admin/queue`, by the app
   // factory. Mounting it here as well used to expose a duplicated

@@ -257,6 +257,8 @@ const envSchema = z.object({
   AI_NET_READ_ONLY_REASON: z.string().optional(),
   /** Path to admin audit database. Default: ./data/admin-audit.db */
   ADMIN_AUDIT_DB_PATH: z.string().default("./data/admin-audit.db"),
+  /** Days to keep admin audit entries; older rows are pruned during maintenance runs. 0 disables pruning. */
+  AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
   /** Directory for admin backups. Default: ./data/backups/admin */
   ADMIN_BACKUP_DIR: z.string().default("./data/backups/admin"),
 

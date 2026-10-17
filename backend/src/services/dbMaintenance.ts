@@ -47,6 +47,8 @@ export interface DbMaintenanceMetrics {
   databasesVacuumed: number;
   databasesBackedUp: number;
   backupsDeleted: number;
+  /** Admin audit entries pruned by the retention hook during the last pass. */
+  auditLogsPruned: number;
   /** Per-database roll-up keyed by database name. */
   byDatabase: Record<
     string,
@@ -70,6 +72,8 @@ export interface DbMaintenanceOptions {
   backupDir?: string;
   /** Maximum number of snapshots retained per database. Default: 14. */
   backupRetentionCount?: number;
+  /** Days to keep admin audit entries; older ones are pruned each pass. 0 or unset disables pruning. */
+  auditLogRetentionDays?: number;
 }
 
 const DEFAULT_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -96,6 +100,7 @@ export class DbMaintenanceService {
   private readonly vacuumThreshold: number;
   private readonly backupDir: string;
   private readonly backupRetentionCount: number;
+  private readonly auditLogRetentionDays: number;
   private readonly databases: MaintenanceDb[];
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
@@ -108,6 +113,7 @@ export class DbMaintenanceService {
     this.vacuumThreshold = options.vacuumThreshold ?? DEFAULT_VACUUM_THRESHOLD;
     this.backupRetentionCount = options.backupRetentionCount ?? DEFAULT_BACKUP_RETENTION;
     this.backupDir = options.backupDir ?? path.join(process.cwd(), "backups");
+    this.auditLogRetentionDays = options.auditLogRetentionDays ?? 0;
   }
 
   start(): void {
@@ -195,6 +201,16 @@ export class DbMaintenanceService {
     snapshot.databasesVacuumed = Object.values(snapshot.byDatabase).filter((d) => d.vacuumed).length;
     snapshot.databasesBackedUp = Object.values(snapshot.byDatabase).filter((d) => d.backedUp).length;
     snapshot.backupsDeleted = backupsDeleted;
+    if (this.auditLogRetentionDays > 0) {
+      try {
+        // Lazy require: adminControl pulls in every database module.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { pruneAdminAuditLog } = require("./adminControl") as typeof import("./adminControl");
+        snapshot.auditLogsPruned = pruneAdminAuditLog(this.auditLogRetentionDays);
+      } catch (error) {
+        logger.error({ err: error }, "audit log retention pruning failed");
+      }
+    }
     snapshot.lastRunAt = new Date().toISOString();
     this.metrics = snapshot;
 
@@ -205,6 +221,7 @@ export class DbMaintenanceService {
         vacuumed: snapshot.databasesVacuumed,
         backedUp: snapshot.databasesBackedUp,
         backupsDeleted,
+        auditLogsPruned: snapshot.auditLogsPruned,
       },
       "database maintenance pass completed",
     );
@@ -257,6 +274,7 @@ function emptyMetrics(): DbMaintenanceMetrics {
     databasesVacuumed: 0,
     databasesBackedUp: 0,
     backupsDeleted: 0,
+    auditLogsPruned: 0,
     byDatabase: {},
   };
 }

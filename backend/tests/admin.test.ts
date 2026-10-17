@@ -43,6 +43,12 @@ jest.mock("../src/services/adminControl", () => ({
     { at: "2024-01-01T00:00:00Z", actor: "admin", action: "GET /admin/", statusCode: 200 },
   ]),
   auditLogToCsv: jest.fn(() => "at,actor,action\n2024-01-01T00:00:00Z,admin,GET /admin/\n"),
+  AUDIT_EXPORT_MAX_ROWS: 100000,
+  AUDIT_LOG_CSV_HEADER: "at,actor,action",
+  auditLogEntryToCsvRow: jest.fn(() => "2024-01-01T00:00:00Z,admin,GET /admin/"),
+  iterateAdminAuditLog: jest.fn(function* () {
+    yield [{ at: "2024-01-01T00:00:00Z", actor: "admin", action: "GET /admin/", statusCode: 200 }];
+  }),
 }));
 
 jest.mock("../src/services/reconciliation", () => ({
@@ -143,6 +149,7 @@ describe("Admin auth enforcement", () => {
       { method: "post" as const, path: "/api/admin/maintenance/vacuum" },
       { method: "post" as const, path: "/api/admin/maintenance/backup" },
       { method: "get" as const, path: "/api/admin/audit-log" },
+      { method: "get" as const, path: "/api/admin/audit-log/export" },
     ];
 
     for (const route of routes) {
