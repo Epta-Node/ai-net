@@ -407,6 +407,30 @@ describe("MigrationRunner.down", () => {
     runner.up();
     expect(() => runner.down()).toThrow(/no down section/);
   });
+
+  it("reverts nothing when any targeted migration is irreversible", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ainet-migrations-"));
+    writeFileSync(join(dir, "0001_a.sql"), "CREATE TABLE IF NOT EXISTS a (id TEXT PRIMARY KEY);");
+    writeFileSync(
+      join(dir, "0002_b.sql"),
+      "CREATE TABLE IF NOT EXISTS b (id TEXT PRIMARY KEY);\n-- migrate:down\nDROP TABLE IF EXISTS b;",
+    );
+    const db = new Database(":memory:");
+    const runner = new MigrationRunner(db, loadMigrations(dir), {
+      logger: silentLogger,
+      includeDownMigrations: true,
+    });
+    runner.up();
+
+    // Newest-first, 0002 is reversible but 0001 is not: refuse before touching 0002.
+    expect(() => runner.down()).toThrow(/0001_a\.sql.*irreversible.*No migrations were reverted/);
+    expect(appliedIds(db)).toEqual(["0001", "0002"]);
+    expect(tableNames(db)).toEqual(expect.arrayContaining(["a", "b"]));
+
+    // Rolling back only the reversible newest migration is still allowed.
+    expect(runner.down({ steps: 1 }).map((r) => r.status)).toEqual(["reverted"]);
+    expect(appliedIds(db)).toEqual(["0001"]);
+  });
 });
 
 describe("shipped migration files", () => {
@@ -512,6 +536,34 @@ describe("shipped migration files", () => {
     // left behind by the dropped AUTOINCREMENT tables.
     expect(tableNames(db)).toEqual(["schema_migrations", "sqlite_sequence"]);
   });
+
+  it("rehearse up -> down -> up to an identical schema", () => {
+    const schemaOf = (db: Database.Database) =>
+      db
+        .prepare(
+          "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+        )
+        .all();
+
+    const db = new Database(":memory:");
+    const runner = new MigrationRunner(db, migrations, {
+      logger: silentLogger,
+      includeDownMigrations: true,
+    });
+
+    runner.up();
+    const afterFirstUp = schemaOf(db);
+
+    expect(runner.down().every((r) => r.status === "reverted")).toBe(true);
+    expect(runner.up().every((r) => r.status === "applied")).toBe(true);
+
+    expect(schemaOf(db)).toEqual(afterFirstUp);
+    expect(appliedIds(db)).toEqual(migrations.map((m) => m.id));
+  });
+
+  it("are all reversible, so db:rollback can undo any of them", () => {
+    expect(migrations.filter((m) => !m.downSql)).toEqual([]);
+  });
 });
 
 describe("resolveDatabasePath", () => {
@@ -611,6 +663,17 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["--", "--down", "--to=0001"])).toMatchObject({ down: true, to: "0001" });
   });
 
+  it("treats --rollback as a one-step down run unless told otherwise", () => {
+    expect(parseCliArgs(["--rollback"])).toMatchObject({
+      down: true,
+      includeDownMigrations: true,
+      steps: 1,
+    });
+    expect(parseCliArgs(["--rollback", "--steps", "2"])).toMatchObject({ down: true, steps: 2 });
+    expect(parseCliArgs(["--rollback", "--to=0001"])).toMatchObject({ down: true, to: "0001" });
+    expect(parseCliArgs(["--rollback", "--to=0001"]).steps).toBeUndefined();
+  });
+
   it("rejects malformed input", () => {
     expect(() => parseCliArgs(["--steps=abc"])).toThrow(/--steps expects/);
     expect(() => parseCliArgs(["--nope"])).toThrow(/Unknown option/);
@@ -693,6 +756,18 @@ describe("runMigrateCli", () => {
     db.close();
   });
 
+  it("rolls back only the newest migration with --rollback", () => {
+    runMigrateCli([`--database=${dbPath}`]);
+    logSpy.mockClear();
+
+    expect(runMigrateCli([`--database=${dbPath}`, "--rollback"])).toBe(0);
+    expect(output()).toContain("reverted 0002_indexes.sql");
+
+    const db = new Database(dbPath);
+    expect(appliedIds(db)).toEqual(["0001"]);
+    db.close();
+  });
+
   it("lists reversible migrations when --include-down-migrations is used with --status", () => {
     runMigrateCli([`--database=${dbPath}`]);
     logSpy.mockClear();
@@ -742,6 +817,10 @@ describe("npm script", () => {
 
   it("exposes db:migrate", () => {
     expect(pkg.scripts["db:migrate"]).toBe("ts-node src/db/cli.ts migrate");
+  });
+
+  it("exposes db:rollback", () => {
+    expect(pkg.scripts["db:rollback"]).toBe("ts-node src/db/migrations/cli.ts --rollback");
   });
 });
 

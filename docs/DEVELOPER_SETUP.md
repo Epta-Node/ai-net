@@ -68,6 +68,20 @@ cd backend && npm install && cd ../frontend && npm install && cd ..
 cd backend && npm run db:migrate && cd ..
 ```
 
+#### Rolling back a migration
+
+Each migration in `backend/src/db/migrations/` may end with a `-- migrate:down` section holding the SQL that reverses it. `db:rollback` reverts the newest applied migration of the consolidated database (the one `db:migrate:status` reports on); pass `--steps N` to revert more:
+
+```bash
+cd backend
+npm run db:rollback               # revert the newest migration
+npm run db:rollback -- --steps 2  # revert the newest two
+```
+
+A migration without a `-- migrate:down` section is irreversible. If any migration a rollback would revert is irreversible, the command exits with an error naming it and reverts nothing. Applied-state tracking lives in the `schema_migrations` table: a reverted migration's row is removed, so `npm run db:migrate:status` shows it as pending again.
+
+The migration test suite rehearses `up -> down -> up` on a scratch in-memory database and asserts the schema is identical afterwards; it runs with the rest of the backend tests in CI (`npm run test:coverage`).
+
 ### Step 5: Start Development Servers
 
 ```bash

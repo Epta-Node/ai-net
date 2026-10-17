@@ -21,6 +21,7 @@ import {
 } from "../../services/reconciliation";
 import type { ReconciliationRouterOptions } from "./reconciliation";
 import type { ReconciliationTrigger } from "../../services/reconciliation.types";
+import { getCostBudgetStatus } from "../../services/budget";
 import { createLogger } from "../../utils/logger";
 import { ValidationError, NotFoundError, AppError } from "../../errors";
 
@@ -163,6 +164,35 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
    */
   router.get("/read-only", (_req: Request, res: Response) => {
     res.json(getReadOnlyState());
+  });
+
+  /**
+   * @openapi
+   * /api/admin/cost-budget:
+   *   get:
+   *     summary: Get daily LLM cost budget status
+   *     operationId: getCostBudgetStatus
+   *     description: >
+   *       Today's recorded spend against `DAILY_COST_BUDGET_USD`. `level` is `ok`
+   *       below 75%, `warn` from 75%, and `exceeded` from 100%, at which point new
+   *       work is refused. `disabled` when no budget is configured.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     responses:
+   *       200:
+   *         description: Current cost budget status
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.get("/cost-budget", (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(getCostBudgetStatus());
+    } catch (err) {
+      next(err);
+    }
   });
 
   router.put("/read-only", (req: Request, res: Response, next: NextFunction) => {

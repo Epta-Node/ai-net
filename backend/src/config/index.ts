@@ -112,6 +112,11 @@ const envSchema = z.object({
   LLM_MAX_PROMPT_TOKENS: z.coerce.number().int().positive().default(16_000),
   VENICE_PRICING: z.string().optional(),
   COST_FLUSH_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  /**
+   * Daily LLM spend budget in USD (#750): warn at 75%, refuse new work at 100%.
+   * `0` disables the budget.
+   */
+  DAILY_COST_BUDGET_USD: z.coerce.number().min(0).default(0),
 
   HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   HEARTBEAT_STALE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(5),
@@ -221,6 +226,10 @@ const envSchema = z.object({
   WS_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(30_000),
   WS_PONG_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
+  // ── SSE task event stream (#751) ────────────────────────────────────────────
+  SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(5),
+  SSE_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+
   METRICS_CACHE_TTL_MS: z.coerce.number().int().positive().default(5_000),
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   METRICS_MAX_SAMPLES: z.coerce.number().int().positive().default(1_000),
@@ -296,6 +305,14 @@ const envSchema = z.object({
   JOB_LEASE_TTL_MS: z.coerce.number().int().positive().default(30_000),
   /** How often a running job's lease is renewed — must be well inside the TTL. */
   JOB_LEASE_HEARTBEAT_MS: z.coerce.number().int().positive().default(10_000),
+
+  // ── Job retry policy (#752) ─────────────────────────────────────────────────
+  /** Base of the full-jitter exponential backoff between job retries, in ms. */
+  JOB_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1_000),
+  /** Ceiling for a single job retry delay, in ms. */
+  JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
+  /** Attempts before a job is moved to the dead-letter queue. */
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;

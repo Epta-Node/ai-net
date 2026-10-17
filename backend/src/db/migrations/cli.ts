@@ -13,6 +13,8 @@
  * npm run db:migrate -- --dry-run                              # preview
  * npm run db:migrate -- --include-down-migrations --status  # down availability
  * npm run db:migrate -- --include-down-migrations --down --to=0001
+ * npm run db:rollback                                          # revert the newest migration
+ * npm run db:rollback -- --steps 2                             # revert the newest two
  * ```
  */
 
@@ -27,6 +29,9 @@ Options:
   --status                      List applied and pending migrations, then exit
   --dry-run                     Report what would run without writing to the DB
   --down                        Revert migrations (newest first)
+  --rollback                    Revert the newest migration (or --steps <n>); implies
+                                --down --include-down-migrations. Refuses, changing
+                                nothing, if any targeted migration is irreversible
   --to=<version>                With --down: revert everything above <version>
   --steps=<n>                   With --down: revert at most <n> migrations
   --include-down-migrations     Allow down migrations to run (required by --down)
@@ -36,6 +41,7 @@ Options:
 
 Example:
   npm run db:migrate -- --include-down-migrations --down --to=0001
+  npm run db:rollback -- --steps 2
 `;
 
 interface CliOptions {
@@ -57,6 +63,7 @@ export function parseCliArgs(argv: string[]): CliOptions {
     includeDownMigrations: false,
     help: false,
   };
+  let rollback = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -94,6 +101,9 @@ export function parseCliArgs(argv: string[]): CliOptions {
       case "--down":
         options.down = true;
         break;
+      case "--rollback":
+        rollback = true;
+        break;
       case "--include-down-migrations":
         options.includeDownMigrations = true;
         break;
@@ -119,6 +129,14 @@ export function parseCliArgs(argv: string[]): CliOptions {
         }
         throw new Error(`Unknown option "${arg}". Run with --help for usage.`);
     }
+  }
+
+  if (rollback) {
+    options.down = true;
+    options.includeDownMigrations = true;
+    // A rollback undoes one migration unless told otherwise; a bare `--down`
+    // keeps reverting everything.
+    if (options.steps === undefined && options.to === undefined) options.steps = 1;
   }
 
   return options;

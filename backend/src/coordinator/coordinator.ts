@@ -19,6 +19,7 @@ import type { Job } from '../queue/jobStore';
 import { selectFallbackAgent } from './dispatch';
 import {
   BudgetExhaustedError,
+  assertDailyCostBudgetAvailable,
   budgetLimitsFromEnv,
   estimateTokens,
   ledgerFor,
@@ -689,6 +690,7 @@ export class Coordinator {
     const ledger = this.ledgerForTask(taskId);
     try {
       ledger.assertCanSpend();
+      assertDailyCostBudgetAvailable(taskId);
     } catch (err) {
       if (err instanceof BudgetExhaustedError) {
         this.failNodeForBudget(taskId, node, ledger, err, nodeSpan);

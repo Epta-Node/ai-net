@@ -2,6 +2,14 @@ import os from "os";
 import { nanoid } from "nanoid";
 import { createLogger } from "../utils/logger";
 import type { Job, JobLease, JobStore } from "./jobStore";
+import {
+  DEFAULT_JOB_BACKOFF_MAX_MS,
+  computeBackoffDelayMs,
+  recordJobDeadLetter,
+  recordJobRetry,
+  recordRetryLag,
+  type RandomFn,
+} from "./backoff";
 
 const logger = createLogger({ component: "job-worker" });
 
@@ -34,7 +42,11 @@ export interface JobWorkerOptions {
   concurrency?: number;
   pollIntervalMs?: number;
   baseBackoffMs?: number;
+  /** Ceiling for a single retry delay (issue #752). Defaults to five minutes. */
+  maxBackoffMs?: number;
   maxAttempts?: number;
+  /** Randomness source for backoff jitter; defaults to `Math.random`. */
+  random?: RandomFn;
   autoStart?: boolean;
   /**
    * Unique id stamped on every job this worker claims, so its heartbeats and
@@ -61,6 +73,8 @@ export class JobWorker {
   private readonly concurrency: number;
   private readonly pollIntervalMs: number;
   private readonly baseBackoffMs: number;
+  private readonly maxBackoffMs: number;
+  private readonly random: RandomFn;
   private readonly maxAttempts: number;
   private readonly leaseTtlMs: number;
   private readonly leaseHeartbeatMs: number;
@@ -89,6 +103,8 @@ export class JobWorker {
     this.concurrency = options.concurrency ?? 3;
     this.pollIntervalMs = options.pollIntervalMs ?? 100;
     this.baseBackoffMs = options.baseBackoffMs ?? 1000;
+    this.maxBackoffMs = options.maxBackoffMs ?? DEFAULT_JOB_BACKOFF_MAX_MS;
+    this.random = options.random ?? Math.random;
     this.maxAttempts = options.maxAttempts ?? 3;
     this.leaseTtlMs = options.leaseTtlMs ?? DEFAULT_JOB_LEASE_TTL_MS;
     // Default the heartbeat to a third of the TTL; an explicit interval is
@@ -303,6 +319,11 @@ export class JobWorker {
   private async executeJob(job: Job): Promise<void> {
     logger.info({ jobId: job.id, taskId: job.taskId, attempt: job.attempts + 1 }, "processing job");
 
+    if (job.attempts > 0 && job.nextRunAt) {
+      const scheduledAt = Date.parse(job.nextRunAt);
+      if (!Number.isNaN(scheduledAt)) recordRetryLag(Date.now() - scheduledAt);
+    }
+
     this.onJobStarted?.(job);
 
     // Keep the lease alive for as long as the handler runs, so a liveness pass
@@ -334,8 +355,13 @@ export class JobWorker {
       const now = new Date().toISOString();
 
       if (attempts < maxAllowedAttempts) {
-        // Exponential backoff: base * 2^(attempt - 1)
-        const delayMs = this.baseBackoffMs * Math.pow(2, attempts - 1);
+        // Full-jitter exponential backoff: random(0, min(cap, base * 2^(attempt - 1)))
+        const delayMs = computeBackoffDelayMs(
+          attempts,
+          this.baseBackoffMs,
+          this.maxBackoffMs,
+          this.random
+        );
         const nextRunAt = new Date(Date.now() + delayMs).toISOString();
 
         this.store.updateStatus(job.id, "failed", {
@@ -344,6 +370,7 @@ export class JobWorker {
           nextRunAt,
           expectedStatus: "active",
         });
+        recordJobRetry();
 
         logger.warn(
           {
@@ -362,10 +389,11 @@ export class JobWorker {
         // Exceeded max retry attempts -> move to dead-letter queue
         this.store.updateStatus(job.id, "dead-letter", {
           attempts,
-          lastError: errorMessage,
+          lastError: `max attempts exceeded (${attempts}/${maxAllowedAttempts}): ${errorMessage}`,
           failedAt: now,
           expectedStatus: "active",
         });
+        recordJobDeadLetter();
 
         logger.error(
           {

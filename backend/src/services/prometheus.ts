@@ -14,6 +14,7 @@
  *  • Venice AI / LLM latency histogram
  *  • Per-wallet daily quota gauges and rejection counter (Issue #738)
  *  • Task token budget / spend gauges
+ *  • LLM cost by agent type and model, and daily cost budget gauges (Issue #750)
  *  • Process uptime and memory gauges
  *
  * The collector reads live data from the existing {@link MetricsService},
@@ -24,6 +25,8 @@ import os from 'os';
 import { createLogger } from '../utils/logger';
 import { metricsService } from './metrics';
 import { quotaMetricsRegistry } from './quota/metrics';
+import { getQueueRetryMetrics } from '../queue/backoff';
+import { getCostBudgetStatus } from './budget';
 import type { RequestSample } from './metrics.types';
 
 const logger = createLogger({ component: 'prometheus' });
@@ -155,8 +158,55 @@ function collectQueueMetrics(): string {
     out += formatGauge('ainet_queue_processing', 'Currently processing jobs', processing);
     out += formatCounter('ainet_queue_completed_total', 'Total completed jobs', completed);
     out += formatCounter('ainet_queue_failed_total', 'Total failed jobs', failed);
+
+    const retry = getQueueRetryMetrics();
+    out += formatCounter('ainet_queue_retries_total', 'Job retries scheduled after a failed attempt', retry.retriesTotal);
+    out += formatCounter('ainet_queue_dead_letter_total', 'Jobs moved to the dead-letter queue', retry.deadLetterTotal);
+    out += formatCounter('ainet_queue_retry_lag_milliseconds_sum', 'Sum of delay between a retry being due and starting, in ms', retry.retryLagMsSum);
+    out += formatCounter('ainet_queue_retry_lag_milliseconds_count', 'Number of retried runs measured for retry lag', retry.retryLagCount);
   } catch (err) {
     logger.debug({ err }, 'queue metrics unavailable');
+  }
+  return out;
+}
+
+function collectCostMetrics(): string {
+  let out = '';
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getTaskDb } = require('../db/tasks') as typeof import('../db/tasks');
+    const rows = getTaskDb()
+      .prepare(
+        `SELECT agentType, model, SUM(costUsd) AS costUsd, SUM(totalTokens) AS tokens, SUM(calls) AS calls
+         FROM task_token_usage GROUP BY agentType, model`,
+      )
+      .all() as Array<{ agentType: string; model: string; costUsd: number | null; tokens: number | null; calls: number | null }>;
+
+    // One HELP/TYPE header per family, then a sample line per label set.
+    const families: Array<[string, string, (row: (typeof rows)[number]) => number]> = [
+      ['ainet_llm_cost_usd', 'LLM spend in USD by agent type and model', (row) => Number(row.costUsd) || 0],
+      ['ainet_llm_tokens', 'LLM tokens used by agent type and model', (row) => Number(row.tokens) || 0],
+      ['ainet_llm_calls', 'LLM calls made by agent type and model', (row) => Number(row.calls) || 0],
+    ];
+    if (rows.length > 0) {
+      for (const [name, help, valueOf] of families) {
+        out += `# HELP ${name} ${help}\n# TYPE ${name} gauge\n`;
+        for (const row of rows) {
+          const agentType = escapeLabelValue(row.agentType || 'unknown');
+          const model = escapeLabelValue(row.model || 'unknown');
+          out += `${name}{agent_type="${agentType}",model="${model}"} ${valueOf(row)}\n`;
+        }
+      }
+    }
+
+    const budget = getCostBudgetStatus();
+    if (budget.enabled) {
+      out += formatGauge('ainet_cost_budget_usd', 'Configured daily LLM cost budget in USD', budget.budgetUsd);
+      out += formatGauge('ainet_cost_spend_today_usd', 'LLM spend so far today (UTC) in USD', budget.spentUsd);
+      out += formatGauge('ainet_cost_budget_used_ratio', 'Fraction of the daily LLM cost budget spent (warn at 0.75, hard stop at 1)', budget.ratio);
+    }
+  } catch (err) {
+    logger.debug({ err }, 'cost metrics unavailable');
   }
   return out;
 }
@@ -342,6 +392,8 @@ export function generatePrometheusMetrics(): string {
   body += collectPaymentMetrics();
   body += '\n';
   body += collectQueueMetrics();
+  body += '\n';
+  body += collectCostMetrics();
   body += '\n';
   body += collectLlmMetrics(samples);
   body += '\n';

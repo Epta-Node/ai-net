@@ -21,7 +21,7 @@
     "db:migrate:status": "ts-node src/db/migrations/cli.ts --status",
     "db:migrate": "ts-node src/db/cli.ts migrate",
     "db:migrate:status": "ts-node src/db/migrations/cli.ts --status",
-    "db:rollback": "ts-node src/db/cli.ts rollback",
+    "db:rollback": "ts-node src/db/migrations/cli.ts --rollback",
     "db:seed": "ts-node src/db/cli.ts seed"
   },
   "license": "MIT",

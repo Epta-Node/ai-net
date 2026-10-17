@@ -9,17 +9,20 @@
  *
  * Routes (mounted under /api):
  *   GET /tasks/:id/cost   — one task's snapshot + per-node breakdown
- *   GET /costs            — platform totals, per-agent rollup, recent tasks
+ *   GET /costs            — platform totals, per-agent rollup, recent tasks, and a
+ *                           per agent/model/day breakdown filterable with the
+ *                           `agentId`, `agentType`, `model` and `day` (YYYY-MM-DD)
+ *                           query params (#750)
  *
  * Ownership is enforced the same way as GET /tasks/:id: the caller must present
  * the wallet key that owns the task.
  */
 
 import { Router, Request, Response, NextFunction } from "express";
-import { createTaskDb, getTaskDb } from "../../db/tasks";
+import { createTaskDb, getTaskDb, type CostBreakdownFilter } from "../../db/tasks";
 import { peekLedger, type TaskCostSnapshot } from "../../services/budget";
 import { createLogger } from "../../utils/logger";
-import { ForbiddenError, NotFoundError } from "../../errors";
+import { ForbiddenError, NotFoundError, ValidationError } from "../../errors";
 
 const log = createLogger({ component: "cost-routes" });
 
@@ -181,9 +184,13 @@ export function createCostRouter(): Router {
       const agentLimit = clampLimit(req.query.agentLimit, 50, 200);
       const recentLimit = clampLimit(req.query.recentLimit, 20, 100);
 
+      const filter = parseBreakdownFilter(req);
+      const breakdownLimit = clampLimit(req.query.breakdownLimit, 100, 500);
+
       const totals = db.getCostTotals();
       const byAgent = db.listAgentCostTotals(agentLimit);
       const recent = db.listRecentCosts(recentLimit);
+      const breakdown = db.listCostBreakdown(filter, breakdownLimit);
 
       log.debug({ totals: totals.costUsd, agents: byAgent.length }, "cost breakdown requested");
 
@@ -191,6 +198,7 @@ export function createCostRouter(): Router {
         data: {
           totals,
           byAgent,
+          breakdown,
           recent: recent.map((row) => ({
             taskId: row.taskId,
             walletPublicKey: row.walletPublicKey,
@@ -214,6 +222,25 @@ export function createCostRouter(): Router {
   });
 
   return router;
+}
+
+const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Read the optional agent/model/day dimension filters from the query string. */
+function parseBreakdownFilter(req: Request): CostBreakdownFilter {
+  const filter: CostBreakdownFilter = {};
+  for (const key of ["agentId", "agentType", "model", "day"] as const) {
+    const raw = req.query[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== "string" || raw.trim() === "") {
+      throw new ValidationError(`Query parameter "${key}" must be a non-empty string`, { field: key });
+    }
+    filter[key] = raw;
+  }
+  if (filter.day !== undefined && !DAY_PATTERN.test(filter.day)) {
+    throw new ValidationError('Query parameter "day" must be formatted YYYY-MM-DD', { field: "day" });
+  }
+  return filter;
 }
 
 function clampLimit(

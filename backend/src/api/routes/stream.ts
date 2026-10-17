@@ -53,7 +53,7 @@ const logger = createLogger({ module: 'ws-stream' });
  * Clients use `event.type === 'task_completed'` / `event.seq` as a resume
  * cursor, so this mapping must be stable.
  */
-function toWireEvent(event: StoredEvent, traceId?: string): Record<string, unknown> {
+export function toWireEvent(event: StoredEvent, traceId?: string): Record<string, unknown> {
   const snakeType = event.type
     // PascalCase → snake_case: "NodeStarted" → "node_started"
     .replace(/([A-Z])/g, (_match, _p1, offset: number) =>
@@ -196,6 +196,11 @@ export interface TaskStreamDeps extends TaskStreamOptions {
   nonceStore?: NonceStore;
   /** Nonce TTL override, mainly for tests. */
   nonceTtlMs?: number;
+  /**
+   * Fan-out hub to read through. Pass the one the SSE endpoint uses so both
+   * transports share a single bus subscription and bounded read per task.
+   */
+  streamHub?: TaskStreamHub;
 }
 
 /**
@@ -297,7 +302,7 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
   // client watching that task (#655). Clients used to each subscribe and each
   // re-query the store per tick, which made reads scale with the subscriber
   // count and tripped MaxListenersExceededWarning past 100 clients.
-  const streamHub = new TaskStreamHub({ store: eventStore, bus: eventBus });
+  const streamHub = deps.streamHub ?? new TaskStreamHub({ store: eventStore, bus: eventBus });
 
   const wss = new WebSocketServer({ noServer: true });
   activeStreamServers.add(wss);

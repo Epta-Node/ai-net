@@ -259,14 +259,22 @@ export class MigrationRunner {
       .filter((record) => (targetVersion === null ? true : Number(record.id) > targetVersion))
       .slice(0, limit);
 
+    // Refuse up front, before reverting anything, so an irreversible migration
+    // never leaves the database half rolled back.
+    const irreversible = doomed
+      .map((record) => byId.get(record.id)!)
+      .filter((migration) => !migration.downSql);
+    if (irreversible.length > 0) {
+      throw new MigrationError(
+        `Cannot roll back: ${irreversible.map((migration) => `"${migration.filename}"`).join(", ")} ` +
+          `has no down section (irreversible); add a "-- migrate:down" block to revert it. ` +
+          "No migrations were reverted.",
+      );
+    }
+
     const results: MigrationResult[] = [];
     for (const record of doomed) {
       const migration = byId.get(record.id)!;
-      if (!migration.downSql) {
-        throw new MigrationError(
-          `Migration "${migration.filename}" has no down section; add a "-- migrate:down" block to revert it.`,
-        );
-      }
 
       if (options.dryRun) {
         results.push({

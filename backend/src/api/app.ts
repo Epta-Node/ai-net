@@ -31,6 +31,8 @@ import {
   getStreamConnectionCount,
   type TaskStreamOptions,
 } from "./routes/stream";
+import { TaskStreamHub } from "./routes/taskStreamHub";
+import { createTaskEventsSseHandler } from "./routes/taskEventsSse";
 import type { DAGNode } from "../types/task";
 import { agentsRouter } from "./routes/agents";
 import { healthRouter, migrationsRouter } from "./routes/health";
@@ -191,6 +193,7 @@ export function createApp(opts: AppOptions = {}): {
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
 
   const jobQueue = opts.queue ?? getGlobalJobQueue();
+  jobQueue.setDefaultMaxAttempts(config.JOB_MAX_ATTEMPTS);
   const jobWorker =
     opts.jobWorker ??
     new JobWorker({
@@ -202,6 +205,10 @@ export function createApp(opts: AppOptions = {}): {
       // up alongside this one cannot re-queue work that is still running.
       leaseTtlMs: config.JOB_LEASE_TTL_MS,
       leaseHeartbeatMs: config.JOB_LEASE_HEARTBEAT_MS,
+      // Retry policy (#752): full-jitter backoff, then the dead-letter queue.
+      baseBackoffMs: config.JOB_BACKOFF_BASE_MS,
+      maxBackoffMs: config.JOB_BACKOFF_MAX_MS,
+      maxAttempts: config.JOB_MAX_ATTEMPTS,
     });
   jobQueue.setWorker(jobWorker);
 
@@ -322,6 +329,16 @@ export function createApp(opts: AppOptions = {}): {
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
 
+  // SSE task event stream (#751). Shares one TaskStreamHub with the WebSocket
+  // stream so both transports use a single bus subscription and bounded read
+  // per task. Mounted ahead of the versioned dispatcher below.
+  const taskStreamHub = new TaskStreamHub({ store: eventStore, bus: eventBus });
+  app.get(
+    "/api/tasks/:id/events/stream",
+    authedLimiter.middleware,
+    createTaskEventsSseHandler({ hub: taskStreamHub })
+  );
+
   // The v1/v2 implementation is picked from the negotiated API version, so the
   // mount is a dispatcher function rather than a sub-router. That would make the
   // task routes invisible to router-walking tooling, so both implementations
@@ -378,6 +395,7 @@ export function createApp(opts: AppOptions = {}): {
     eventBus,
     getTask,
     trustProxy,
+    streamHub: taskStreamHub,
     heartbeatIntervalMs: config.WS_HEARTBEAT_INTERVAL_MS,
     pongTimeoutMs: config.WS_PONG_TIMEOUT_MS,
     inactivityTimeoutMs: config.WS_INACTIVITY_TIMEOUT_MS,

@@ -34,7 +34,7 @@ export const COMPRESSION_THRESHOLD = 1024; // 1 KB
  * applying gzip/brotli on top wastes CPU and grows the payload.
  */
 const SKIP_CONTENT_TYPES =
-  /^(image\/|audio\/|video\/|application\/(zip|gzip|x-gzip|x-bzip|x-bzip2|x-7z-compressed|x-rar-compressed|octet-stream|wasm)|font\/)/i;
+  /^(image\/|audio\/|video\/|text\/event-stream|application\/(zip|gzip|x-gzip|x-bzip|x-bzip2|x-7z-compressed|x-rar-compressed|octet-stream|wasm)|font\/)/i;
 
 /** Whether a content-type should be skipped (already compressed / binary). */
 function shouldSkipContentType(contentType: string | undefined): boolean {

@@ -502,6 +502,7 @@ describe("Background Job Queue & Worker", () => {
       expect(finalJob?.status).toBe("dead-letter");
       expect(finalJob?.attempts).toBe(3);
       expect(finalJob?.lastError).toContain("Permanent failure 3");
+      expect(finalJob?.lastError).toContain("max attempts exceeded (3/3)");
       expect(finalJob?.failedAt).toBeDefined();
       expect(deadLetterJob).not.toBeNull();
 

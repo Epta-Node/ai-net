@@ -147,6 +147,33 @@ export interface AgentCostTotal {
   costUsd: number;
 }
 
+/** Filters for {@link TaskDb.listCostBreakdown}; every field is optional. */
+export interface CostBreakdownFilter {
+  agentId?: string;
+  agentType?: string;
+  model?: string;
+  /** UTC calendar day, `YYYY-MM-DD`. */
+  day?: string;
+}
+
+/**
+ * Spend for one (agent, model, day) combination. Carries only identifiers and
+ * counters: no prompts, completions or wallet keys are ever stored with cost.
+ */
+export interface CostBreakdownRow {
+  agentId: string;
+  agentType: string;
+  model: string;
+  /** UTC day of the usage row's last update, `YYYY-MM-DD`. */
+  day: string;
+  tasks: number;
+  calls: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
 /** Platform-wide cost totals. */
 export interface CostTotals {
   tasks: number;
@@ -211,6 +238,9 @@ export interface TaskDb {
   listAgentCostTotals(limit?: number): AgentCostTotal[];
   /** Platform-wide totals plus a recent-spend series, for the stats endpoint. */
   getCostTotals(): CostTotals;
+  listCostBreakdown(filter?: CostBreakdownFilter, limit?: number): CostBreakdownRow[];
+  /** USD spent on the given UTC day (`YYYY-MM-DD`), across all tasks and agents. */
+  getDailySpendUsd(day: string): number;
   listRecentCosts(limit?: number): PersistedTaskCost[];
 }
 
@@ -714,6 +744,71 @@ export function createTaskDb(db: Database.Database): TaskDb {
         costUsd: round6(row?.costUsd ?? 0),
         overBudgetTasks: row?.overBudgetTasks ?? 0,
       };
+    },
+
+    listCostBreakdown(filter: CostBreakdownFilter = {}, limit: number = 100): CostBreakdownRow[] {
+      const conditions: string[] = [];
+      const params: Record<string, string | number> = { limit };
+      if (filter.agentId !== undefined) {
+        conditions.push("agentId = @agentId");
+        params.agentId = filter.agentId;
+      }
+      if (filter.agentType !== undefined) {
+        conditions.push("agentType = @agentType");
+        params.agentType = filter.agentType;
+      }
+      if (filter.model !== undefined) {
+        conditions.push("model = @model");
+        params.model = filter.model;
+      }
+      if (filter.day !== undefined) {
+        conditions.push("substr(updatedAt, 1, 10) = @day");
+        params.day = filter.day;
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const rows = db
+        .prepare(
+          `
+          SELECT
+            agentId,
+            agentType,
+            model,
+            substr(updatedAt, 1, 10) AS day,
+            COUNT(DISTINCT taskId)  AS tasks,
+            SUM(calls)              AS calls,
+            SUM(promptTokens)       AS promptTokens,
+            SUM(completionTokens)   AS completionTokens,
+            SUM(totalTokens)        AS totalTokens,
+            SUM(costUsd)            AS costUsd
+          FROM task_token_usage
+          ${where}
+          GROUP BY agentId, agentType, model, day
+          ORDER BY day DESC, costUsd DESC
+          LIMIT @limit
+        `,
+        )
+        .all(params) as any[];
+      return rows.map((r) => ({
+        agentId: r.agentId,
+        agentType: r.agentType,
+        model: r.model,
+        day: r.day,
+        tasks: r.tasks ?? 0,
+        calls: r.calls ?? 0,
+        promptTokens: r.promptTokens ?? 0,
+        completionTokens: r.completionTokens ?? 0,
+        totalTokens: r.totalTokens ?? 0,
+        costUsd: round6(r.costUsd ?? 0),
+      }));
+    },
+
+    getDailySpendUsd(day: string): number {
+      const row = db
+        .prepare(
+          "SELECT SUM(costUsd) AS costUsd FROM task_token_usage WHERE substr(updatedAt, 1, 10) = ?",
+        )
+        .get(day) as any;
+      return round6(row?.costUsd ?? 0);
     },
 
     listRecentCosts(limit: number = 20): PersistedTaskCost[] {

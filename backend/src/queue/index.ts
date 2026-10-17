@@ -15,6 +15,7 @@ const logger = createLogger({ component: "job-queue" });
 
 export * from "./jobStore";
 export * from "./worker";
+export * from "./backoff";
 
 /**
  * Thrown by {@link JobQueue.enqueueUnique} when a job for the same `taskId`
@@ -47,6 +48,7 @@ export interface EnqueueOptions<T = any> {
 export class JobQueue {
   private readonly store: JobStore;
   private worker?: JobWorker;
+  private defaultMaxAttempts = 3;
 
   constructor(store: JobStore, worker?: JobWorker) {
     this.store = store;
@@ -66,7 +68,7 @@ export class JobQueue {
       priority: options.priority ?? "normal",
       progress: 0,
       attempts: 0,
-      maxAttempts: options.maxAttempts ?? 3,
+      maxAttempts: options.maxAttempts ?? this.defaultMaxAttempts,
       nextRunAt: now,
       createdAt: now,
       updatedAt: now,
@@ -139,6 +141,11 @@ export class JobQueue {
       this.worker?.trigger();
     }
     return success;
+  }
+
+  /** Attempts given to jobs enqueued without an explicit `maxAttempts` (#752). */
+  public setDefaultMaxAttempts(maxAttempts: number): void {
+    this.defaultMaxAttempts = maxAttempts;
   }
 
   public setWorker(worker: JobWorker): void {
