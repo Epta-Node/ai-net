@@ -653,3 +653,119 @@ fn prop_capability_index_consistent() {
         );
     }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PROPERTY 7 — Reputation scoring and decay math
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// The weighted score stays within [0, REPUTATION_SCALE] for any u32 inputs
+/// (including u32::MAX) and never drops when a component is raised.
+#[test]
+fn prop_reputation_score_bounded_and_monotonic() {
+    let iters = 2_000;
+    let mut rng = Rng::new(0xEEEE_7777);
+
+    for i in 0..iters {
+        let pick = |rng: &mut Rng| match rng.next_u32() % 4 {
+            0 => u32::MAX,
+            1 => rng.next_u32() % 101,
+            _ => rng.next_u32(),
+        };
+        let lo = ReputationInput {
+            success_rate: pick(&mut rng),
+            quality: pick(&mut rng),
+            uptime: pick(&mut rng),
+            price_fairness: pick(&mut rng),
+        };
+        let hi = ReputationInput {
+            success_rate: lo.success_rate.max(pick(&mut rng)),
+            quality: lo.quality.max(pick(&mut rng)),
+            uptime: lo.uptime.max(pick(&mut rng)),
+            price_fairness: lo.price_fairness.max(pick(&mut rng)),
+        };
+
+        let lo_score = reputation_score_fp(&lo);
+        let hi_score = reputation_score_fp(&hi);
+        assert!(lo_score <= REPUTATION_SCALE, "iter {}: score above scale", i);
+        assert!(hi_score <= REPUTATION_SCALE, "iter {}: score above scale", i);
+        assert!(hi_score >= lo_score, "iter {}: raising inputs lowered score", i);
+    }
+}
+
+/// Lazy decay never increases a score, never panics on u64-boundary inputs,
+/// and advances the timestamp only by whole epochs without passing `now`.
+#[test]
+fn prop_reputation_decay_never_increases_and_no_overflow() {
+    let iters = 2_000;
+    let mut rng = Rng::new(0xFFFF_8888);
+
+    for i in 0..iters {
+        let score = match rng.next_u32() % 3 {
+            0 => u64::MAX,
+            1 => rng.next_u64() % (REPUTATION_SCALE + 1),
+            _ => rng.next_u64(),
+        };
+        let last_updated = match rng.next_u32() % 3 {
+            0 => 0,
+            1 => u64::MAX,
+            _ => rng.next_u64(),
+        };
+        let now = match rng.next_u32() % 3 {
+            0 => 0,
+            1 => u64::MAX,
+            _ => rng.next_u64(),
+        };
+        let config = ReputationConfig {
+            decay_pct: rng.next_u32(),
+            epoch_secs: match rng.next_u32() % 3 {
+                0 => 1,
+                1 => u64::MAX,
+                _ => rng.next_u64().max(1),
+            },
+        };
+
+        let (out, advanced, epochs) = apply_reputation_decay(score, last_updated, now, &config);
+        assert!(out <= score, "iter {}: decay increased score", i);
+        assert!(advanced >= last_updated, "iter {}: timestamp moved back", i);
+        assert!(advanced <= last_updated.max(now), "iter {}: timestamp past now", i);
+        assert_eq!(
+            (advanced - last_updated) % config.epoch_secs,
+            0,
+            "iter {}: timestamp not epoch-aligned",
+            i
+        );
+        if epochs == 0 {
+            assert_eq!(out, score, "iter {}: score changed without an epoch", i);
+        }
+        if epochs > MAX_DECAY_EPOCHS {
+            assert_eq!(out, 0, "iter {}: dormant agent not zeroed", i);
+        }
+    }
+}
+
+/// With a valid schedule, a longer idle period never yields a higher score.
+#[test]
+fn prop_reputation_decay_monotonic_in_elapsed_epochs() {
+    let iters = 2_000;
+    let mut rng = Rng::new(0x1111_9999);
+
+    for i in 0..iters {
+        let score = rng.next_u64() % (REPUTATION_SCALE + 1);
+        let config = ReputationConfig {
+            decay_pct: rng.next_u32() % 101,
+            epoch_secs: 1 + rng.next_u64() % 1_000_000,
+        };
+        let last_updated = rng.next_u64() % (1 << 40);
+        let k = rng.next_u64() % 150;
+
+        let at = |n: u64| {
+            let now = last_updated + n * config.epoch_secs;
+            apply_reputation_decay(score, last_updated, now, &config).0
+        };
+        assert!(at(k + 1) <= at(k), "iter {}: more idle epochs raised score", i);
+        assert!(at(k) <= score, "iter {}: decay increased score", i);
+        if config.decay_pct == 100 && k >= 1 {
+            assert_eq!(at(k), 0, "iter {}: 100% decay should zero the score", i);
+        }
+    }
+}
