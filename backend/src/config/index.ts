@@ -1,7 +1,7 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json");
+const pkg = require('../../package.json');
 
 /**
  * Reject known placeholder values for secret-bearing configuration keys.
@@ -39,30 +39,28 @@ function rejectPlaceholder(value: string | undefined, ctx: z.RefinementCtx): voi
  * defaults that make `NODE_ENV=test` and local development work would fail
  * schema validation.
  */
-const TEST_FALLBACK_JWT_SECRET = "ai-net-jest-suite-jwt-secret-0123456789abcdef";
-const DEV_FALLBACK_JWT_SECRET = "ai-net-local-development-jwt-secret-0123456789";
+const TEST_FALLBACK_JWT_SECRET = 'ai-net-jest-suite-jwt-secret-0123456789abcdef';
+const DEV_FALLBACK_JWT_SECRET = 'ai-net-local-development-jwt-secret-0123456789';
 
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  LOG_LEVEL: z
-    .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
-    .default("info"),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 
-  STELLAR_NETWORK: z.enum(["testnet", "mainnet", "local", "futurenet"]).default("testnet"),
-  STELLAR_HORIZON_URL: z.string().url().default("https://horizon-testnet.stellar.org"),
+  STELLAR_NETWORK: z.enum(['testnet', 'mainnet', 'local', 'futurenet']).default('testnet'),
+  STELLAR_HORIZON_URL: z.string().url().default('https://horizon-testnet.stellar.org'),
   STELLAR_HORIZON: z.string().url().optional(),
   STELLAR_PUBLIC_KEY: z.string().optional(),
   SKIP_STELLAR_ACCOUNT_VERIFY: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("false"),
-  SOROBAN_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
+  SOROBAN_RPC_URL: z.string().url().default('https://soroban-testnet.stellar.org'),
   REGISTRY_CONTRACT_ID: z.string().optional(),
 
-  VENICE_API_KEY: z.string().min(1, "VENICE_API_KEY is required"),
-  VENICE_BASE_URL: z.string().url().default("https://api.venice.ai/api/v1"),
-  VENICE_MODEL_VERSION: z.string().default("v1"),
+  VENICE_API_KEY: z.string().min(1, 'VENICE_API_KEY is required'),
+  VENICE_BASE_URL: z.string().url().default('https://api.venice.ai/api/v1'),
+  VENICE_MODEL_VERSION: z.string().default('v1'),
   VENICE_CACHE_TTL_MS: z.coerce.number().int().positive().default(86_400_000),
   VENICE_CACHE_CODING_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
   VENICE_CACHE_SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
@@ -78,29 +76,37 @@ const envSchema = z.object({
   VENICE_KEY_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
   VENICE_KEY_ERROR_RATE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.2),
 
-  DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default("./data/ai-net.db"),
+  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required').default('./data/ai-net.db'),
   DB_MIGRATIONS_DIR: z.string().optional(),
   /** Apply pending schema migrations during server startup (Issue #274). */
   AUTO_MIGRATE: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   STELLAR_COORDINATOR_SECRET: z.string().optional().superRefine(rejectPlaceholder),
   STELLAR_TEST_SECRET: z.string().optional().superRefine(rejectPlaceholder),
-  ALLOWED_ORIGINS: z.string().default("http://localhost:3000"),
-  NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? "0.1.0"),
+  ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+  NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? '0.1.0'),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
   HEALTH_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   /** Job queue depth at which `/health/deep` reports the queue as degraded. */
   HEALTH_QUEUE_DEPTH_WARN: z.coerce.number().int().positive().default(1_000),
 
-  CACHE_DRIVER: z.enum(["lru", "redis"]).default("lru"),
-  REDIS_URL: z.string().default("redis://localhost:6379"),
+  // ── Per-endpoint timeout budgets (#742) ────────────────────────────────────
+  /** Whole-request deadline for LLM task submission (`POST /api/tasks`). */
+  TIMEOUT_BUDGET_LLM_SUBMIT_MS: z.coerce.number().int().positive().default(30_000),
+  /** Whole-request deadline for read-only `GET` routes. */
+  TIMEOUT_BUDGET_READ_MS: z.coerce.number().int().positive().default(5_000),
+  /** Whole-request deadline for admin/operational routes. */
+  TIMEOUT_BUDGET_ADMIN_MS: z.coerce.number().int().positive().default(10_000),
+
+  CACHE_DRIVER: z.enum(['lru', 'redis']).default('lru'),
+  REDIS_URL: z.string().default('redis://localhost:6379'),
   CACHE_LRU_MAX_SIZE: z.coerce.number().int().positive().default(500),
   CACHE_TTL_AGENTS: z.coerce.number().int().nonnegative().default(60),
   CACHE_TTL_STATS: z.coerce.number().int().nonnegative().default(30),
   CACHE_TTL_HEALTH: z.coerce.number().int().nonnegative().default(10),
-  REGISTRY_CACHE_KEY_PREFIX: z.string().default("registry"),
+  REGISTRY_CACHE_KEY_PREFIX: z.string().default('registry'),
 
   MAX_PROMPT_LENGTH: z.coerce.number().int().positive().default(10_000),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
@@ -134,8 +140,8 @@ const envSchema = z.object({
    * (An empty value in `.env` means "unset", matching the other optional keys.)
    */
   MAX_PROMPT_CHARS_PER_REQUEST: z.preprocess(
-    (v) => (v === "" ? undefined : v),
-    z.coerce.number().int().positive().optional(),
+    (v) => (v === '' ? undefined : v),
+    z.coerce.number().int().positive().optional()
   ),
 
   TASK_TOKEN_BUDGET: z.coerce.number().int().positive().default(200_000),
@@ -165,18 +171,14 @@ const envSchema = z.object({
    * *detects* drift and reports it; nothing is written to the payments table.
    */
   RECONCILIATION_REMEDIATION_ENABLED: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   /**
    * How long a `locked` escrow may sit on-chain after its task reached a
    * terminal unsuccessful state before it is treated as expired and refunded.
    */
-  RECONCILIATION_ESCROW_EXPIRY_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(86_400_000),
+  RECONCILIATION_ESCROW_EXPIRY_MS: z.coerce.number().int().positive().default(86_400_000),
   /** Maximum claimable balances pulled from Horizon in a single run. */
   RECONCILIATION_MAX_BALANCES: z.coerce.number().int().positive().default(2_000),
   /** Maximum release transactions verified against Horizon in a single run. */
@@ -191,13 +193,13 @@ const envSchema = z.object({
   COMPRESSION_THRESHOLD: z.coerce.number().int().min(0).default(1024),
   COMPRESSION_LEVEL: z.coerce.number().int().min(1).max(9).default(6),
   COMPRESSION_ENABLE_BROTLI: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
 
-  API_LATEST_VERSION: z.string().default("2.0"),
-  API_SUPPORTED_VERSIONS: z.string().default("1.0,1.1,2.0"),
-  API_DEFAULT_VERSION: z.string().default("1.0"),
+  API_LATEST_VERSION: z.string().default('2.0'),
+  API_SUPPORTED_VERSIONS: z.string().default('1.0,1.1,2.0'),
+  API_DEFAULT_VERSION: z.string().default('1.0'),
   API_V1_SUNSET_DATE: z.string().optional(),
 
   ADMIN_API_KEY: z.string().min(1).optional(),
@@ -207,10 +209,10 @@ const envSchema = z.object({
   DB_POOL_MAX: z.coerce.number().int().positive().default(10),
   DB_POOL_ACQUIRE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   DB_POOL_HEALTH_CHECK: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
-  DB_BACKUP_DIR: z.string().default("./data/backups"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
+  DB_BACKUP_DIR: z.string().default('./data/backups'),
   DB_BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(5),
   /**
    * Passphrase for at-rest database backups (issue #747). Scrypt-derived into
@@ -220,29 +222,29 @@ const envSchema = z.object({
    * (An empty value in `.env` means "unset", matching the other optional keys.)
    */
   DB_BACKUP_ENCRYPTION_KEY: z.preprocess(
-    (v) => (v === "" ? undefined : v),
-    z.string().min(1).optional(),
+    (v) => (v === '' ? undefined : v),
+    z.string().min(1).optional()
   ),
   DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().int().nonnegative().default(100),
   ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   ERROR_REGISTRY_CAP_PER_AGENT: z.coerce.number().int().positive().default(100),
 
-  EVENT_STORE_PATH: z.string().default("./data/events.db"),
+  EVENT_STORE_PATH: z.string().default('./data/events.db'),
   EVENT_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   EVENT_COMPACTION_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   EVENT_COMPACTION_BATCH_TASKS: z.coerce.number().int().positive().default(50),
   EVENT_COMPACTION_ENABLED: z
-    .enum(["true", "false"])
-    .transform((v) => v === "true")
-    .default("true"),
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   /**
    * Days an archived event stays in the SQLite archive table before its whole
    * UTC day moves to a cold file (issue #809).
    */
   EVENT_HOT_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
   /** Root directory for cold, gzip-compressed daily event archives (issue #809). */
-  EVENT_ARCHIVE_DIR: z.string().default("./data/archive"),
+  EVENT_ARCHIVE_DIR: z.string().default('./data/archive'),
   /** Days a daily cold archive is kept before it is purged (issue #809). */
   EVENT_COLD_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 
@@ -262,13 +264,9 @@ const envSchema = z.object({
   TRUST_PROXY: z
     .string()
     .trim()
-    .default("none")
+    .default('none')
     .transform((value): boolean | number | string => {
-      if (
-        !value ||
-        value.toLowerCase() === "none" ||
-        value.toLowerCase() === "false"
-      ) {
+      if (!value || value.toLowerCase() === 'none' || value.toLowerCase() === 'false') {
         return false;
       }
       if (/^\d+$/.test(value)) {
@@ -300,7 +298,7 @@ const envSchema = z.object({
   /** JWT secret key used to sign and verify access tokens. */
   AUTH_JWT_SECRET: z
     .string()
-    .min(32, "AUTH_JWT_SECRET must be at least 32 characters")
+    .min(32, 'AUTH_JWT_SECRET must be at least 32 characters')
     .superRefine(rejectPlaceholder),
   /** Access token validity in seconds. Default: 900 (15 min). */
   AUTH_ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(900),
@@ -317,11 +315,17 @@ const envSchema = z.object({
   /** Threshold for requiring manual review. Default: 60 */
   QUALITY_REVIEW_THRESHOLD: z.coerce.number().int().min(0).max(100).default(60),
   /** Enable percentile-based quality scoring. Default: false */
-  QUALITY_PERCENTILE_ENABLED: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
+  QUALITY_PERCENTILE_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
   /** Minimum samples required for percentile calculation. Default: 10 */
   QUALITY_PERCENTILE_MIN_SAMPLES: z.coerce.number().int().positive().default(10),
   /** Cache quality scores by output content hash, skipping repeat scoring work. Default: true (#812) */
-  QUALITY_SCORER_CACHE_ENABLED: z.enum(["true", "false"]).transform((v) => v === "true").default("true"),
+  QUALITY_SCORER_CACHE_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('true'),
   /** How long a cached quality score stays valid, in ms. Default: 1 hour (#812) */
   QUALITY_SCORER_CACHE_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
   /** Maximum cached quality scores before LRU eviction. Default: 500 (#812) */
@@ -329,15 +333,18 @@ const envSchema = z.object({
 
   // ── Admin Control Configuration ─────────────────────────────────────────────
   /** Enable read-only mode for the API. Default: false */
-  AI_NET_READ_ONLY: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
+  AI_NET_READ_ONLY: z
+    .enum(['true', 'false'])
+    .transform((v) => v === 'true')
+    .default('false'),
   /** Reason for read-only mode. Optional. */
   AI_NET_READ_ONLY_REASON: z.string().optional(),
   /** Path to admin audit database. Default: ./data/admin-audit.db */
-  ADMIN_AUDIT_DB_PATH: z.string().default("./data/admin-audit.db"),
+  ADMIN_AUDIT_DB_PATH: z.string().default('./data/admin-audit.db'),
   /** Days to keep admin audit entries; older rows are pruned during maintenance runs. 0 disables pruning. */
   AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
   /** Directory for admin backups. Default: ./data/backups/admin */
-  ADMIN_BACKUP_DIR: z.string().default("./data/backups/admin"),
+  ADMIN_BACKUP_DIR: z.string().default('./data/backups/admin'),
 
   // ── Database observability (#807) ───────────────────────────────────────────
   /** Comma-separated query-latency histogram bounds in milliseconds. Default: 1,5,10,50,100,500,1000 */
@@ -400,37 +407,37 @@ export class ConfigValidationError extends Error {
   constructor(readonly issues: z.ZodIssue[]) {
     super(
       `[config] Invalid environment variables:\n${issues
-        .map((issue) => `  ${issue.path.join(".") || "ENV"}: ${issue.message}`)
-        .join("\n")}`,
+        .map((issue) => `  ${issue.path.join('.') || 'ENV'}: ${issue.message}`)
+        .join('\n')}`
     );
-    this.name = "ConfigValidationError";
+    this.name = 'ConfigValidationError';
   }
 }
 
 let cachedConfig: Config | null = null;
 
 function withRuntimeDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const nodeEnv = env.NODE_ENV ?? "development";
+  const nodeEnv = env.NODE_ENV ?? 'development';
   const dbUrl = env.DATABASE_URL ?? env.DB_PATH;
   const testDefaults =
-    nodeEnv === "test"
+    nodeEnv === 'test'
       ? {
-          DATABASE_URL: ":memory:",
+          DATABASE_URL: ':memory:',
           // Keep the event store off the filesystem under test, mirroring
           // DATABASE_URL. Tests that need real persistence pass an explicit
           // path to createEventStore() instead.
-          EVENT_STORE_PATH: ":memory:",
-          VENICE_API_KEY: "test-venice-key",
+          EVENT_STORE_PATH: ':memory:',
+          VENICE_API_KEY: 'test-venice-key',
           // Deterministic key so backup round-trips are testable without ever
           // falling back to plaintext backups (issue #747 fails closed).
-          DB_BACKUP_ENCRYPTION_KEY: "test-backup-encryption-key-0123456789",
-          LOG_LEVEL: "silent",
+          DB_BACKUP_ENCRYPTION_KEY: 'test-backup-encryption-key-0123456789',
+          LOG_LEVEL: 'silent',
           AUTH_JWT_SECRET: TEST_FALLBACK_JWT_SECRET,
         }
       : {};
 
   const devDefaults =
-    nodeEnv === "development"
+    nodeEnv === 'development'
       ? {
           AUTH_JWT_SECRET: env.AUTH_JWT_SECRET ?? DEV_FALLBACK_JWT_SECRET,
         }
@@ -440,22 +447,23 @@ function withRuntimeDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     ...testDefaults,
     ...devDefaults,
     ...env,
-    DATABASE_URL: dbUrl ?? testDefaults.DATABASE_URL ?? "./data/ai-net.db",
-    STELLAR_HORIZON_URL: env.STELLAR_HORIZON_URL ?? env.STELLAR_HORIZON ?? "https://horizon-testnet.stellar.org",
+    DATABASE_URL: dbUrl ?? testDefaults.DATABASE_URL ?? './data/ai-net.db',
+    STELLAR_HORIZON_URL:
+      env.STELLAR_HORIZON_URL ?? env.STELLAR_HORIZON ?? 'https://horizon-testnet.stellar.org',
   };
 }
 
-function networkPassphrase(network: RawConfig["STELLAR_NETWORK"]): string {
+function networkPassphrase(network: RawConfig['STELLAR_NETWORK']): string {
   switch (network) {
-    case "mainnet":
-      return "Public Global Stellar Network ; September 2015";
-    case "local":
-      return "Standalone Network ; February 2017";
-    case "futurenet":
-      return "Test SDF Future Network ; October 2022";
-    case "testnet":
+    case 'mainnet':
+      return 'Public Global Stellar Network ; September 2015';
+    case 'local':
+      return 'Standalone Network ; February 2017';
+    case 'futurenet':
+      return 'Test SDF Future Network ; October 2022';
+    case 'testnet':
     default:
-      return "Test SDF Network ; September 2015";
+      return 'Test SDF Network ; September 2015';
   }
 }
 
@@ -469,14 +477,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const nodeEnv = result.data.NODE_ENV;
 
   // Fail closed in production: AUTH_JWT_SECRET must be explicitly set
-  if (nodeEnv === "production") {
+  if (nodeEnv === 'production') {
     const providedSecret = env.AUTH_JWT_SECRET;
     if (!providedSecret) {
       throw new ConfigValidationError([
         {
           code: z.ZodIssueCode.custom,
-          path: ["AUTH_JWT_SECRET"],
-          message: "AUTH_JWT_SECRET is required in production",
+          path: ['AUTH_JWT_SECRET'],
+          message: 'AUTH_JWT_SECRET is required in production',
         },
       ]);
     }
@@ -486,36 +494,36 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // `null` entry can never match a real origin and only signals a
   // misconfiguration. Production must also name its origins explicitly rather
   // than silently inheriting the localhost default.
-  const originEntries = result.data.ALLOWED_ORIGINS.split(",")
+  const originEntries = result.data.ALLOWED_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
-  const invalidOrigin = originEntries.find((origin) => origin.includes("*") || origin === "null");
+  const invalidOrigin = originEntries.find((origin) => origin.includes('*') || origin === 'null');
   if (invalidOrigin) {
     throw new ConfigValidationError([
       {
         code: z.ZodIssueCode.custom,
-        path: ["ALLOWED_ORIGINS"],
+        path: ['ALLOWED_ORIGINS'],
         message: `ALLOWED_ORIGINS entry "${invalidOrigin}" is not allowed; list each origin explicitly (no wildcards, no "null")`,
       },
     ]);
   }
-  if (nodeEnv === "production" && (!env.ALLOWED_ORIGINS?.trim() || originEntries.length === 0)) {
+  if (nodeEnv === 'production' && (!env.ALLOWED_ORIGINS?.trim() || originEntries.length === 0)) {
     throw new ConfigValidationError([
       {
         code: z.ZodIssueCode.custom,
-        path: ["ALLOWED_ORIGINS"],
-        message: "ALLOWED_ORIGINS is required in production and must list at least one origin",
+        path: ['ALLOWED_ORIGINS'],
+        message: 'ALLOWED_ORIGINS is required in production and must list at least one origin',
       },
     ]);
   }
 
   // Warn in development if using default secret
-  if (nodeEnv === "development") {
+  if (nodeEnv === 'development') {
     const secret = result.data.AUTH_JWT_SECRET;
     if (secret === DEV_FALLBACK_JWT_SECRET) {
       console.warn(
-        "[config] WARNING: Using default AUTH_JWT_SECRET in development. " +
-          "Set AUTH_JWT_SECRET to a secure random value in production."
+        '[config] WARNING: Using default AUTH_JWT_SECRET in development. ' +
+          'Set AUTH_JWT_SECRET to a secure random value in production.'
       );
     }
   }
@@ -528,7 +536,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
 }
 
 export function getConfig(): Config {
-  if (process.env.NODE_ENV === "test") {
+  if (process.env.NODE_ENV === 'test') {
     return loadConfig();
   }
   return cachedConfig ?? loadConfig();
@@ -544,38 +552,38 @@ export const config = new Proxy({} as Config, {
   },
 });
 
-export function ttlForRoute(group: "agents" | "stats" | "health"): number {
+export function ttlForRoute(group: 'agents' | 'stats' | 'health'): number {
   const cfg = getConfig();
   switch (group) {
-    case "agents":
+    case 'agents':
       return cfg.CACHE_TTL_AGENTS;
-    case "stats":
+    case 'stats':
       return cfg.CACHE_TTL_STATS;
-    case "health":
+    case 'health':
       return cfg.CACHE_TTL_HEALTH;
   }
 }
 
 export function allowedOrigins(): string[] {
   return getConfig()
-    .ALLOWED_ORIGINS.split(",")
+    .ALLOWED_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
 }
 
 function redactConfigValue(key: string, value: unknown): unknown {
   if (/secret|token|api[_-]?key|password|authorization|cookie|private[_-]?key/i.test(key)) {
-    return value ? "[REDACTED]" : value;
+    return value ? '[REDACTED]' : value;
   }
   if (/address|public[_-]?key|wallet|owner|claimant|destination|source/i.test(key)) {
-    return value ? "[REDACTED_ADDRESS]" : value;
+    return value ? '[REDACTED_ADDRESS]' : value;
   }
   return value;
 }
 
 export function redactedConfigSnapshot(cfg: Config = getConfig()): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(cfg).map(([key, value]) => [key, redactConfigValue(key, value)]),
+    Object.entries(cfg).map(([key, value]) => [key, redactConfigValue(key, value)])
   );
 }
 

@@ -13,6 +13,7 @@ import { HeartbeatClient } from '../heartbeat.js';
 import { signAgentRequest } from '../agentAuthClient.js';
 import { getConfig } from '../../config/index.js';
 import { createLogger } from '../../utils/logger';
+import { fetchWithTimeout } from '../../utils/timeout';
 
 /**
  * Fraction of a node's token allowance its prompt may consume. The remainder is
@@ -147,23 +148,32 @@ export abstract class BaseAgent {
       : null;
 
     try {
-      const response = await fetch(`${this.apiBaseUrl}/api/agents/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(signed ?? {}),
+      const response = await fetchWithTimeout(
+        `${this.apiBaseUrl}/api/agents/register`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(signed ?? {}),
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
-      });
+        getConfig().TIMEOUT_BUDGET_READ_MS
+      );
       if (!response.ok) {
         console.warn(
           `[${this.constructor.name}] Registration returned non-2xx status: ${response.status}`
         );
       } else {
-        console.info(`[${this.constructor.name}] Successfully registered with capability "${this.getCapability()}".`);
+        console.info(
+          `[${this.constructor.name}] Successfully registered with capability "${this.getCapability()}".`
+        );
       }
     } catch (err) {
-      console.warn(`[${this.constructor.name}] Could not reach registry to self-register:`, err instanceof Error ? err.message : 'unknown');
+      console.warn(
+        `[${this.constructor.name}] Could not reach registry to self-register:`,
+        err instanceof Error ? err.message : 'unknown'
+      );
     }
   }
 
@@ -184,7 +194,10 @@ export abstract class BaseAgent {
     if (typeof raw !== 'string') {
       return null;
     }
-    const trimmed = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+    const trimmed = raw
+      .trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '');
     try {
       return JSON.parse(trimmed);
     } catch {
@@ -266,7 +279,7 @@ export abstract class BaseAgent {
         trimmedChars: trimmed.length,
         promptCeiling,
       },
-      'prompt trimmed to fit node token allowance',
+      'prompt trimmed to fit node token allowance'
     );
     return trimmed;
   }
