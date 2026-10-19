@@ -123,6 +123,12 @@ export const QUOTA_METRICS: readonly MetricDescriptor[] = Object.freeze([
     labelNames: ['bucket'],
   },
   {
+    name: 'ainet_wallet_quota_used_ratio',
+    type: 'gauge',
+    help: 'Highest per-wallet Venice token quota utilisation (MAX_DAILY_VENICE_TOKENS_PER_WALLET) in the trailing 24h',
+    labelNames: [],
+  },
+  {
     name: 'ainet_task_token_budget',
     type: 'gauge',
     help: 'Configured per-task token budget (TASK_TOKEN_BUDGET)',
@@ -171,6 +177,12 @@ export interface QuotaUsageSource {
     tasks: number;
     overBudget: number;
   };
+  /**
+   * Per-wallet Venice token spend recorded since `windowStart` (ISO 8601),
+   * from `wallet_quota_events` (Issue #803). Optional: sources that predate
+   * the wallet quota simply omit it and the ratio gauge reports zero.
+   */
+  walletTokenUsage?(windowStart: string): Array<{ wallet: string; tokens: number }>;
 }
 
 /** Everything a scrape needs, resolved and ready to render. */
@@ -189,6 +201,11 @@ export interface QuotaMetricsSnapshot {
   costUsdDaily: number;
   tasksSettledDaily: number;
   tasksOverBudgetDaily: number;
+  /**
+   * Highest per-wallet Venice token utilisation observed in the trailing 24h
+   * (Issue #803). 0 when the quota is disabled or no usage source supports it.
+   */
+  maxWalletQuotaUsedRatio: number;
   /** Set when the usage source threw, so the operator knows the gauges are stale. */
   sourceError?: string;
 }
@@ -199,6 +216,10 @@ function tally(): Record<QuotaBucket, number> {
 
 function nonNegative(value: number): number {
   return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function positiveLimit(value: number | undefined): number {
+  return Number.isFinite(value) && (value as number) > 0 ? Math.floor(value as number) : 0;
 }
 
 function escapeLabelValue(v: string): string {
@@ -236,7 +257,12 @@ export class QuotaMetricsRegistry {
 
   constructor(
     private readonly source: QuotaUsageSource,
-    private readonly limits: () => { dailyTaskLimit: number; tokenBudget: number },
+    private readonly limits: () => {
+      dailyTaskLimit: number;
+      tokenBudget: number;
+      /** `MAX_DAILY_VENICE_TOKENS_PER_WALLET`; 0 disables the ratio gauge. */
+      veniceTokenLimit?: number;
+    },
     private readonly now: () => number = () => Date.now(),
   ) {}
 
@@ -294,6 +320,7 @@ export class QuotaMetricsRegistry {
     const wallets = tally();
     let walletsTracked = 0;
     let maxUtilizationRatio = 0;
+    let maxWalletQuotaUsedRatio = 0;
     let tokensSpentDaily = 0;
     let costUsdDaily = 0;
     let tasksSettledDaily = 0;
@@ -307,6 +334,14 @@ export class QuotaMetricsRegistry {
         walletsTracked += 1;
         if (limits.dailyTaskLimit > 0) {
           maxUtilizationRatio = Math.max(maxUtilizationRatio, tasks / limits.dailyTaskLimit);
+        }
+      }
+
+      const veniceTokenLimit = positiveLimit(limits.veniceTokenLimit);
+      if (veniceTokenLimit > 0 && this.source.walletTokenUsage) {
+        for (const row of this.source.walletTokenUsage(windowStart)) {
+          const tokens = nonNegative(row.tokens);
+          maxWalletQuotaUsedRatio = Math.max(maxWalletQuotaUsedRatio, tokens / veniceTokenLimit);
         }
       }
 
@@ -335,6 +370,7 @@ export class QuotaMetricsRegistry {
       costUsdDaily: round4(costUsdDaily),
       tasksSettledDaily,
       tasksOverBudgetDaily,
+      maxWalletQuotaUsedRatio: round4(maxWalletQuotaUsedRatio),
       sourceError,
     };
   }
@@ -357,6 +393,9 @@ export class QuotaMetricsRegistry {
         { labels: {}, value: snapshot.maxUtilizationRatio },
       ],
       ainet_wallet_daily_quota_rejections_total: rejectionSeries,
+      ainet_wallet_quota_used_ratio: [
+        { labels: {}, value: snapshot.maxWalletQuotaUsedRatio },
+      ],
       ainet_task_token_budget: [{ labels: {}, value: snapshot.tokenBudget }],
       ainet_task_tokens_spent_total: [{ labels: {}, value: snapshot.tokensSpentTotal }],
       ainet_task_tokens_spent_daily: [{ labels: {}, value: snapshot.tokensSpentDaily }],
@@ -462,11 +501,29 @@ export function createSqliteQuotaSource(db: QuotaDb): QuotaUsageSource {
         overBudget: Number(row?.overBudget) || 0,
       };
     },
+
+    walletTokenUsage(windowStart: string): Array<{ wallet: string; tokens: number }> {
+      // `wallet_quota_events` lives in the same `tasks.db` handle (Issue #803),
+      // so one source answers both the task bands and the token ratio.
+      const rows = db
+        .prepare(
+          `SELECT walletPublicKey AS wallet, COALESCE(SUM(units), 0) AS tokens
+             FROM wallet_quota_events
+            WHERE kind = 'tokens' AND createdAt > ? AND walletPublicKey <> 'anonymous'
+            GROUP BY walletPublicKey`,
+        )
+        .all(windowStart) as Array<{ wallet: string | null; tokens: number }>;
+      return rows.map(row => ({ wallet: row.wallet ?? '', tokens: Number(row.tokens) || 0 }));
+    },
   };
 }
 
 /** Limits read from the validated config, never from `process.env`. */
-function quotaLimitsFromConfig(): { dailyTaskLimit: number; tokenBudget: number } {
+function quotaLimitsFromConfig(): {
+  dailyTaskLimit: number;
+  tokenBudget: number;
+  veniceTokenLimit?: number;
+} {
   // Imported lazily: `getConfig()` validates the whole environment, and this
   // module is imported by collectors that must stay usable without a config.
   try {
@@ -476,9 +533,10 @@ function quotaLimitsFromConfig(): { dailyTaskLimit: number; tokenBudget: number 
     return {
       dailyTaskLimit: Number(config.DAILY_TASK_LIMIT_PER_WALLET) || 0,
       tokenBudget: Number(config.TASK_TOKEN_BUDGET) || 0,
+      veniceTokenLimit: Number(config.MAX_DAILY_VENICE_TOKENS_PER_WALLET) || 0,
     };
   } catch {
-    return { dailyTaskLimit: 0, tokenBudget: 0 };
+    return { dailyTaskLimit: 0, tokenBudget: 0, veniceTokenLimit: 0 };
   }
 }
 

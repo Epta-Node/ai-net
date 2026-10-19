@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
 import { CircuitBreaker, type CircuitMetrics, type CircuitState, type CircuitTransition } from './circuitBreaker.js';
 import { trackCircuitBreaker } from '../circuitBreaker.js';
-import { CircuitOpenError, TokenBudgetExceededError, VeniceStatusError } from './errors.js';
+import { CircuitOpenError, TokenBudgetExceededError, VeniceStatusError, VeniceUnavailableError } from './errors.js';
+import {
+  VeniceKeyPool,
+  loadNumberedVeniceKeys,
+  setActiveVeniceKeyPool,
+  type VeniceKeyPoolOptions,
+} from './keyPool.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
 import {
@@ -12,6 +18,7 @@ import {
   type VeniceKeyHealthStore,
 } from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
+import { currentTraceContext, toW3cTraceparent } from '../traceContext.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -31,6 +38,17 @@ interface CacheEnvConfig {
   VENICE_REQUEST_TIMEOUT_MS: number;
   VENICE_PROVIDER_MAX_RETRIES: number;
 }
+
+/** Key-pool tuning resolved from the environment (issue #806). */
+interface KeyPoolEnvConfig {
+  VENICE_KEY_COOLDOWN_MS: number;
+  VENICE_KEY_ERROR_RATE_THRESHOLD: number;
+}
+
+const KEY_POOL_CONFIG_FALLBACK: KeyPoolEnvConfig = {
+  VENICE_KEY_COOLDOWN_MS: 60_000,
+  VENICE_KEY_ERROR_RATE_THRESHOLD: 0.2,
+};
 
 /** Circuit-breaker tuning resolved from the environment (issue #495). */
 interface CircuitEnvConfig {
@@ -173,8 +191,8 @@ export class VeniceClient implements VeniceClientLike {
   private readonly breaker: CircuitBreaker;
   private readonly cache: VeniceResponseCache;
   private readonly deduplicator: RequestDeduplicator;
-  /** Per-key health backing the fallback rotation (issue #741). */
-  private readonly keyHealth: VeniceKeyHealthStore;
+  /** Health of each provider key; keys in cooldown are skipped (#806). */
+  private readonly keyPool: VeniceKeyPool;
   private readonly modelVersion: string;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
@@ -223,11 +241,11 @@ export class VeniceClient implements VeniceClientLike {
       this.providers = this.buildProvidersFromEnv(config);
     }
 
-    // Per-key health is process-wide by default: every client built from the
-    // same env keys feeds one history, which `/api/admin/status` and the
-    // metrics surface then read from.
-    this.keyHealth = config.keyHealth ?? getVeniceKeyHealthStore();
-    this.keyHealth.register(this.providers);
+    this.keyPool = new VeniceKeyPool(
+      this.providers.map((provider) => provider.apiKey),
+      this.resolveKeyPoolConfig(),
+    );
+    setActiveVeniceKeyPool(this.keyPool);
 
     const cacheConfig = config.cacheConfig ?? {};
     this.cache =
@@ -297,6 +315,12 @@ export class VeniceClient implements VeniceClientLike {
     };
     const providers: VeniceProviderConfig[] = [primary];
 
+    // Numbered keys (#806) join the chain after the primary and any explicit fallbacks.
+    for (const [index, key] of loadNumberedVeniceKeys().entries()) {
+      if (providers.some((provider) => provider.apiKey === key)) continue;
+      providers.push({ apiKey: key, baseUrl: primary.baseUrl, name: `key-${index + 1}` });
+    }
+
     // Try to read fallback env vars via getConfig (if available)
     try {
       const cfg: any = getConfig();
@@ -339,6 +363,27 @@ export class VeniceClient implements VeniceClientLike {
     } catch {
       return CONFIG_FALLBACK;
     }
+  }
+
+  private resolveKeyPoolConfig(): VeniceKeyPoolOptions {
+    try {
+      const config = getConfig() as any;
+      return {
+        cooldownMs: config?.VENICE_KEY_COOLDOWN_MS ?? KEY_POOL_CONFIG_FALLBACK.VENICE_KEY_COOLDOWN_MS,
+        errorRateThreshold:
+          config?.VENICE_KEY_ERROR_RATE_THRESHOLD ?? KEY_POOL_CONFIG_FALLBACK.VENICE_KEY_ERROR_RATE_THRESHOLD,
+      };
+    } catch {
+      return {
+        cooldownMs: KEY_POOL_CONFIG_FALLBACK.VENICE_KEY_COOLDOWN_MS,
+        errorRateThreshold: KEY_POOL_CONFIG_FALLBACK.VENICE_KEY_ERROR_RATE_THRESHOLD,
+      };
+    }
+  }
+
+  /** Key health snapshot for the admin status endpoint. Values are masked. */
+  getKeyPoolStatus(): ReturnType<VeniceKeyPool['getStatus']> {
+    return this.keyPool.getStatus();
   }
 
   private resolveCircuitConfig(): CircuitEnvConfig {
@@ -492,20 +537,23 @@ export class VeniceClient implements VeniceClientLike {
     };
 
     try {
-      this.breaker.assertClosed();
-      // Only a HALF_OPEN admit reserves a probe slot; a CLOSED admit reserves
-      // none, so `release()` must not run for those calls.
-      probeHeld = this.breaker.getState() === 'HALF_OPEN';
-    } catch (e) {
-      if (this.enableCacheFallback && !options?.force) {
-        const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
-        if (stale !== null) {
-          log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
-          // A cache read costs no upstream tokens; report zero so the ledger
-          // does not charge the task for a lookup.
-          this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
-          return stale;
+      try {
+        this.breaker.assertClosed();
+        probeHeld = true;
+      } catch (e) {
+        if (this.enableCacheFallback && !options?.force) {
+          const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
+          if (stale !== null) {
+            log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
+            // A cache read costs no upstream tokens; report zero so the ledger
+            // does not charge the task for a lookup.
+            this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+            return stale;
+          }
         }
+        // No stale entry to fall back on: the open circuit must still shed
+        // the call rather than let it through.
+        throw e;
       }
       throw e;
     }
@@ -527,16 +575,7 @@ export class VeniceClient implements VeniceClientLike {
       }
 
       const runFetch = (): Promise<FetchOutcome> =>
-        this.runVeniceFetch({
-          messages,
-          model,
-          options,
-          maxTokens,
-          promptForLogging,
-          agentType,
-          settleSuccess,
-          settleFailure,
-        });
+        this.runVeniceFetch({ messages, model, options, maxTokens, promptForLogging, agentType, settleSuccess, settleFailure });
 
       let outcome: FetchOutcome;
       try {
@@ -569,9 +608,8 @@ export class VeniceClient implements VeniceClientLike {
       }
       return outcome.content;
     } finally {
-      // A call that never reached the network (cache hit above, or an error
-      // raised before the fetch settled the probe) hands its HALF_OPEN slot
-      // back, so the probe budget is not leaked.
+      // Give back a HALF_OPEN probe slot the call never used. Harmless when the
+      // slot was already settled — the breaker floors the counter at zero.
       if (probeHeld && !settled) {
         this.breaker.release();
       }
@@ -607,13 +645,10 @@ export class VeniceClient implements VeniceClientLike {
     maxTokens: number;
     promptForLogging: string;
     agentType: string;
-    /**
-     * Settle the caller's HALF_OPEN probe exactly once. Supplied by
-     * `createCompletion`, which owns the admission; when absent the fetch
-     * settles the breaker itself so a standalone call still reports its outcome.
-     */
-    settleSuccess?: () => void;
-    settleFailure?: () => void;
+    /** Records a success with the breaker (idempotent per call). */
+    settleSuccess: () => void;
+    /** Records a failure with the breaker (idempotent per call). */
+    settleFailure: () => void;
   }): Promise<FetchOutcome> {
     const requestId = randomUUID();
     const start = Date.now();
@@ -629,13 +664,16 @@ export class VeniceClient implements VeniceClientLike {
     });
 
     let lastError: Error | undefined;
+    let attempted = 0;
 
-    // Try providers in health order (fallback chain): a key inside a quota
-    // cooldown sorts last so the call does not pay for a known 429 (issue #741).
-    const chain = this.keyHealth.order(this.providers);
-    for (let pIndex = 0; pIndex < chain.length; pIndex++) {
-      const provider = chain[pIndex]!;
-      const attemptStart = Date.now();
+    // Try providers in order (fallback chain), skipping keys in cooldown (#806)
+    for (let pIndex = 0; pIndex < this.providers.length; pIndex++) {
+      const provider = this.providers[pIndex]!;
+      if (!this.keyPool.isAvailable(provider.apiKey)) {
+        log.warn({ agentType, model, skippedProvider: provider.name }, 'venice key in cooldown — skipping');
+        continue;
+      }
+      attempted += 1;
 
       try {
         const response = await this.fetchWithRetryForProvider(
@@ -655,8 +693,8 @@ export class VeniceClient implements VeniceClientLike {
         // anything.
         const usage = parseUsage(data) ?? estimateUsage(promptForLogging, content);
 
-        this.keyHealth.recordSuccess(provider.name ?? 'primary', Date.now() - attemptStart);
-        succeed();
+        this.keyPool.recordResult(provider.apiKey, true);
+        settleSuccess();
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'ok', retries, provider.name, usage);
         return { content, usage };
       } catch (err) {
@@ -673,8 +711,13 @@ export class VeniceClient implements VeniceClientLike {
         // fails over; other 4xx statuses will be rejected by every provider and
         // only serve to amplify load, so they fail fast.
         const mayFailover = shouldFailoverToNextProvider(lastError);
-        if (mayFailover && pIndex < chain.length - 1) {
-          const nextProvider = chain[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
+        // Only failures that reflect on the key count against its health; a 400
+        // says nothing about the key that issued it.
+        if (mayFailover) {
+          this.keyPool.recordResult(provider.apiKey, false);
+        }
+        if (mayFailover && pIndex < this.providers.length - 1) {
+          const nextProvider = this.providers[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
           log.warn(
             {
               agentType,
@@ -697,6 +740,12 @@ export class VeniceClient implements VeniceClientLike {
         // If we have stale cache fallback enabled, the caller (createCompletion) will handle it
         throw lastError;
       }
+    }
+
+    // Every key was skipped for cooldown: fail fast rather than hang (#806).
+    if (attempted === 0) {
+      settleFailure();
+      throw new VeniceUnavailableError(this.providers.length);
     }
 
     // Should not reach here, but fallback
@@ -764,16 +813,12 @@ export class VeniceClient implements VeniceClientLike {
     let lastError: Error | undefined;
 
     try {
-    // Health-ordered chain, same as runVeniceFetch: keys inside a quota
-    // cooldown sort last (issue #741).
-    const chain = this.keyHealth.order(this.providers);
-    for (let pIndex = 0; pIndex < chain.length; pIndex++) {
-      const provider = chain[pIndex]!;
-      const attemptStart = Date.now();
-      // Per-attempt buffer. Reset up front so no state leaks between providers.
-      let accumulated = '';
-      const deltas: string[] = [];
-      try {
+      for (let pIndex = 0; pIndex < this.providers.length; pIndex++) {
+        const provider = this.providers[pIndex]!;
+        // Per-attempt buffer. Reset up front so no state leaks between providers.
+        let accumulated = '';
+        const deltas: string[] = [];
+        try {
         const response = await this.fetchWithRetryForProvider(body, provider, () => { retries++; });
 
           if (!response.body) {
@@ -825,9 +870,32 @@ export class VeniceClient implements VeniceClientLike {
           const result = await reader.read();
           done = result.done;
           if (result.value) {
-            // `stream: true` keeps a multi-byte UTF-8 sequence that straddles
-            // a chunk boundary intact; the final read flushes the decoder.
-            buffer += decoder.decode(result.value, { stream: !done });
+            const text = decoder.decode(result.value, { stream: !done });
+            const lines = text.split('\n');
+            for (const line of lines) {
+              if (!line.startsWith('data: ')) continue;
+              const payload = line.slice(6).trim();
+              if (payload === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(payload);
+                const delta = parsed?.choices?.[0]?.delta?.content;
+                if (typeof delta === 'string' && delta.length > 0) {
+                  accumulated += delta;
+                  deltas.push(delta);
+                }
+              } catch (err) {
+                parseFailures += 1;
+                log.warn(
+                  {
+                    error: err instanceof Error ? err.message : String(err),
+                    agentType,
+                    model,
+                    payloadPreview: payload.slice(0, 200),
+                  },
+                  'venice SSE frame failed to parse — frame dropped'
+                );
+              }
+            }
           }
 
           // Everything up to the last newline is a complete line; the remainder
@@ -857,7 +925,6 @@ export class VeniceClient implements VeniceClientLike {
         for (const delta of deltas) onChunk(delta);
         delivered = accumulated.length;
 
-        this.keyHealth.recordSuccess(provider.name ?? 'primary', Date.now() - attemptStart);
         settleSuccess();
         // SSE frames only carry deltas, so there is no provider usage block to
         // read. Estimate from the prompt and everything we actually received;
@@ -904,7 +971,7 @@ export class VeniceClient implements VeniceClientLike {
           `Venice stream error after ${delivered} characters delivered: ${lastError.message}`
         );
       }
-    }
+      }
 
       settleFailure();
       throw lastError ?? new Error('Venice stream failed (all providers)');
@@ -934,11 +1001,17 @@ export class VeniceClient implements VeniceClientLike {
       }
 
       try {
+        // Propagate the active W3C trace context to Venice so provider-side
+        // logs correlate with our request spans (#856).
+        const traceCtx = currentTraceContext();
         const response = await fetch(`${provider.baseUrl ?? this.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${provider.apiKey}`,
+            ...(traceCtx
+              ? { traceparent: toW3cTraceparent(traceCtx.traceId, traceCtx.spanId) }
+              : {}),
           },
           body,
           signal: controller.signal,

@@ -27,9 +27,50 @@
 
 import type { Logger } from "pino";
 import { createAgentDb, getAgentDb, type AgentDb, type AgentRecord } from "../db/agents";
+import { getEventStore } from "../events/eventStore";
+import {
+  AGENT_EVICTED_EVENT,
+  CURRENT_EVENT_VERSION,
+  type AgentEvictedEvent,
+} from "../events/eventTypes";
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger({ module: "agent-watchdog" });
+
+/** Eviction history kept in memory for the status endpoint. */
+const MAX_EVICTION_HISTORY = 500;
+/** Evictions returned in the status snapshot. */
+const RECENT_EVICTIONS_SHOWN = 20;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Evictions since process start, across every watchdog instance. Exported to Prometheus as `agent_watchdog_evictions_total`. */
+let evictionsTotal = 0;
+
+/** Total evictions performed by this process. */
+export function getAgentWatchdogEvictionsTotal(): number {
+  return evictionsTotal;
+}
+
+export interface EvictionRecord {
+  agentId: string;
+  evictedAt: string;
+  lastSeenAt: string | null;
+}
+
+/** Snapshot served by `GET /api/admin/watchdog/status` (#804). */
+export interface WatchdogStatus {
+  running: boolean;
+  intervalMs: number;
+  gracePeriodMinutes: number;
+  /** When the last detection pass started, or null before the first one. */
+  lastRunAt: string | null;
+  /** When the next scheduled pass is due, or null while stopped. */
+  nextRunAt: string | null;
+  /** Agents currently quarantined inside their grace period. */
+  stalledCount: number;
+  evictedLast24h: number;
+  recentEvictions: EvictionRecord[];
+}
 
 export type AlertType = "heartbeat_stale" | "quarantined" | "evicted" | "recovered" | "eviction_failed";
 export type AlertSeverity = "warning" | "critical";
@@ -70,6 +111,18 @@ export interface AgentWatchdogOptions {
   db?: AgentDb;
   /** Custom logger, for tests. */
   logger?: Pick<Logger, "info" | "warn" | "error" | "debug">;
+  /**
+   * Publish `agent.evicted` for each eviction (#804). Defaults to appending to
+   * the process event store. A failure is logged and never blocks the eviction.
+   */
+  publishEvent?: (event: AgentEvictedEvent) => void;
+  /**
+   * Bust cached agent listings after a pass that evicted anyone (#804). Called
+   * once per pass, best-effort; its failure is logged.
+   */
+  invalidateCache?: () => Promise<unknown>;
+  /** Clock override for tests. */
+  now?: () => number;
 }
 
 export interface AgentWatchdog {
@@ -77,6 +130,8 @@ export interface AgentWatchdog {
   stop: () => void;
   /** Run a single detection/eviction pass now. Exposed for tests and admin. */
   tick: () => Promise<{ quarantined: number; evicted: number; recovered: number }>;
+  /** Current status for the admin endpoint. */
+  getStatus: () => WatchdogStatus;
 }
 
 const DEFAULTS = {
@@ -110,6 +165,38 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
   let ticking: Promise<unknown> | null = null;
 
   const getDb = (): AgentDb => options.db ?? createAgentDb(getAgentDb());
+  const clock = options.now ?? (() => Date.now());
+  const publishEvent =
+    options.publishEvent ??
+    ((event: AgentEvictedEvent) => {
+      getEventStore().append(event);
+    });
+
+  let running = false;
+  let startedAtMs: number | null = null;
+  let lastRunAtMs: number | null = null;
+  const evictionHistory: EvictionRecord[] = [];
+
+  function recordEviction(record: EvictionRecord): void {
+    evictionHistory.push(record);
+    if (evictionHistory.length > MAX_EVICTION_HISTORY) evictionHistory.shift();
+  }
+
+  /** Emit `agent.evicted`. Never throws: the eviction has already happened. */
+  function emitEvicted(agent: AgentRecord, evictedAtMs: number): void {
+    const event: AgentEvictedEvent = {
+      type: AGENT_EVICTED_EVENT,
+      taskId: `agent:${agent.id}`,
+      occurredAt: new Date(evictedAtMs).toISOString(),
+      version: CURRENT_EVENT_VERSION,
+      payload: { agentId: agent.id, reason: "heartbeat_timeout", lastSeenAt: agent.lastSeenAt ?? null },
+    };
+    try {
+      publishEvent(event);
+    } catch (err) {
+      log.error({ err, agentId: agent.id }, "failed to publish agent.evicted");
+    }
+  }
 
   function alert(
     db: AgentDb,
@@ -137,9 +224,10 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
   async function tick(): Promise<{ quarantined: number; evicted: number; recovered: number }> {
     const db = getDb();
     const stats = { quarantined: 0, evicted: 0, recovered: 0 };
-    const now = new Date();
+    const now = new Date(clock());
     const nowMs = now.getTime();
     const graceMs = gracePeriodMinutes * 60_000;
+    lastRunAtMs = nowMs;
 
     // ── Phase 1: detect ─────────────────────────────────────────────────────
     // Scan online agents for a first missed heartbeat and quarantine them.
@@ -237,6 +325,12 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
 
       db.delete(agent.id);
       stats.evicted += 1;
+      evictionsTotal += 1;
+      recordEviction({
+        agentId: agent.id,
+        evictedAt: new Date(nowMs).toISOString(),
+        lastSeenAt: agent.lastSeenAt ?? null,
+      });
       alert(
         db,
         agent,
@@ -250,10 +344,19 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
           reconciliation: options.onEvict ? reconciliation : "not_configured",
         },
       );
+      emitEvicted(agent, nowMs);
       log.error(
         { agentId: agent.id, silentForMs, gracePeriodMinutes, reconciliation },
         "agent evicted — heartbeat grace period expired",
       );
+    }
+
+    if (stats.evicted > 0 && options.invalidateCache) {
+      try {
+        await options.invalidateCache();
+      } catch (err) {
+        log.warn({ err }, "agent cache invalidation after eviction failed");
+      }
     }
 
     if (stats.quarantined || stats.evicted || stats.recovered) {
@@ -262,9 +365,36 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
     return stats;
   }
 
+  function getStatus(): WatchdogStatus {
+    const nowMs = clock();
+    const dayAgo = nowMs - DAY_MS;
+    const evictedLast24h = evictionHistory.filter((r) => Date.parse(r.evictedAt) >= dayAgo).length;
+    let stalledCount = 0;
+    try {
+      stalledCount = getDb().listStaleAgents().length;
+    } catch (err) {
+      // Status must still answer when the agent store is unavailable.
+      log.warn({ err }, "could not count quarantined agents for watchdog status");
+    }
+    const anchorMs = lastRunAtMs ?? startedAtMs;
+    return {
+      running,
+      intervalMs,
+      gracePeriodMinutes,
+      lastRunAt: lastRunAtMs === null ? null : new Date(lastRunAtMs).toISOString(),
+      nextRunAt: running && anchorMs !== null ? new Date(anchorMs + intervalMs).toISOString() : null,
+      stalledCount,
+      evictedLast24h,
+      recentEvictions: evictionHistory.slice(-RECENT_EVICTIONS_SHOWN).reverse(),
+    };
+  }
+
   return {
+    getStatus,
     start() {
       if (timer) return;
+      running = true;
+      startedAtMs = clock();
       timer = setInterval(() => {
         if (ticking) return; // skip overlapping pass
         ticking = tick()
@@ -277,6 +407,7 @@ export function createAgentWatchdog(options: AgentWatchdogOptions = {}): AgentWa
       }, intervalMs);
     },
     stop() {
+      running = false;
       if (timer) {
         clearInterval(timer);
         timer = null;

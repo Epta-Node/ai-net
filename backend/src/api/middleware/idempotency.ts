@@ -41,7 +41,7 @@
 import { Request, Response, NextFunction } from 'express';
 import type { IdempotencyStore } from '../../services/idempotency';
 import { getDefaultIdempotencyStore } from '../../services/idempotency';
-import { ValidationError, ConflictError } from '../../errors';
+import { ValidationError, AppError } from '../../errors';
 import { createLogger } from '../../utils/logger';
 
 const log = createLogger({ component: 'idempotency-middleware' });
@@ -50,7 +50,10 @@ const log = createLogger({ component: 'idempotency-middleware' });
  * Maximum accepted length of the `Idempotency-Key` header, in characters.
  * Longer keys are rejected with 400 before they reach the store.
  */
-export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
+
+/** Error code returned when a duplicate arrives while the original is in flight. */
+export const IDEMPOTENCY_IN_PROGRESS_CODE = 'REQUEST_IN_PROGRESS';
 
 /** Seconds advertised in `Retry-After` when a duplicate is still in flight. */
 const IN_FLIGHT_RETRY_AFTER_SECONDS = 1;
@@ -126,6 +129,7 @@ export function createIdempotencyMiddleware(store?: IdempotencyStore) {
       const entry = reservation.entry;
       res.status(entry.statusCode ?? 200);
       res.setHeader('Idempotency-Key', key);
+      res.setHeader('X-Idempotent-Replay', 'true');
       try {
         res.json(JSON.parse(entry.responseBody ?? 'null'));
       } catch {
@@ -141,8 +145,10 @@ export function createIdempotencyMiddleware(store?: IdempotencyStore) {
       log.info({ key, wallet }, 'rejecting concurrent duplicate idempotency key');
       res.setHeader('Retry-After', String(IN_FLIGHT_RETRY_AFTER_SECONDS));
       return next(
-        new ConflictError(
+        new AppError(
           'A request with this Idempotency-Key is still in progress',
+          409,
+          IDEMPOTENCY_IN_PROGRESS_CODE,
           { idempotencyKey: key, status: 'in_flight' },
         ),
       );

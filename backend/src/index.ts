@@ -20,6 +20,7 @@ import { createDefaultReconciliationService, closeReconciliationDb } from "./ser
 import { DbMaintenanceService, defaultMaintenanceDatabases } from "./services/dbMaintenance";
 import { ErrorRegistryMaintenanceService } from "./services/errorRegistryMaintenance";
 import { EventRetentionService } from "./services/eventRetention";
+import { runDefaultEventColdArchive } from "./events/eventColdArchive";
 import { createLogger } from "./utils/logger";
 import { redactedConfigSnapshot } from "./config";
 import { runStartupMigrations } from "./db/migrations/startup";
@@ -84,6 +85,8 @@ async function main() {
       backupDir: config.DB_BACKUP_DIR,
       backupRetentionCount: config.DB_BACKUP_RETENTION_COUNT,
       auditLogRetentionDays: config.AUDIT_LOG_RETENTION_DAYS,
+      // Daily 02:00 UTC move of aged event archive rows to cold files (#809).
+      runColdArchive: runDefaultEventColdArchive,
     });
     maintenanceService.start();
 

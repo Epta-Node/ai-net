@@ -1,0 +1,62 @@
+# CodeQL static analysis (issue #854)
+#
+# Nightly + on pushes/PRs targeting main. Complements the ad-hoc scanners in
+# ci.yml (npm audit / TruffleHog / Trivy) by covering semantic vulnerabilities:
+# injection, unsafe deserialization, path traversal, and Rust memory-safety
+# smells in the smart-contracts workspace.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 04:23 UTC — off-peak for CI runners.
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # Required to upload SARIF results to the Security tab.
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+          - language: rust
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain (rust analysis)
+        if: matrix.language == 'rust'
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

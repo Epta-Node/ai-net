@@ -28,6 +28,10 @@ pub const MAX_VOTERS: u32 = 50;
 pub const MAX_EVIDENCE_PER_DISPUTE: u32 = 20;
 /// Minimum votes required for a non-neutral ruling.
 pub const MINIMUM_VOTES: u32 = 3;
+/// Required votes for a binding resolution (2-of-3 arbiters).
+pub const REQUIRED_ARBITER_VOTES: u32 = 2;
+/// Fixed arbiter pool size for security model.
+pub const ARBITER_POOL_SIZE: u32 = 3;
 /// Maximum length of a dispute reason, in bytes.
 pub const MAX_REASON_BYTES: u32 = 512;
 /// Window after the first ruling in which the losing party may appeal.
@@ -67,6 +71,8 @@ pub enum DataKey {
     AgentRegistry,
     AppealVote(Symbol, Address),
     VoteRound(Symbol),
+    ArbiterPool,
+    ArbiterVote(Symbol, Address),
 }
 
 #[contract]
@@ -335,6 +341,37 @@ impl DisputeResolutionContract {
         Ok(())
     }
 
+    /// Admin: set the fixed 3-arbiter pool for 2-of-3 voting protocol.
+    /// Must be exactly 3 unique addresses. Replaces any previous pool.
+    pub fn set_arbiter_pool(env: Env, arbiters: Vec<Address>) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        require_admin(&env)?;
+
+        if arbiters.len() != ARBITER_POOL_SIZE {
+            return Err(Error::InvalidVoterPool);
+        }
+
+        for (index, arbiter) in arbiters.iter().enumerate() {
+            if arbiters.iter().skip(index + 1).any(|other| other == arbiter) {
+                return Err(Error::InvalidVoterPool);
+            }
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ArbiterPool, &arbiters);
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("arb_set")),
+            arbiters.len(),
+        );
+        Ok(())
+    }
+
+    /// Get the current 3-arbiter pool.
+    pub fn get_arbiter_pool(env: Env) -> Option<Vec<Address>> {
+        env.storage().instance().get(&DataKey::ArbiterPool)
+    }
+
     /// Admin: map the dispute-party address to its registry agent identifier.
     pub fn set_agent_registry_id(
         env: Env,
@@ -573,6 +610,92 @@ impl DisputeResolutionContract {
                 ruling,
             },
         );
+        Ok(())
+    }
+
+    /// Cast a binding arbiter vote (2-of-3 protocol). Voter must be in the
+    /// configured 3-arbiter pool. Requires exactly 2 matching votes to bind.
+    pub fn vote_as_arbiter(
+        env: Env,
+        dispute_id: Symbol,
+        arbiter: Address,
+        ruling: VoteSide,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        arbiter.require_auth();
+        let mut dispute = load_dispute(&env, &dispute_id)?;
+
+        let arbiter_pool: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ArbiterPool)
+            .ok_or(Error::NoVotersAvailable)?;
+
+        if !arbiter_pool.contains(&arbiter) {
+            return Err(Error::NotEligibleVoter);
+        }
+
+        let now = env.ledger().timestamp();
+        if dispute.status == DisputeStatus::Resolved {
+            return Err(Error::DisputeAlreadyResolved);
+        }
+        if now < dispute.evidence_deadline {
+            return Err(Error::InvalidPhase);
+        }
+        if now >= dispute.voting_deadline {
+            return Err(Error::DisputeExpired);
+        }
+
+        let vote_key = DataKey::ArbiterVote(dispute_id.clone(), arbiter.clone());
+        if env.storage().persistent().has(&vote_key) {
+            return Err(Error::AlreadyVoted);
+        }
+
+        if dispute.status != DisputeStatus::Voting {
+            start_voting(&env, &mut dispute);
+        }
+
+        let vote = Vote {
+            dispute_id: dispute_id.clone(),
+            voter: arbiter.clone(),
+            ruling: ruling.clone(),
+            voted_at: now,
+        };
+
+        env.storage().persistent().set(&vote_key, &vote);
+        extend_ttl(&env, &vote_key);
+
+        let mut filer_votes = 0u32;
+        let mut agent_votes = 0u32;
+        for arb in arbiter_pool.iter() {
+            if let Some(v) = env.storage().persistent().get::<_, Vote>(
+                &DataKey::ArbiterVote(dispute_id.clone(), arb)
+            ) {
+                match v.ruling {
+                    VoteSide::SupportFiler => filer_votes += 1,
+                    VoteSide::SupportAgent => agent_votes += 1,
+                }
+            }
+        }
+
+        if filer_votes >= REQUIRED_ARBITER_VOTES || agent_votes >= REQUIRED_ARBITER_VOTES {
+            let outcome = if filer_votes >= REQUIRED_ARBITER_VOTES {
+                DisputeOutcome::SupportFiler
+            } else {
+                DisputeOutcome::SupportAgent
+            };
+            apply_final_ruling(&env, &mut dispute, &outcome)?;
+        }
+
+        env.events().publish(
+            (symbol_short!("dispute"), symbol_short!("arb_vote")),
+            VoteCastEvent {
+                dispute_id,
+                voter: arbiter,
+                ruling,
+            },
+        );
+
         Ok(())
     }
 

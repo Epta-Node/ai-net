@@ -10,6 +10,7 @@ import {
   recordRetryLag,
   type RandomFn,
 } from "./backoff";
+import { DeadLetterQueue } from "./dlq";
 
 const logger = createLogger({ component: "job-worker" });
 
@@ -78,6 +79,12 @@ export class JobWorker {
   private readonly maxAttempts: number;
   private readonly leaseTtlMs: number;
   private readonly leaseHeartbeatMs: number;
+  /**
+   * Where jobs go once their retry budget is gone (issue #802). Shares this
+   * worker's store, so the park is the same atomic status transition the
+   * worker already relied on — plus the `job.dead_lettered` event emission.
+   */
+  private readonly deadLetterQueue: DeadLetterQueue;
 
   /** Id stamped on every lease this worker takes (issue #648). */
   public readonly workerId: string;
@@ -119,6 +126,7 @@ export class JobWorker {
       );
     }
     this.workerId = options.workerId ?? `${os.hostname()}-${process.pid}-${nanoid(6)}`;
+    this.deadLetterQueue = new DeadLetterQueue(this.store, { emitEvents: true });
 
     if (options.autoStart) {
       this.start();
@@ -352,7 +360,6 @@ export class JobWorker {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const attempts = job.attempts + 1;
       const maxAllowedAttempts = job.maxAttempts || this.maxAttempts;
-      const now = new Date().toISOString();
 
       if (attempts < maxAllowedAttempts) {
         // Full-jitter exponential backoff: random(0, min(cap, base * 2^(attempt - 1)))
@@ -386,13 +393,11 @@ export class JobWorker {
 
         this.onJobFailed?.(job, error, true, nextRunAt);
       } else {
-        // Exceeded max retry attempts -> move to dead-letter queue
-        this.store.updateStatus(job.id, "dead-letter", {
-          attempts,
-          lastError: `max attempts exceeded (${attempts}/${maxAllowedAttempts}): ${errorMessage}`,
-          failedAt: now,
-          expectedStatus: "active",
-        });
+        // Exceeded max retry attempts -> isolate in the dead-letter queue
+        // (issue #802). `push` performs the guarded status transition, parks
+        // the last error against the row and emits `job.dead_lettered`, so a
+        // poison message can never be re-claimed by the main queue.
+        this.deadLetterQueue.push(job, error, { attempts, maxAttempts: maxAllowedAttempts });
         recordJobDeadLetter();
 
         logger.error(

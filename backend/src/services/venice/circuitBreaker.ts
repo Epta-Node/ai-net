@@ -46,7 +46,8 @@
 
 import { createLogger } from '../../utils/logger.js';
 import { CircuitOpenError } from './errors.js';
-import type { CircuitBreakerStatus } from '../circuitBreaker.js';
+
+export { CircuitOpenError } from './errors.js';
 
 const log = createLogger({ module: 'VeniceCircuitBreaker' });
 
@@ -106,6 +107,11 @@ export type CircuitTransitionReason =
   | 'manual_reset';
 
 export interface CircuitBreakerOptions {
+  /**
+   * Service name surfaced to the shared health-check registry. Default:
+   * `venice`.
+   */
+  name?: string;
   /** Consecutive failures required to open the circuit. Default: 3. */
   failureThreshold?: number;
   /** How long the circuit stays `OPEN` before admitting probes. Default: 60_000. */
@@ -133,13 +139,8 @@ function positiveInt(value: number | undefined, fallback: number): number {
 }
 
 export class CircuitBreaker {
-  /**
-   * Service name. The breaker is Venice-scoped, but the shared health registry
-   * (`trackCircuitBreaker` → `/health/deep`) identifies instances by name, so
-   * this one reports `venice` like the named-registry breakers do.
-   */
-  readonly name = 'venice';
-
+  /** Service name, shared with the health-check registry. */
+  readonly name: string;
   private state: CircuitState = 'CLOSED';
   private failures = 0;
   private successes = 0;
@@ -166,6 +167,7 @@ export class CircuitBreaker {
     const opts: CircuitBreakerOptions =
       typeof options === 'function' ? { nowFn: options } : options;
 
+    this.name = opts.name ?? 'venice';
     this.failureThreshold = positiveInt(opts.failureThreshold, DEFAULT_FAILURE_THRESHOLD);
     this.cooldownMs = positiveInt(opts.cooldownMs, DEFAULT_COOLDOWN_MS);
     this.probeCount = positiveInt(opts.probeCount, DEFAULT_PROBE_COUNT);
@@ -216,14 +218,19 @@ export class CircuitBreaker {
   }
 
   /**
-   * Serialisable snapshot in the shape the shared health registry expects
-   * (`CircuitBreakerStatus`), so `/health/deep` can aggregate this breaker with
-   * the ones created through `getCircuitBreaker`.
-   *
-   * `cooldownMs` maps onto the registry's `recoveryTimeoutMs` — both describe
-   * how long the circuit stays open before a probe is admitted.
+   * Serialisable status snapshot in the shared registry's shape, so
+   * `/health/deep` can aggregate this breaker alongside registry instances.
    */
-  getStatus(): CircuitBreakerStatus {
+  getStatus(): {
+    name: string;
+    state: CircuitState;
+    failures: number;
+    failureThreshold: number;
+    recoveryTimeoutMs: number;
+    openedAt: number | null;
+    lastSuccessAt: number | null;
+    lastFailureAt: number | null;
+  } {
     this.evaluateCooldown();
     return {
       name: this.name,
@@ -251,12 +258,12 @@ export class CircuitBreaker {
   acquire(): void {
     this.evaluateCooldown();
     if (this.state === 'OPEN') {
-      throw new CircuitOpenError(this.name, 'OPEN');
+      throw new CircuitOpenError();
     }
     if (this.state === 'HALF_OPEN') {
       if (this.probesInFlight >= this.probeCount) {
         throw new CircuitOpenError(
-          `${this.name} — probe budget exhausted, Venice requests are blocked`,
+          'Circuit breaker is HALF_OPEN — probe budget exhausted, Venice requests are blocked',
           'HALF_OPEN',
         );
       }
@@ -265,9 +272,9 @@ export class CircuitBreaker {
   }
 
   /**
-   * @deprecated Use {@link acquire} — it additionally enforces the `HALF_OPEN`
-   * probe budget. Retained because it reads naturally at call sites that only
-   * care about "may I talk to Venice right now?".
+   * Alias of {@link acquire}, kept for backwards compatibility with the original
+   * single-argument API. Prefer {@link acquire} — it is the same check, named for
+   * what it does (reserve a probe slot, or reject).
    */
   assertClosed(): void {
     this.acquire();

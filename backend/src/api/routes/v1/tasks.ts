@@ -12,7 +12,9 @@ import { rateLimitMiddleware } from "../../middleware/rateLimit";
 import { idempotencyMiddleware } from "../../middleware/idempotency";
 import { currentTraceId } from "../../../services/traceContext";
 import { assertDailyTaskQuota } from "../../../services/quota/dailyQuota";
-import { NotFoundError, ForbiddenError, ConflictError } from "../../../errors";
+import { walletQuotaCheck } from "../../middleware/quotaCheck";
+import { getWalletQuotaStatus } from "../../../services/quota/walletQuota";
+import { NotFoundError, ForbiddenError, ConflictError, UnauthorizedError } from "../../../errors";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
 import { config } from "../../../config";
@@ -43,7 +45,7 @@ export function createV1TasksRouter(
   const jobQueue = queue ?? getGlobalJobQueue();
 
   // POST /api/tasks — v1 format, idempotent
-  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response): void => {
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), walletQuotaCheck, (req: Request, res: Response): void => {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
@@ -96,6 +98,18 @@ export function createV1TasksRouter(
 
     // v1 response format
     res.json({ tasks, total, page, pageSize });
+  });
+
+  tasksRouter.get("/quota", (req: Request, res: Response): void => {
+    const wallet = (req.headers["walletpublickey"] as string | undefined)?.trim();
+    if (!wallet) {
+      throw new UnauthorizedError(
+        "walletpublickey header is required",
+        undefined,
+        res.locals.correlationId as string | undefined,
+      );
+    }
+    res.json(getWalletQuotaStatus(wallet));
   });
 
   // GET /api/tasks/:id — v1 format

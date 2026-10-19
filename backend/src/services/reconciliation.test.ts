@@ -381,10 +381,16 @@ describe("ReconciliationService alerts", () => {
 
     const report = await service.run();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://alerts.example.com/reconciliation");
-    expect(JSON.parse((init as RequestInit).body as string).id).toBe(report.id);
+    // One POST carries the full report; one more carries the threshold drift alert (#811).
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).toEqual([
+      "https://alerts.example.com/reconciliation",
+      "https://alerts.example.com/reconciliation",
+    ]);
+    const bodies = fetchMock.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string));
+    expect(bodies.find((body) => body.alert === undefined)?.id).toBe(report.id);
+    expect(bodies.filter((body) => body.alert === "payment_drift_detected")).toHaveLength(1);
   });
 
   it("does not POST to the webhook when no discrepancies are found", async () => {
@@ -972,7 +978,7 @@ describe("ReconciliationService events and metrics", () => {
 
 // ─── Scheduling ───────────────────────────────────────────────────────────────
 
-describe("ReconciliationService.start / startFrequent", () => {
+describe("ReconciliationService.start", () => {
   beforeEach(() => {
     jest.useFakeTimers();
   });
@@ -1013,7 +1019,7 @@ describe("ReconciliationService.start / startFrequent", () => {
     });
     const runSpy = jest.spyOn(service, "run").mockResolvedValue(consistentReport());
 
-    service.startFrequent(300_000);
+    service.start(300_000);
 
     jest.advanceTimersByTime(300_000);
     await Promise.resolve();
@@ -1071,7 +1077,7 @@ describe("ReconciliationService.start / startFrequent", () => {
       onChainProvider: makeOnChainProvider([]),
       reportStore: makeReportStore().store,
     });
-    service.startFrequent(300_000);
+    service.start(300_000);
     service.stop();
 
     expect((service as unknown as { timer: NodeJS.Timeout | null }).timer).toBeNull();

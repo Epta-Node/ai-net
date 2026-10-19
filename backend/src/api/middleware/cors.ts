@@ -107,6 +107,9 @@ export const CORS_BASE_METHODS: readonly string[] = [
   'OPTIONS',
 ];
 
+/** `Access-Control-Max-Age` for preflight responses, in seconds (10 minutes). */
+export const CORS_PREFLIGHT_MAX_AGE_SECONDS = 600;
+
 // ---------------------------------------------------------------------------
 // Route-table introspection
 // ---------------------------------------------------------------------------
@@ -171,7 +174,15 @@ export function buildCorsOptions(app?: unknown) {
 
   return {
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      if (!origin || origins.includes(origin)) {
+      // `Origin: null` comes from sandboxed iframes and `file://` pages. It is
+      // rejected in every environment, even when it is not in the list, so a
+      // development build cannot be reached from an opaque origin.
+      if (origin === 'null') {
+        logger.debug('CORS null origin rejected');
+        callback(new ForbiddenError('Not allowed by CORS'));
+      } else if (!origin || origins.includes(origin)) {
+        // No Origin header means a non-browser caller (server-to-server, curl),
+        // which CORS does not apply to.
         callback(null, true);
       } else {
         // Rejected origins are a client policy outcome, not a server fault.
@@ -184,6 +195,8 @@ export function buildCorsOptions(app?: unknown) {
     credentials: true,
     methods: allowedMethods(app),
     allowedHeaders: [...CORS_ALLOWED_REQUEST_HEADERS],
+    // Preflight cache lifetime, in seconds. Browsers re-validate after this.
+    maxAge: CORS_PREFLIGHT_MAX_AGE_SECONDS,
   };
 }
 

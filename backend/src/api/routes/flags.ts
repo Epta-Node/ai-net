@@ -1,22 +1,41 @@
 /**
- * Feature-flag admin endpoints (#425).
+ * Feature-flag admin endpoints (#425, #814).
  *
- * GET  /api/admin/flags        — list all flags with state + source
- * PUT  /api/admin/flags/:flag  — set runtime override { "enabled": true|false }
- * DELETE /api/admin/flags/:flag — clear runtime override (fall back to env/default)
+ * GET  /api/admin/flags        — list all flags with state + source, and runtime records
+ * PUT  /api/admin/flags/:flag  — create or update a runtime record
+ *                                 { "enabled": true|false, "rolloutPercent"?: 0-100, "enabledWallets"?: [...] }
+ * DELETE /api/admin/flags/:flag — clear runtime record (fall back to env/default)
+ *
+ * Runtime records are persisted to the tasks DB, so they survive a restart.
+ * Every call is recorded by the `/api/admin` audit middleware.
  */
 import { Router, Request, Response } from "express";
 import {
+  deleteFlagRecord,
+  FLAG_KEY_PATTERN,
   getAllFlags,
-  setFlag,
+  getFlagState,
+  initFeatureFlagPersistence,
   KNOWN_FLAGS,
-  type FeatureFlag,
+  listFlagRecords,
+  upsertFlag,
 } from "../../services/featureFlags";
 import { adminAuthMiddleware } from "../middleware/auth";
+import { getTaskDb } from "../../db/tasks";
+import { actorFromRequest } from "../../services/adminControl";
 import { NotFoundError, ValidationError } from "../../errors";
+
+/** Upper bound on explicit allow-list entries per flag. */
+const MAX_ENABLED_WALLETS = 500;
+
+/** Same shape as `stellarPublicKeySchema` in `src/schemas/common.ts`. */
+const STELLAR_PUBLIC_KEY = /^G[A-Z2-7]{55}$/;
 
 export function createFlagsRouter(): Router {
   const router = Router();
+
+  // Load persisted runtime records before any request can read a flag.
+  initFeatureFlagPersistence(getTaskDb());
 
   router.use(adminAuthMiddleware);
 
@@ -48,7 +67,7 @@ export function createFlagsRouter(): Router {
    *         description: ADMIN_API_KEY is not configured
    */
   router.get("/", (_req: Request, res: Response) => {
-    res.json({ flags: getAllFlags() });
+    res.json({ flags: getAllFlags(), records: listFlagRecords() });
   });
 
   /**
@@ -57,7 +76,7 @@ export function createFlagsRouter(): Router {
    *   put:
    *     summary: Set a feature flag override
    *     operationId: setFeatureFlag
-   *     description: Applies a runtime override for a known flag, taking precedence over the environment value until the process restarts.
+   *     description: Creates or updates a runtime record. The record takes precedence over the environment value and is persisted, so it survives a restart. Set `rolloutPercent` to bucket wallets deterministically, and `enabledWallets` to always enable the flag for specific wallets.
    *     tags: [Admin, FeatureFlags]
    *     security:
    *       - adminApiKey: []
@@ -77,6 +96,11 @@ export function createFlagsRouter(): Router {
    *             required: [enabled]
    *             properties:
    *               enabled: { type: boolean }
+   *               rolloutPercent: { type: integer, minimum: 0, maximum: 100, default: 100 }
+   *               enabledWallets:
+   *                 type: array
+   *                 maxItems: 500
+   *                 items: { type: string, pattern: '^G[A-Z2-7]{55}$' }
    *     responses:
    *       200:
    *         description: Override applied
@@ -90,12 +114,6 @@ export function createFlagsRouter(): Router {
    *           application/json:
    *             schema:
    *               $ref: '#/components/schemas/ValidationError'
-   *       404:
-   *         description: Unknown feature flag
-   *         content:
-   *           application/json:
-   *             schema:
-   *               $ref: '#/components/schemas/NotFoundError'
    *   delete:
    *     summary: Clear a feature flag override
    *     operationId: clearFeatureFlag
@@ -125,34 +143,87 @@ export function createFlagsRouter(): Router {
    *               $ref: '#/components/schemas/NotFoundError'
    */
   router.put("/:flag", (req: Request, res: Response) => {
-    const flag = req.params.flag as FeatureFlag;
+    const flag = req.params.flag;
 
-    if (!(KNOWN_FLAGS as readonly string[]).includes(flag)) {
-      throw new NotFoundError("Feature flag", flag);
+    if (!FLAG_KEY_PATTERN.test(flag)) {
+      throw new ValidationError(
+        "Flag key must be 2-64 characters: lowercase letters, digits and underscores, starting with a letter",
+        { field: "flag", received: flag },
+      );
     }
 
-    const { enabled } = req.body as { enabled?: unknown };
-    if (typeof enabled !== "boolean") {
+    const body = (req.body ?? {}) as {
+      enabled?: unknown;
+      rolloutPercent?: unknown;
+      enabledWallets?: unknown;
+    };
+
+    if (typeof body.enabled !== "boolean") {
       throw new ValidationError('Body must include { "enabled": true | false }', {
         field: "enabled",
-        received: typeof enabled,
+        received: typeof body.enabled,
       });
     }
 
-    setFlag(flag, enabled);
-    res.json({ flag, enabled, source: "runtime" });
+    let rolloutPercent: number | undefined;
+    if (body.rolloutPercent !== undefined) {
+      if (
+        typeof body.rolloutPercent !== "number" ||
+        !Number.isInteger(body.rolloutPercent) ||
+        body.rolloutPercent < 0 ||
+        body.rolloutPercent > 100
+      ) {
+        throw new ValidationError("rolloutPercent must be an integer between 0 and 100", {
+          field: "rolloutPercent",
+          received: body.rolloutPercent,
+        });
+      }
+      rolloutPercent = body.rolloutPercent;
+    }
+
+    let enabledWallets: string[] | undefined;
+    if (body.enabledWallets !== undefined) {
+      const wallets = body.enabledWallets;
+      if (
+        !Array.isArray(wallets) ||
+        wallets.length > MAX_ENABLED_WALLETS ||
+        !wallets.every((w) => typeof w === "string" && STELLAR_PUBLIC_KEY.test(w))
+      ) {
+        throw new ValidationError(
+          `enabledWallets must be an array of at most ${MAX_ENABLED_WALLETS} Stellar public keys`,
+          { field: "enabledWallets" },
+        );
+      }
+      enabledWallets = [...new Set(wallets as string[])];
+    }
+
+    const record = upsertFlag(
+      flag,
+      { enabled: body.enabled, rolloutPercent, enabledWallets },
+      actorFromRequest(req),
+    );
+
+    res.json({
+      flag,
+      enabled: record.enabled,
+      source: "runtime",
+      rolloutPercent: record.rolloutPercent,
+      enabledWallets: record.enabledWallets,
+      updatedAt: record.updatedAt,
+      updatedBy: record.updatedBy,
+    });
   });
 
   router.delete("/:flag", (req: Request, res: Response) => {
-    const flag = req.params.flag as FeatureFlag;
+    const flag = req.params.flag;
+    const isKnown = (KNOWN_FLAGS as readonly string[]).includes(flag);
 
-    if (!(KNOWN_FLAGS as readonly string[]).includes(flag)) {
+    const removed = FLAG_KEY_PATTERN.test(flag) && deleteFlagRecord(flag);
+    if (!removed && !isKnown) {
       throw new NotFoundError("Feature flag", flag);
     }
 
-    setFlag(flag, null);
-    const all = getAllFlags();
-    res.json({ flag, ...all[flag] });
+    res.json({ flag, ...getFlagState(flag) });
   });
 
   return router;

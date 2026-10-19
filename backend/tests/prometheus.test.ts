@@ -85,4 +85,11 @@ describe('Prometheus metric families', () => {
       expect(output).toContain('ainet_http_request_duration_milliseconds_count');
     }
   });
+
+  it('exposes the dead-letter queue depth gauge (issue #802)', () => {
+    const output = generatePrometheusMetrics();
+    expect(output).toContain('# HELP ainet_queue_dlq_depth');
+    expect(output).toContain('# TYPE ainet_queue_dlq_depth gauge');
+    expect(output).toMatch(/ainet_queue_dlq_depth\s+\d+/);
+  });
 });

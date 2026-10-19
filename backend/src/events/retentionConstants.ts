@@ -28,7 +28,7 @@ export const SYSTEM_TASK_ID = "system";
 export const TERMINAL_EVENT_TYPES = ["TaskCompleted", "TaskFailed"] as const satisfies readonly EventType[];
 
 /** Task statuses that make a task eligible for compaction. */
-export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled"] as const;
+export const TERMINAL_TASK_STATUSES = ["completed", "failed", "cancelled", "payment_failed"] as const;
 
 export type TerminalTaskStatusName = (typeof TERMINAL_TASK_STATUSES)[number];
 

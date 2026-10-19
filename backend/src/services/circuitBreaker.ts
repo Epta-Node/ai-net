@@ -37,11 +37,17 @@ export interface CircuitBreakerEvent {
 }
 
 export class CircuitOpenError extends Error {
-  /** State the breaker was in when it shed the call, when the thrower knows it. */
-  readonly state?: CircuitState;
-
-  constructor(name: string, state?: CircuitState) {
-    super(`Circuit breaker OPEN for service: ${name}`);
+  /**
+   * Which shed state rejected the call. The Venice reservation path throws
+   * `HALF_OPEN` when the probe budget is exhausted so callers can tell the
+   * difference from a hard-open circuit.
+   */
+  readonly state: 'OPEN' | 'HALF_OPEN';
+  constructor(
+    message = 'Circuit breaker is OPEN',
+    state: 'OPEN' | 'HALF_OPEN' = 'OPEN',
+  ) {
+    super(message);
     this.name = 'CircuitOpenError';
     this.state = state;
   }
@@ -84,7 +90,7 @@ export class CircuitBreaker {
   assertClosed(): void {
     this.evaluateTimeout();
     if (this.state === 'OPEN') {
-      throw new CircuitOpenError(this.name);
+      throw new CircuitOpenError(`Circuit breaker OPEN for service: ${this.name}`);
     }
   }
 
@@ -197,14 +203,16 @@ export function getAllCircuitBreakerStatuses(): ReturnType<CircuitBreaker['getSt
 // ── Tracked breakers — instances owned by their callers ──────────────────────
 
 /**
- * Contract for breakers that are visible to health checks: a name plus a
- * status snapshot. Structural, so caller-owned breakers that are not instances
- * of the class above (e.g. the Venice-scoped breaker in
- * `services/venice/circuitBreaker.ts`) can be tracked too.
+ * Public surface a caller-owned breaker must expose to be aggregated by
+ * health checks. Declared structurally (no private fields) so richer
+ * implementations — such as the Venice reservation-model breaker, which keeps
+ * probe slots and transition listeners — can be tracked alongside registry
+ * instances without subclassing.
  */
-export interface CircuitBreakerLike {
+export interface TrackableCircuitBreaker {
   readonly name: string;
-  getStatus(): CircuitBreakerStatus;
+  getState(): CircuitState;
+  getStatus(): ReturnType<CircuitBreaker['getStatus']>;
 }
 
 /**
@@ -212,13 +220,13 @@ export interface CircuitBreakerLike {
  * the named registry. Several instances may share a name, so health checks
  * aggregate them with {@link summarizeCircuitBreakers}.
  */
-const tracked = new Set<CircuitBreakerLike>();
+const tracked = new Set<TrackableCircuitBreaker>();
 
 /**
  * Make a caller-owned breaker visible to health checks.
  * Returns an unsubscribe function; call it when the owner is disposed.
  */
-export function trackCircuitBreaker(breaker: CircuitBreakerLike): () => void {
+export function trackCircuitBreaker(breaker: TrackableCircuitBreaker): () => void {
   tracked.add(breaker);
   return () => {
     tracked.delete(breaker);
@@ -257,7 +265,7 @@ function maxNullable(a: number | null, b: number | null): number | null {
  * owning client has not been constructed).
  */
 export function summarizeCircuitBreakers(name: string): CircuitBreakerSummary | null {
-  const instances = new Set<CircuitBreakerLike>();
+  const instances = new Set<TrackableCircuitBreaker>();
   const registered = registry.get(name);
   if (registered) instances.add(registered);
   for (const breaker of tracked) {

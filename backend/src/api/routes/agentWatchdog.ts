@@ -30,10 +30,40 @@ export function createAgentWatchdogRouter(options: AgentWatchdogRouterOptions = 
   const getDb = (): AgentDb => options.db ?? createAgentDb(getAgentDb());
 
   /**
-   * GET /api/agent-watchdog/alerts
-   *
-   * `?unresolvedOnly=true` is the dashboard's default view: it shows what is
-   * still wrong rather than burying today's problem under a week of history.
+   * @openapi
+   * /api/agent-watchdog/alerts:
+   *   get:
+   *     summary: List agent watchdog alerts (Issue #379)
+   *     operationId: listAgentWatchdogAlerts
+   *     description: >
+   *       Recent heartbeat-liveness alerts, newest first. `unresolvedOnly=true`
+   *       (the dashboard default) hides alerts that have already been resolved.
+   *     tags: [Agents]
+   *     security: []
+   *     parameters:
+   *       - in: query
+   *         name: unresolvedOnly
+   *         schema: { type: boolean, default: false }
+   *         description: Only return alerts that have not been resolved
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+   *       - in: query
+   *         name: agentId
+   *         schema: { type: string }
+   *         description: Filter alerts to a single agent
+   *     responses:
+   *       200:
+   *         description: Paginated watchdog alerts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items: { type: object }
+   *                 _meta: { type: object }
    */
   router.get("/alerts", (req: Request, res: Response, next: NextFunction): void => {
     try {
@@ -58,12 +88,28 @@ export function createAgentWatchdogRouter(options: AgentWatchdogRouterOptions = 
   });
 
   /**
-   * GET /api/agent-watchdog/quarantine
-   *
-   * Agents that missed a heartbeat but are still inside the grace period. This
-   * is the "unavailable but not yet evicted" set — the state that proves the
-   * acceptance criterion that a stale agent stops being dispatchable
-   * immediately rather than only when it is finally deleted.
+   * @openapi
+   * /api/agent-watchdog/quarantine:
+   *   get:
+   *     summary: List currently-quarantined agents (Issue #379)
+   *     operationId: listAgentWatchdogQuarantine
+   *     description: >
+   *       Agents that missed a heartbeat but are still inside the grace period
+   *       — the "unavailable but not yet evicted" set.
+   *     tags: [Agents]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: Quarantined agents with silence duration
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: array
+   *                   items: { type: object }
+   *                 _meta: { type: object }
    */
   router.get("/quarantine", (_req: Request, res: Response, next: NextFunction): void => {
     try {
@@ -94,11 +140,34 @@ export function createAgentWatchdogRouter(options: AgentWatchdogRouterOptions = 
   });
 
   /**
-   * POST /api/agent-watchdog/tick
-   *
-   * Forces a detection pass instead of waiting for the next interval. Rate
-   * limited at the admin tier: it performs deletes, and an unauthenticated
-   * caller should not be able to trigger evictions on a timer.
+   * @openapi
+   * /api/agent-watchdog/tick:
+   *   post:
+   *     summary: Force an agent watchdog detection pass (Issue #379)
+   *     operationId: tickAgentWatchdog
+   *     description: >
+   *       Runs a detection pass immediately instead of waiting for the next
+   *       scheduled interval. Performs deletes, so it is rate-limited at the
+   *       admin tier. Returns 501 when the watchdog tick is not wired.
+   *     tags: [Agents]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: Tick result with quarantined, evicted and recovered counts
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     quarantined: { type: integer }
+   *                     evicted: { type: integer }
+   *                     recovered: { type: integer }
+   *                 _meta: { type: object }
+   *       501:
+   *         description: Watchdog tick is not wired in this deployment
    */
   router.post("/tick", adminLimiter.middleware, (_req: Request, res: Response, next: NextFunction): void => {
     if (!options.tick) {

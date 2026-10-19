@@ -173,6 +173,8 @@ describe('Idempotency Middleware (#658)', () => {
     const second = await post('idem-key-2');
     expect(second.status).toBe(201);
     expect(second.body.taskId).toBe('task_1');
+    expect(second.headers['x-idempotent-replay']).toBe('true');
+    expect(first.headers['x-idempotent-replay']).toBeUndefined();
     // The handler must not run a second time.
     expect(handlerCallCount).toBe(1);
   });
@@ -196,7 +198,7 @@ describe('Idempotency Middleware (#658)', () => {
     const res = await post('in-flight-key', WALLET_A);
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('CONFLICT');
+    expect(res.body.error.code).toBe('REQUEST_IN_PROGRESS');
     expect(res.headers['retry-after']).toBeDefined();
     expect(handlerCallCount).toBe(0);
   });
@@ -312,8 +314,8 @@ describe('Idempotency Middleware (#658)', () => {
     expect(handlerCallCount).toBe(1);
   });
 
-  it('exposes a documented limit of 255 characters', () => {
-    expect(IDEMPOTENCY_KEY_MAX_LENGTH).toBe(255);
+  it('exposes a documented limit of 128 characters', () => {
+    expect(IDEMPOTENCY_KEY_MAX_LENGTH).toBe(128);
   });
 
   it('does not reserve a slot when the store throws', async () => {

@@ -12,7 +12,9 @@ import { rateLimitMiddleware } from "../../middleware/rateLimit";
 import { idempotencyMiddleware } from "../../middleware/idempotency";
 import { currentTraceId } from "../../../services/traceContext";
 import { assertDailyTaskQuota } from "../../../services/quota/dailyQuota";
-import { NotFoundError, ForbiddenError, ConflictError, ValidationError } from "../../../errors";
+import { walletQuotaCheck } from "../../middleware/quotaCheck";
+import { getWalletQuotaStatus } from "../../../services/quota/walletQuota";
+import { NotFoundError, ForbiddenError, ConflictError, ValidationError, UnauthorizedError } from "../../../errors";
 import { taskStreamUrl } from "../stream";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../../queue";
@@ -51,7 +53,7 @@ export function createV2TasksRouter(
   const jobQueue = queue ?? getGlobalJobQueue();
 
   // POST /api/tasks — v2 format with enhanced response, idempotent
-  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), walletQuotaCheck, (req: Request, res: Response, next: NextFunction): void => {
     try {
     const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
     const walletPublicKey: string =
@@ -204,6 +206,22 @@ export function createV2TasksRouter(
         apiVersion: res.locals.apiVersion || "2.0",
       },
     });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  tasksRouter.get("/quota", (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const wallet = (req.headers["walletpublickey"] as string | undefined)?.trim();
+      if (!wallet) {
+        throw new UnauthorizedError(
+          "walletpublickey header is required",
+          undefined,
+          res.locals.correlationId as string | undefined,
+        );
+      }
+      res.json(getWalletQuotaStatus(wallet));
     } catch (err) {
       next(err);
     }

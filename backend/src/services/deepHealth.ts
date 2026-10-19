@@ -18,6 +18,7 @@
  */
 import type Database from 'better-sqlite3';
 import { summarizeCircuitBreakers, type CircuitBreakerSummary } from './circuitBreaker.js';
+import { getDatabaseMetrics, type DatabaseMetricsSnapshot } from '../db/metrics.js';
 
 export type DependencyStatus = 'ok' | 'degraded' | 'fail';
 
@@ -38,6 +39,8 @@ export interface DeepHealthReport {
   /** Names of non-`ok` dependencies, split by severity. */
   failing: string[];
   degraded: string[];
+  /** Pool utilisation and p99 query latency per SQLite database (#807). */
+  db: DatabaseMetricsSnapshot;
 }
 
 export interface QueueStats {
@@ -59,6 +62,7 @@ export interface DeepHealthDeps {
   getWriteDb?: () => Database.Database | Promise<Database.Database>;
   isReadOnly?: () => boolean | Promise<boolean>;
   getQueueStats?: () => QueueStats | Promise<QueueStats>;
+  getDatabaseMetrics?: () => DatabaseMetricsSnapshot;
 }
 
 /** Breaker names, as registered by the Venice client and PaymentService. */
@@ -318,6 +322,10 @@ async function defaultQueueStats(): Promise<QueueStats> {
   return createJobStore(getJobDb()).getStats();
 }
 
+function defaultDatabaseMetrics(): DatabaseMetricsSnapshot {
+  return getDatabaseMetrics();
+}
+
 export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHealthReport> {
   const deps: Required<DeepHealthDeps> = {
     fetchFn: (...args) => fetch(...args),
@@ -326,6 +334,7 @@ export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHea
     getWriteDb: defaultWriteDb,
     isReadOnly: defaultIsReadOnly,
     getQueueStats: defaultQueueStats,
+    getDatabaseMetrics: defaultDatabaseMetrics,
     ...input,
   };
 
@@ -354,5 +363,6 @@ export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHea
     dependencies,
     failing,
     degraded,
+    db: deps.getDatabaseMetrics(),
   };
 }

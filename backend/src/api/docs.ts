@@ -210,9 +210,10 @@ List endpoints support standardized query parameters:
         IdParam: generateOpenApiSchema(IdParamSchema),
         TaskStatus: {
           type: "string",
-          enum: ["queued", "running", "completed", "failed", "cancelled"],
+          enum: ["queued", "running", "completed", "failed", "cancelled", "payment_failed"],
           example: "queued",
-          description: "Current lifecycle state of the task orchestration.",
+          description:
+            "Current lifecycle state of the task orchestration. `payment_failed` means every node completed but an escrow release failed.",
         },
         NodeStatus: {
           type: "string",
@@ -575,6 +576,26 @@ List endpoints support standardized query parameters:
             updatedAt: { type: "string", format: "date-time" },
           },
         },
+        // Operator-facing dead-letter triage shape (issue #802).
+        DeadLetterEntry: {
+          type: "object",
+          required: ["jobId", "taskId", "failureReason", "failedAt", "retryCount"],
+          properties: {
+            jobId: { type: "string", example: "job_98fe76dc54ba" },
+            taskId: { type: "string", example: "task_ab12cd34ef56" },
+            failureReason: {
+              type: "string",
+              example: "max attempts exceeded (3/3): upstream timeout",
+            },
+            failedAt: { type: "string", format: "date-time" },
+            retryCount: { type: "integer", example: 3 },
+            originalPayload: {
+              type: "object",
+              description: "Payload the job was originally enqueued with, for triage.",
+              additionalProperties: true,
+            },
+          },
+        },
         QueueStatusResponse: {
           type: "object",
           required: ["status", "stats"],
@@ -846,6 +867,61 @@ List endpoints support standardized query parameters:
             discrepancies: {
               type: "array",
               items: { $ref: "#/components/schemas/ReconciliationDiscrepancy" },
+            },
+          },
+        },
+        ReconciliationDrift: {
+          type: "object",
+          description: "A payment drift awaiting manual operator review (Issue #495).",
+          required: [
+            "id",
+            "driftType",
+            "balanceId",
+            "description",
+            "severity",
+            "recommendedAction",
+            "detectedAt",
+            "lastSeenAt",
+            "occurrences",
+            "acknowledged",
+          ],
+          properties: {
+            id: { type: "string", example: "task_ab12cd34ef56:node_research_1" },
+            driftType: {
+              type: "string",
+              enum: [
+                "orphaned_locked",
+                "missing_release_tx",
+                "release_unconfirmed",
+                "expired_escrow",
+                "missing_local",
+                "amount_mismatch",
+              ],
+              example: "orphaned_locked",
+            },
+            balanceId: { type: "string", example: "00000000abc123..." },
+            taskId: { type: "string", example: "task_ab12cd34ef56" },
+            nodeId: { type: "string", example: "node_research_1" },
+            description: { type: "string", example: "DB says locked but no on-chain claimable balance exists" },
+            severity: { type: "string", enum: ["info", "warning", "critical"], example: "warning" },
+            recommendedAction: {
+              type: "string",
+              enum: ["mark_orphaned", "backfill_tx_hash", "requeue_release", "refund_escrow", "manual_review"],
+              example: "mark_orphaned",
+            },
+            detectedAt: { type: "string", format: "date-time", example: "2026-08-25T17:40:00.000Z" },
+            lastSeenAt: { type: "string", format: "date-time", example: "2026-08-25T18:40:00.000Z" },
+            occurrences: { type: "integer", example: 3 },
+            acknowledged: { type: "boolean", example: false },
+            resolution: {
+              type: "object",
+              description: "Operator resolution patch applied to the payment record.",
+              properties: {
+                status: { type: "string", enum: ["released", "refunded", "orphaned"], example: "released" },
+                txHash: { type: "string", example: "abc123def456..." },
+                at: { type: "string", format: "date-time", example: "2026-08-25T19:00:00.000Z" },
+                by: { type: "string", example: "operator" },
+              },
             },
           },
         },

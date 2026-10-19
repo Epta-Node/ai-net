@@ -70,10 +70,13 @@ const envSchema = z.object({
   VENICE_PROVIDER_MAX_RETRIES: z.coerce.number().int().positive().default(3),
   VENICE_FALLBACK_API_KEYS: z.string().optional(),
   VENICE_FALLBACK_BASE_URLS: z.string().optional(),
-  /** How long a Venice key that returned 429 is skipped by the rotation (issue #741). */
+  /**
+   * Cooldown applied to a Venice key whose recent error rate crosses
+   * `VENICE_KEY_ERROR_RATE_THRESHOLD` (#806). `VENICE_API_KEY_1..10` are read
+   * directly by the key pool, so they are not declared here.
+   */
   VENICE_KEY_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
-  /** Upper bound for the escalated quota cooldown after repeated 429s. */
-  VENICE_KEY_COOLDOWN_MAX_MS: z.coerce.number().int().positive().default(900_000),
+  VENICE_KEY_ERROR_RATE_THRESHOLD: z.coerce.number().min(0).max(1).default(0.2),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default("./data/ai-net.db"),
   DB_MIGRATIONS_DIR: z.string().optional(),
@@ -90,6 +93,23 @@ const envSchema = z.object({
   HEALTH_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
   /** Job queue depth at which `/health/deep` reports the queue as degraded. */
   HEALTH_QUEUE_DEPTH_WARN: z.coerce.number().int().positive().default(1_000),
+
+  // ── Distributed tracing / OpenTelemetry export (issue #856) ────────────────
+  /**
+   * Fraction of spans sampled into in-memory traces, in `[0, 1]`. `1` records
+   * every span, `0` records none — error spans (`status === 'failed'`) are
+   * always recorded regardless of rate, so failures never disappear.
+   */
+  OTEL_SAMPLING_RATE: z.coerce.number().min(0).max(1).default(1),
+  /**
+   * When set, every ended span is exported as OTLP/HTTP JSON to
+   * `${OTEL_EXPORTER_ENDPOINT}/v1/traces` (an OpenTelemetry Collector).
+   * An empty value means "unset", matching the other optional keys.
+   */
+  OTEL_EXPORTER_ENDPOINT: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.string().url().optional(),
+  ),
 
   CACHE_DRIVER: z.enum(["lru", "redis"]).default("lru"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
@@ -111,6 +131,30 @@ const envSchema = z.object({
   RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(20),
   DAILY_TASK_LIMIT_PER_WALLET: z.coerce.number().int().min(0).default(100),
 
+  // ── Per-wallet abuse-control quota (issue #803) ─────────────────────────────
+  /**
+   * Maximum task submissions a single wallet may have *accepted* in the
+   * trailing 24 hours. The 51st submission is rejected with 429 QUOTA_EXCEEDED.
+   * `0` disables the submission count check (token limits still apply).
+   */
+  MAX_DAILY_TASKS_PER_WALLET: z.coerce.number().int().min(0).default(50),
+  /**
+   * Maximum estimated Venice tokens a single wallet may consume in the
+   * trailing 24 hours (approximated as `ceil(chars / 4)` at submit time).
+   * `0` disables the token budget check.
+   */
+  MAX_DAILY_VENICE_TOKENS_PER_WALLET: z.coerce.number().int().min(0).default(100_000),
+  /**
+   * Hard prompt-length ceiling enforced by the quota layer before a request
+   * reaches the handler. When unset, `MAX_PROMPT_LENGTH` is used so the quota
+   * check and the legacy schema validation agree on one boundary.
+   * (An empty value in `.env` means "unset", matching the other optional keys.)
+   */
+  MAX_PROMPT_CHARS_PER_REQUEST: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.coerce.number().int().positive().optional(),
+  ),
+
   TASK_TOKEN_BUDGET: z.coerce.number().int().positive().default(200_000),
   LLM_MAX_TOKENS_PER_CALL: z.coerce.number().int().positive().default(8_192),
   LLM_MAX_PROMPT_TOKENS: z.coerce.number().int().positive().default(16_000),
@@ -126,7 +170,8 @@ const envSchema = z.object({
   HEARTBEAT_STALE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(5),
   AGENT_OFFLINE_DELETE_HOURS: z.coerce.number().int().positive().default(24),
 
-  AGENT_WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  /** Watchdog pass interval. Floor of 10s so a typo cannot turn the scan into a busy loop (#804). */
+  AGENT_WATCHDOG_INTERVAL_MS: z.coerce.number().int().min(10_000).default(60_000),
   AGENT_WATCHDOG_GRACE_MINUTES: z.coerce.number().int().positive().default(10),
 
   RECONCILIATION_WEBHOOK_URL: z.string().url().optional(),
@@ -154,6 +199,12 @@ const envSchema = z.object({
   /** Maximum release transactions verified against Horizon in a single run. */
   RECONCILIATION_MAX_TX_LOOKUPS: z.coerce.number().int().positive().default(200),
 
+  // ── Drift alerting thresholds (issue #811) ──────────────────────────────────
+  /** Amount drift (percent of the expected amount) that raises a `warning` alert. */
+  RECONCILIATION_WARNING_DRIFT_PERCENT: z.coerce.number().nonnegative().default(1.0),
+  /** Amount drift (percent of the expected amount) that raises a `critical` alert. */
+  RECONCILIATION_CRITICAL_DRIFT_PERCENT: z.coerce.number().nonnegative().default(5.0),
+
   COMPRESSION_THRESHOLD: z.coerce.number().int().min(0).default(1024),
   COMPRESSION_LEVEL: z.coerce.number().int().min(1).max(9).default(6),
   COMPRESSION_ENABLE_BROTLI: z
@@ -178,6 +229,17 @@ const envSchema = z.object({
     .default("true"),
   DB_BACKUP_DIR: z.string().default("./data/backups"),
   DB_BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(5),
+  /**
+   * Passphrase for at-rest database backups (issue #747). Scrypt-derived into
+   * an AES-256-GCM key; every backup is encrypted and paired with a checksum
+   * manifest. When unset the backup pipeline fails closed rather than writing
+   * plaintext — set it in every environment that takes backups.
+   * (An empty value in `.env` means "unset", matching the other optional keys.)
+   */
+  DB_BACKUP_ENCRYPTION_KEY: z.preprocess(
+    (v) => (v === "" ? undefined : v),
+    z.string().min(1).optional(),
+  ),
   DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().int().nonnegative().default(100),
   ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
@@ -191,6 +253,15 @@ const envSchema = z.object({
     .enum(["true", "false"])
     .transform((v) => v === "true")
     .default("true"),
+  /**
+   * Days an archived event stays in the SQLite archive table before its whole
+   * UTC day moves to a cold file (issue #809).
+   */
+  EVENT_HOT_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  /** Root directory for cold, gzip-compressed daily event archives (issue #809). */
+  EVENT_ARCHIVE_DIR: z.string().default("./data/archive"),
+  /** Days a daily cold archive is kept before it is purged (issue #809). */
+  EVENT_COLD_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 
   // ── Idempotency store (Issue #657) ───────────────────────────────────────────
   /** How long completed idempotency keys are retained for replay. Default: 24 h. */
@@ -233,6 +304,10 @@ const envSchema = z.object({
   // ── SSE task event stream (#751) ────────────────────────────────────────────
   SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(5),
   SSE_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
+  /** Socket write-buffer size above which task events are dropped for a slow client (#813). */
+  SSE_HIGH_WATER_MARK_BYTES: z.coerce.number().int().positive().default(65_536),
+  /** Close a stream with `stream_timeout` after this long without a successful write (#813). */
+  SSE_STALE_CONNECTION_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
 
   METRICS_CACHE_TTL_MS: z.coerce.number().int().positive().default(5_000),
   METRICS_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
@@ -262,6 +337,12 @@ const envSchema = z.object({
   QUALITY_PERCENTILE_ENABLED: z.enum(["true", "false"]).transform((v) => v === "true").default("false"),
   /** Minimum samples required for percentile calculation. Default: 10 */
   QUALITY_PERCENTILE_MIN_SAMPLES: z.coerce.number().int().positive().default(10),
+  /** Cache quality scores by output content hash, skipping repeat scoring work. Default: true (#812) */
+  QUALITY_SCORER_CACHE_ENABLED: z.enum(["true", "false"]).transform((v) => v === "true").default("true"),
+  /** How long a cached quality score stays valid, in ms. Default: 1 hour (#812) */
+  QUALITY_SCORER_CACHE_TTL_MS: z.coerce.number().int().positive().default(3_600_000),
+  /** Maximum cached quality scores before LRU eviction. Default: 500 (#812) */
+  QUALITY_SCORER_CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(500),
 
   // ── Admin Control Configuration ─────────────────────────────────────────────
   /** Enable read-only mode for the API. Default: false */
@@ -274,6 +355,12 @@ const envSchema = z.object({
   AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
   /** Directory for admin backups. Default: ./data/backups/admin */
   ADMIN_BACKUP_DIR: z.string().default("./data/backups/admin"),
+
+  // ── Database observability (#807) ───────────────────────────────────────────
+  /** Comma-separated query-latency histogram bounds in milliseconds. Default: 1,5,10,50,100,500,1000 */
+  DB_LATENCY_BUCKETS: z.string().optional(),
+  /** Statements at or above this duration are logged as `slow_query`. Default: 200 */
+  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(200),
 
   // ── Agent ownership proof (#557, #558) ───────────────────────────────────────
   /**
@@ -351,6 +438,9 @@ function withRuntimeDefaults(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
           // path to createEventStore() instead.
           EVENT_STORE_PATH: ":memory:",
           VENICE_API_KEY: "test-venice-key",
+          // Deterministic key so backup round-trips are testable without ever
+          // falling back to plaintext backups (issue #747 fails closed).
+          DB_BACKUP_ENCRYPTION_KEY: "test-backup-encryption-key-0123456789",
           LOG_LEVEL: "silent",
           AUTH_JWT_SECRET: TEST_FALLBACK_JWT_SECRET,
         }
@@ -407,6 +497,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         },
       ]);
     }
+  }
+
+  // Fail closed on CORS (#810). Origins are matched exactly, so a wildcard or
+  // `null` entry can never match a real origin and only signals a
+  // misconfiguration. Production must also name its origins explicitly rather
+  // than silently inheriting the localhost default.
+  const originEntries = result.data.ALLOWED_ORIGINS.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  const invalidOrigin = originEntries.find((origin) => origin.includes("*") || origin === "null");
+  if (invalidOrigin) {
+    throw new ConfigValidationError([
+      {
+        code: z.ZodIssueCode.custom,
+        path: ["ALLOWED_ORIGINS"],
+        message: `ALLOWED_ORIGINS entry "${invalidOrigin}" is not allowed; list each origin explicitly (no wildcards, no "null")`,
+      },
+    ]);
+  }
+  if (nodeEnv === "production" && (!env.ALLOWED_ORIGINS?.trim() || originEntries.length === 0)) {
+    throw new ConfigValidationError([
+      {
+        code: z.ZodIssueCode.custom,
+        path: ["ALLOWED_ORIGINS"],
+        message: "ALLOWED_ORIGINS is required in production and must list at least one origin",
+      },
+    ]);
   }
 
   // Warn in development if using default secret

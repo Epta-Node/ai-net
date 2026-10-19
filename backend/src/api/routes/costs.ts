@@ -120,9 +120,55 @@ export function createCostRouter(): Router {
   const router = Router();
 
   /**
-   * GET /api/tasks/:id/cost
-   *
-   * Wallet-scoped: only the owner of the task may read its cost.
+   * @openapi
+   * /api/tasks/{id}/cost:
+   *   get:
+   *     summary: Get one task's cost breakdown (Issue #390)
+   *     operationId: getTaskCost
+   *     description: >
+   *       Budget snapshot plus per-node token/cost breakdown for a single task.
+   *       Wallet-scoped: the caller must present the wallet key that owns the
+   *       task, enforced identically to `GET /api/tasks/{id}`.
+   *     tags: [Tasks]
+   *     security:
+   *       - WalletAuth: []
+   *     parameters:
+   *       - in: path
+   *         name: id
+   *         required: true
+   *         schema: { type: string }
+   *         description: Task identifier
+   *         example: "task_ab12cd34ef56"
+   *     responses:
+   *       200:
+   *         description: Task cost snapshot in the v2 `{ data, _meta }` envelope
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     taskId: { type: string }
+   *                     budgetTokens: { type: integer }
+   *                     usedTokens: { type: integer }
+   *                     remainingTokens: { type: integer }
+   *                     costUsd: { type: number }
+   *                     currency: { type: string, example: USD }
+   *                     exceeded: { type: boolean }
+   *                     calls: { type: integer }
+   *                     inProgress: { type: boolean }
+   *                     agents:
+   *                       type: array
+   *                       items: { type: object }
+   *                 _meta: { type: object }
+   *       401:
+   *         description: Missing or invalid wallet key
+   *       403:
+   *         description: Wallet key does not own the task
+   *       404:
+   *         description: Task not found
    */
   router.get("/tasks/:id/cost", (req: Request, res: Response, next: NextFunction): void => {
     try {
@@ -173,10 +219,63 @@ export function createCostRouter(): Router {
   });
 
   /**
-   * GET /api/costs — platform-wide totals, per-agent rollup, recent tasks.
-   *
-   * Deliberately not wallet-scoped: this is the operator/finance view that
-   * makes "what are we spending" answerable without summing every task by hand.
+   * @openapi
+   * /api/costs:
+   *   get:
+   *     summary: Platform-wide cost totals, per-agent rollup and breakdown (Issues #390/#750)
+   *     operationId: getPlatformCosts
+   *     description: >
+   *       Operator/finance view: aggregate spend, per-agent rollup, recent task
+   *       costs and an agent/model/day breakdown filterable with `agentId`,
+   *       `agentType`, `model` and `day` (YYYY-MM-DD). Deliberately not
+   *       wallet-scoped.
+   *     tags: [Tasks]
+   *     security: []
+   *     parameters:
+   *       - in: query
+   *         name: agentLimit
+   *         schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+   *       - in: query
+   *         name: recentLimit
+   *         schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+   *       - in: query
+   *         name: agentId
+   *         schema: { type: string }
+   *       - in: query
+   *         name: agentType
+   *         schema: { type: string }
+   *       - in: query
+   *         name: model
+   *         schema: { type: string }
+   *       - in: query
+   *         name: day
+   *         schema: { type: string, format: date }
+   *         description: Filter breakdown to a single day (YYYY-MM-DD)
+   *         example: "2026-08-25"
+   *       - in: query
+   *         name: breakdownLimit
+   *         schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+   *     responses:
+   *       200:
+   *         description: Platform cost totals in the v2 `{ data, _meta }` envelope
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 data:
+   *                   type: object
+   *                   properties:
+   *                     totals: { type: object }
+   *                     byAgent: { type: array, items: { type: object } }
+   *                     breakdown: { type: array, items: { type: object } }
+   *                     recent: { type: array, items: { type: object } }
+   *                 _meta: { type: object }
+   *       400:
+   *         description: Invalid query parameters
+   *         content:
+   *           application/json:
+   *             schema: { $ref: '#/components/schemas/ValidationError' }
    */
   router.get("/costs", (req: Request, res: Response, next: NextFunction): void => {
     try {

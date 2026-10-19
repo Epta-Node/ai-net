@@ -21,6 +21,7 @@ export function getTaskPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "tasks.db");
     _taskPool = createPool({
       filePath,
+      name: "tasks",
       min: 1,
       max: 4,
       acquireTimeoutMs: 5_000,

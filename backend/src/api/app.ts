@@ -52,6 +52,7 @@ import { getOpenapiJson, getOpenapiYaml, openapiSpec, swaggerUiOptions } from ".
 import { createCostRouter } from "./routes/costs";
 import { createAgentWatchdogRouter } from "./routes/agentWatchdog";
 import { createAgentWatchdog } from "../services/agentWatchdog";
+import { invalidateAgentsCache } from "../cache/invalidation";
 import { flushActiveCosts, setPricingOverrides } from "../services/budget";
 import { createAdminRouter, createAdminQueueRouter } from "./routes/admin";
 import { createFlagsRouter } from "./routes/flags";
@@ -258,6 +259,8 @@ export function createApp(opts: AppOptions = {}): {
   const watchdog = createAgentWatchdog({
     intervalMs: config.AGENT_WATCHDOG_INTERVAL_MS,
     gracePeriodMinutes: config.AGENT_WATCHDOG_GRACE_MINUTES,
+    // Evicted agents must not be served from cached listings (#804).
+    invalidateCache: () => invalidateAgentsCache(),
     onEvict: registryLookup
       ? async (agent) => {
           const stillRegistered = registryLookup.getAgent(agent.id) !== undefined;
@@ -314,10 +317,49 @@ export function createApp(opts: AppOptions = {}): {
     createAgentWatchdogRouter({ tick: () => watchdog.tick() }),
   );
 
+  /**
+   * @openapi
+   * /openapi.json:
+   *   get:
+   *     summary: Machine-readable OpenAPI specification (JSON)
+   *     operationId: getOpenapiJson
+   *     description: >
+   *       Serves the same OpenAPI 3.1.0 document that backs /api-docs, in
+   *       JSON form, for codegen and client tooling. Public: the spec is not
+   *       operational data, so it opts out of the spec-wide WalletAuth default.
+   *     tags: [System]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: OpenAPI 3.1.0 specification
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   */
   app.get("/openapi.json", (_req: Request, res: Response) => {
     res.json(getOpenapiJson());
   });
 
+  /**
+   * @openapi
+   * /openapi.yaml:
+   *   get:
+   *     summary: Machine-readable OpenAPI specification (YAML)
+   *     operationId: getOpenapiYaml
+   *     description: >
+   *       The OpenAPI 3.1.0 document in YAML form. Semantically equivalent to
+   *       `GET /openapi.json`. Public: opts out of the spec-wide WalletAuth default.
+   *     tags: [System]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: OpenAPI 3.1.0 specification (YAML)
+   *         content:
+   *           text/yaml:
+   *             schema:
+   *               type: string
+   */
   app.get("/openapi.yaml", (_req: Request, res: Response) => {
     res.type("text/yaml").send(getOpenapiYaml());
   });
@@ -354,7 +396,11 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Admin Queue routes ─────────────────────────────────────────────────────
   app.use("/api/admin/queue", adminLimiter.middleware, createAdminQueueRouter(jobQueue));
-  app.use("/api/admin", adminLimiter.middleware, createAdminRouter({ queue: jobQueue, reconciliation: opts.reconciliation }));
+  app.use(
+    "/api/admin",
+    adminLimiter.middleware,
+    createAdminRouter({ queue: jobQueue, reconciliation: opts.reconciliation, watchdog }),
+  );
 
   // ── Feature-flag admin routes (#425) ───────────────────────────────────────
   app.use("/api/admin/flags", createFlagsRouter());

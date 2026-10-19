@@ -833,7 +833,7 @@ describe("Background Job Queue & Worker", () => {
     });
 
     it("enqueueUnique throws DuplicateJobError when a pending job already exists", async () => {
-      const { DuplicateJobError } = await import("./index");
+      const { DuplicateJobError } = await import("./index.js");
       const queue = new JobQueue(store);
       queue.enqueueUnique({ taskId: "task_unique_2" });
 
@@ -841,7 +841,7 @@ describe("Background Job Queue & Worker", () => {
     });
 
     it("enqueueUnique succeeds after the prior job completes (terminal state allows re-submission)", async () => {
-      const { DuplicateJobError } = await import("./index");
+      const { DuplicateJobError } = await import("./index.js");
       const queue = new JobQueue(store);
       const job = queue.enqueueUnique({ taskId: "task_unique_3" });
 
@@ -853,7 +853,7 @@ describe("Background Job Queue & Worker", () => {
     });
 
     it("DuplicateJobError carries the offending taskId", async () => {
-      const { DuplicateJobError } = await import("./index");
+      const { DuplicateJobError } = await import("./index.js");
       const queue = new JobQueue(store);
       queue.enqueueUnique({ taskId: "task_unique_4" });
 

@@ -1,0 +1,15 @@
+# Grafana datasource provisioning (Issue #853).
+# The uid `prometheus` must match the datasource references used by
+# backend/grafana/ai-net-dashboard.json.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    uid: prometheus
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s

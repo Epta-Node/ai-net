@@ -62,7 +62,7 @@ describe("api/schemas barrel", () => {
 
   it("re-exports six of the seven schemas its modules define", () => {
     const defined = [...Object.values(commonSchema), ...Object.values(taskSchema), ...Object.values(agentSchema)].filter(
-      (value): value is { safeParse: unknown } => typeof (value as { safeParse?: unknown })?.safeParse === "function",
+      (value: unknown): value is { safeParse: unknown } => typeof (value as { safeParse?: unknown })?.safeParse === "function",
     );
 
     expect(defined).toHaveLength(7);

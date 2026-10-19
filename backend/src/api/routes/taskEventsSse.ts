@@ -4,6 +4,13 @@ import { getTask as defaultGetTask } from "../../coordinator/taskStore";
 import { getConfig } from "../../config";
 import { AppError, ForbiddenError, NotFoundError, RateLimitError } from "../../errors";
 import { isEnabled } from "../../services/featureFlags";
+import {
+  recordSseConnectionClosed,
+  recordSseConnectionOpened,
+  recordSseConnectionTimedOut,
+  recordSseEventDropped,
+  recordSseEventSent,
+} from "../../services/sseMetrics";
 import { createLogger } from "../../utils/logger";
 import type { Task } from "../../types/task";
 import { toWireEvent } from "./stream";
@@ -22,6 +29,16 @@ export interface TaskEventsSseOptions {
   heartbeatIntervalMs?: number;
   /** Concurrent streams allowed per client IP. Default `SSE_MAX_CONNECTIONS_PER_CLIENT`. */
   maxConnectionsPerClient?: number;
+  /**
+   * Socket write-buffer size above which events are dropped for a slow client.
+   * Default `SSE_HIGH_WATER_MARK_BYTES` (#813).
+   */
+  highWaterMarkBytes?: number;
+  /**
+   * Close the stream with `stream_timeout` after this long without a successful
+   * write. Default `SSE_STALE_CONNECTION_TIMEOUT_MS` (#813).
+   */
+  staleTimeoutMs?: number;
 }
 
 /**
@@ -47,6 +64,9 @@ function parseResumeCursor(req: Request): number | undefined {
  *       Each message carries `id: <seq>`, so `EventSource` resumes through the
  *       `Last-Event-ID` header on reconnect. A `: keep-alive` comment is sent
  *       periodically and the stream ends after `task_completed` / `task_failed`.
+ *       A client that stops accepting writes stops receiving events once its
+ *       buffer passes the high-water mark, and is closed with a `stream_timeout`
+ *       event after `SSE_STALE_CONNECTION_TIMEOUT_MS` without progress.
  *       Returns 404 while the `streaming_responses` feature flag is off.
  *     tags: [Tasks]
  *     parameters:
@@ -99,6 +119,8 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
       const maxConnections =
         options.maxConnectionsPerClient ?? cfg.SSE_MAX_CONNECTIONS_PER_CLIENT;
       const heartbeatMs = options.heartbeatIntervalMs ?? cfg.SSE_HEARTBEAT_INTERVAL_MS;
+      const highWaterMarkBytes = options.highWaterMarkBytes ?? cfg.SSE_HIGH_WATER_MARK_BYTES;
+      const staleTimeoutMs = options.staleTimeoutMs ?? cfg.SSE_STALE_CONNECTION_TIMEOUT_MS;
 
       const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
       const open = connectionsByClient.get(clientIp) ?? 0;
@@ -107,6 +129,7 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
         throw new RateLimitError("Too many concurrent event streams");
       }
       connectionsByClient.set(clientIp, open + 1);
+      recordSseConnectionOpened();
 
       res.status(200).set({
         "Content-Type": "text/event-stream",
@@ -118,27 +141,70 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
       res.flushHeaders();
 
       let closed = false;
+      // Assigned after `cleanup` is defined so an early close can call it;
+      // `const` would put the reference in the temporal dead zone.
+      // eslint-disable-next-line prefer-const
       let unsubscribe: (() => void) | undefined;
-      const heartbeat = setInterval(() => {
-        if (!closed) res.write(": keep-alive\n\n");
-      }, heartbeatMs);
+      // Time of the last write the socket accepted (or drained). A client that
+      // stops reading stops accepting writes, so this stops advancing (#813).
+      let lastProgressAt = Date.now();
+      res.on("drain", () => {
+        lastProgressAt = Date.now();
+      });
+      // Timers are collected here so `cleanup` can clear them without referencing
+      // the heartbeat interval before it exists.
+      const timers: NodeJS.Timeout[] = [];
 
       const cleanup = (): void => {
         if (closed) return;
         closed = true;
-        clearInterval(heartbeat);
+        for (const timer of timers) clearInterval(timer);
         unsubscribe?.();
+        recordSseConnectionClosed();
         const remaining = (connectionsByClient.get(clientIp) ?? 1) - 1;
         if (remaining <= 0) connectionsByClient.delete(clientIp);
         else connectionsByClient.set(clientIp, remaining);
       };
       res.on("close", cleanup);
 
+      const timeOut = (): void => {
+        if (closed) return;
+        recordSseConnectionTimedOut();
+        logger.warn({ clientIp, taskId, staleTimeoutMs }, "closing stalled SSE stream");
+        res.write(`event: stream_timeout\ndata: ${JSON.stringify({ type: "stream_timeout", taskId })}\n\n`);
+        cleanup();
+        res.end();
+      };
+
+      // Heartbeat doubles as the stall check: a successful keep-alive write
+      // counts as progress, and no progress for `staleTimeoutMs` closes the stream.
+      timers.push(
+        setInterval(() => {
+          if (closed) return;
+          if (Date.now() - lastProgressAt > staleTimeoutMs) {
+            timeOut();
+            return;
+          }
+          if (res.write(": keep-alive\n\n")) lastProgressAt = Date.now();
+        }, heartbeatMs),
+      );
+
       let finished = false;
       const deliver = (event: StoredEvent): void => {
         if (closed || finished) return;
+        // Backpressure (#813): past the high-water mark the client is not
+        // reading, so the event is dropped and counted rather than letting the
+        // socket buffer grow without bound.
+        if (res.writableLength > highWaterMarkBytes) {
+          recordSseEventDropped();
+          return;
+        }
         const wire = toWireEvent(event) as { type: string; seq: number };
-        res.write(`id: ${wire.seq}\nevent: ${wire.type}\ndata: ${JSON.stringify(wire)}\n\n`);
+        const flushed = res.write(
+          `id: ${wire.seq}\nevent: ${wire.type}\ndata: ${JSON.stringify(wire)}\n\n`,
+        );
+        recordSseEventSent();
+        if (flushed) lastProgressAt = Date.now();
         if (TERMINAL_EVENT_TYPES.has(wire.type)) {
           finished = true;
           cleanup();

@@ -133,6 +133,16 @@ export interface JobStore {
   getDeadLetterJobs(page?: number, pageSize?: number): { jobs: Job[]; total: number };
   retryDeadLetterJob(id: string): boolean;
   /**
+   * Delete dead-letter jobs whose failure happened at or before `beforeIso`.
+   *
+   * The retention cut is applied to `failedAt` (falling back to `updatedAt`
+   * for legacy rows parked before the column existed), so a purge only ever
+   * removes entries that have actually aged out.
+   *
+   * @returns the number of rows deleted.
+   */
+  purgeDeadLetters(beforeIso: string): number;
+  /**
    * Reclaim `active` jobs whose lease has lapsed — left behind by a crash or an
    * ungraceful restart — back to `pending` so they are retried.
    *
@@ -224,6 +234,11 @@ export function initJobSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_jobs_status_nextRun ON jobs (status, nextRunAt);
     CREATE INDEX IF NOT EXISTS idx_jobs_taskId ON jobs (taskId);
     CREATE INDEX IF NOT EXISTS idx_jobs_priority ON jobs (priorityNum DESC, createdAt ASC);
+    -- Dead-letter access path (#802): the list/purge scans are always
+    -- status-filtered, so the index mirrors that predicate and keeps both the
+    -- paginated inspection and the age-based purge off a full table scan.
+    CREATE INDEX IF NOT EXISTS idx_jobs_deadLetter_failedAt
+      ON jobs (failedAt) WHERE status = 'dead-letter';
   `);
 
   // Idempotent column guards for databases created before lease-based recovery
@@ -627,6 +642,29 @@ export function createJobStore(db: Database.Database): JobStore {
         .run(now, now, id);
 
       return info.changes > 0;
+    },
+
+    purgeDeadLetters(beforeIso: string): number {
+      // `failedAt` is stamped on every dead-letter move; the `updatedAt`
+      // fallback only ever matches legacy rows parked before the column
+      // existed, so an age-based purge can never skip them silently.
+      // The bound is inclusive so a `days = 0` purge (cutoff = now) is a true
+      // delete-all even for rows stamped in the same millisecond.
+      const info = db
+        .prepare(`
+          DELETE FROM jobs
+          WHERE status = 'dead-letter'
+            AND (failedAt <= ? OR (failedAt IS NULL AND updatedAt <= ?))
+        `)
+        .run(beforeIso, beforeIso);
+
+      if (info.changes > 0) {
+        logger.info(
+          { purged: info.changes, beforeIso },
+          "purged expired dead-letter jobs from the store",
+        );
+      }
+      return info.changes;
     },
 
     recoverIncompleteJobs(nowIso?: string): number {

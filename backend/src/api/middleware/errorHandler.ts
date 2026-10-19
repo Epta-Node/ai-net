@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { createLogger } from "../../utils/logger";
-import { AppError } from "../../errors";
+import { AppError, QuotaExceededError } from "../../errors";
 import { getConfig } from "../../config";
 import { HTTP_STATUS_FOR_CODE, type ErrorCode } from "../../errors/ErrorCode";
 
@@ -144,6 +144,19 @@ export function errorHandler(
       log.error({ ...logPayload, stack: err.stack }, "non-operational error");
     } else {
       log.warn(logPayload, "operational error");
+    }
+
+    // 429s that know when their budget resets advertise it, so an automated
+    // client can back off until then instead of hammering a closed window.
+    const retryAfterSeconds =
+      err instanceof QuotaExceededError
+        ? err.retryAfterSeconds
+        : typeof (err.details as { retryAfterSeconds?: unknown } | undefined)
+            ?.retryAfterSeconds === "number"
+          ? ((err.details as { retryAfterSeconds: number }).retryAfterSeconds)
+          : undefined;
+    if (err.statusCode === 429 && retryAfterSeconds !== undefined) {
+      res.setHeader("Retry-After", String(Math.max(0, Math.ceil(retryAfterSeconds))));
     }
 
     const body = buildErrorEnvelope({

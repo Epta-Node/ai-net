@@ -1,4 +1,4 @@
-declare module "@stellar/stellar-sdk" {
+declare module '@stellar/stellar-sdk' {
   export class Keypair {
     static fromSecret(secret: string): Keypair;
     static fromPublicKey(publicKey: string): Keypair;
@@ -8,12 +8,22 @@ declare module "@stellar/stellar-sdk" {
     sign(data: Buffer): Buffer;
   }
 
+  export class NotFoundError extends Error {}
+
+  export class Memo {
+    static text(text: string): Memo;
+    static hash(data: Buffer | string): Memo;
+    static id(id: string): Memo;
+    toXDRObject(): unknown;
+  }
+
   export class Server {
     constructor(serverURL: string);
     loadAccount(publicKey: string): Promise<AccountResponse>;
     submitTransaction(tx: Transaction): Promise<HorizonResponse>;
     claimableBalances(): ClaimableBalanceCallBuilder;
     transactions(): TransactionCallBuilder;
+    fetchBaseFee(): Promise<number>;
   }
 
   export namespace Horizon {
@@ -23,6 +33,7 @@ declare module "@stellar/stellar-sdk" {
       submitTransaction(tx: Transaction): Promise<HorizonResponse>;
       claimableBalances(): ClaimableBalanceCallBuilder;
       transactions(): TransactionCallBuilder;
+      fetchBaseFee(): Promise<number>;
     }
   }
 
@@ -59,8 +70,10 @@ declare module "@stellar/stellar-sdk" {
    * `released` payment really moved on-chain (issue #496).
    */
   export class TransactionCallBuilder {
+    forAccount(accountId: string): TransactionCallBuilder;
     forClaimableBalance(balanceId: string): TransactionCallBuilder;
     forSigner(accountId: string): TransactionCallBuilder;
+    order(direction: 'asc' | 'desc'): TransactionCallBuilder;
     limit(limit: number): TransactionCallBuilder;
     call(): Promise<TransactionPage>;
     transaction(hash: string): TransactionRecordBuilder;
@@ -96,6 +109,7 @@ declare module "@stellar/stellar-sdk" {
   export class TransactionBuilder {
     constructor(account: AccountResponse, options: TransactionBuilderOptions);
     addOperation(op: Operation): this;
+    addMemo(memo: Memo): this;
     setTimeout(timeout: number): this;
     build(): Transaction;
   }
@@ -105,7 +119,8 @@ declare module "@stellar/stellar-sdk" {
     networkPassphrase: string;
   }
 
-  export interface Transaction {
+  export class Transaction {
+    constructor(envelopeXdr: string, networkPassphrase?: string);
     sign(keypair: Keypair): void;
     getClaimableBalanceId(opIndex: number): string;
   }
@@ -119,6 +134,13 @@ declare module "@stellar/stellar-sdk" {
       claimants: Claimant[];
     }): Operation;
     claimClaimableBalance(opts: { balanceId: string }): Operation;
+    payment(opts: {
+      source?: string;
+      destination: string;
+      asset: Asset;
+      amount: string;
+      memo?: Memo;
+    }): Operation;
   };
 
   export class Asset {

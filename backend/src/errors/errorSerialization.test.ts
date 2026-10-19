@@ -145,7 +145,7 @@ describe("no internal detail leaks into a production response", () => {
   });
 
   it("does not expose the isOperational flag", () => {
-    const payload = new AppError("Boom", 500, "INTERNAL_ERROR").serialize(true) as Record<
+    const payload = new AppError("Boom", 500, "INTERNAL_ERROR").serialize(true) as unknown as Record<
       string,
       unknown
     >;

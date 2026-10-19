@@ -78,6 +78,25 @@ jest.mock("../src/services/tracing", () => ({
   },
 }));
 
+const mockDlq = {
+  list: jest.fn(() => ({
+    deadLetters: [
+      {
+        jobId: "job-dlq-1",
+        taskId: "task-dlq-1",
+        failureReason: "max attempts exceeded (3/3): boom",
+        failedAt: "2026-10-17T10:00:00.000Z",
+        retryCount: 3,
+        originalPayload: { taskId: "task-dlq-1" },
+      },
+    ],
+    total: 1,
+    page: 1,
+    pageSize: 50,
+  })),
+  replay: jest.fn((id: string) => id === "job-dlq-1"),
+};
+
 const mockJobQueue = {
   getStats: jest.fn(() => ({ queued: 0, active: 0, completed: 0, failed: 0, deadLetter: 0 })),
   getWorker: jest.fn(() => ({
@@ -86,6 +105,8 @@ const mockJobQueue = {
   listJobs: jest.fn(() => ({ jobs: [], total: 0, page: 1, pageSize: 50 })),
   getDeadLetterJobs: jest.fn(() => ({ jobs: [], total: 0, page: 1, pageSize: 50 })),
   retryDeadLetter: jest.fn((id: string) => id !== "not-found"),
+  getDeadLetterQueue: jest.fn(() => mockDlq),
+  purgeDeadLetters: jest.fn(() => 3),
 };
 
 jest.mock("../src/queue", () => ({
@@ -93,6 +114,15 @@ jest.mock("../src/queue", () => ({
 }));
 
 // ── Build test apps ──────────────────────────────────────────────────────────
+
+// Earlier tests in this file call jest.resetModules(), which makes subsequent
+// requires load fresh module instances. Always resolve the audit mock lazily
+// (AFTER the app under test is built) so the assertion sees the same instance
+// the route handlers call.
+function auditMock(): { recordAdminAudit: jest.Mock } {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  return require("../src/services/adminControl");
+}
 
 function buildAdminApp() {
   const { createAdminRouter } = require("../src/api/routes/admin");
@@ -349,6 +379,86 @@ describe("Admin endpoint functionality", () => {
         .set("X-Admin-API-Key", ADMIN_KEY);
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+    });
+  });
+
+  describe("Dead-letter queue routes (issue #802)", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+    });
+
+    it("GET /dlq lists parked jobs", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .get("/api/admin/dlq")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        total: 1,
+        page: 1,
+        deadLetters: [expect.objectContaining({ jobId: "job-dlq-1", taskId: "task-dlq-1" })],
+      });
+    });
+
+    it("GET /dlq rejects an invalid page size", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .get("/api/admin/dlq?pageSize=9999")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+      expect(res.status).toBe(400);
+    });
+
+    it("POST /dlq/:jobId/replay requeues a parked job with 202", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .post("/api/admin/dlq/job-dlq-1/replay")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+
+      expect(res.status).toBe(202);
+      expect(res.body).toMatchObject({ success: true, status: "requeued", jobId: "job-dlq-1" });
+      expect(mockDlq.replay).toHaveBeenCalledWith("job-dlq-1");
+      expect(auditMock().recordAdminAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "queue.dlq.replay", target: "job-dlq-1" }),
+      );
+    });
+
+    it("POST /dlq/:jobId/replay returns 404 when the job is not parked", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .post("/api/admin/dlq/job-elsewhere/replay")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+      expect(res.status).toBe(404);
+    });
+
+    it("DELETE /dlq purges with the requested retention and audits it", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .delete("/api/admin/dlq?days=7")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ success: true, purged: 3, days: 7 });
+      expect(mockJobQueue.purgeDeadLetters).toHaveBeenCalledWith(7);
+      expect(auditMock().recordAdminAudit).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "queue.dlq.purge" }),
+      );
+    });
+
+    it("DELETE /dlq without days purges everything", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app).delete("/api/admin/dlq").set("X-Admin-API-Key", ADMIN_KEY);
+
+      expect(res.status).toBe(200);
+      expect(mockJobQueue.purgeDeadLetters).toHaveBeenCalledWith(0);
+    });
+
+    it("rejects an out-of-range days parameter", async () => {
+      const app = buildAdminQueueApp();
+      const res = await request(app)
+        .delete("/api/admin/dlq?days=-1")
+        .set("X-Admin-API-Key", ADMIN_KEY);
+      expect(res.status).toBe(400);
     });
   });
 });

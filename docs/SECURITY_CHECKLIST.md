@@ -61,6 +61,70 @@ Unchecked items must have a tracked issue with owner and ETA.
 - [ ] **C4** — Test coverage >= 80% for new code
 - [ ] **C5** — No new `console.log` or `debug` statements in committed code
 
+## Automated Controls (Issue #854)
+
+These checks run on every PR/push without human action. Verify the linked
+workflow is still present and green before release:
+
+| Control | Workflow | What it enforces |
+|---|---|---|
+| Dependency audit (backend, frontend) | `.github/workflows/ci.yml` → `security-audit` | `npm audit --audit-level=high` fails the job on any high/critical advisory |
+| Secret scanning | `.github/workflows/ci.yml` → `secret-scan` | TruffleHog scans the full git history (base = default branch, head = HEAD) for committed credentials |
+| Container CVE scanning | `.github/workflows/ci.yml` → `container-scan` | Trivy scans the built backend image; HIGH/CRITICAL CVEs fail the job |
+| Static analysis (JS/TS + Rust) | `.github/workflows/codeql.yml` | CodeQL on push/PR to main + nightly schedule; results land in the Security tab |
+| Rust dependency audit | `.github/workflows/smart-contracts.yml` → `dependency-audit` | `cargo audit --locked` + `cargo deny` on every smart-contracts change |
+| Fault injection suite | `tests/e2e/fault-injection.test.ts` (`npm run test:fault`) | Agent crash, capability outage, payment failure, Horizon outage, drift repair, SSE replay, idempotency |
+| Full quality gate | `npm run gate` | format + lint + typecheck + coverage thresholds + i18n parity + env validation |
+
+## Manual Review Checklist — Soroban Contracts
+
+Automated scans cannot reason about on-chain authorization semantics. Before
+any contract release, a human must confirm **every** invariant:
+
+- [ ] **M1** — Every state-mutating entry point calls `require_auth()` for the
+      exact address that owns the mutation (no shared/pooled authorities).
+- [ ] **M2** — No `unwrap()`/`expect()` on external input; all fallible
+      arithmetic uses checked ops (`checked_add`, `checked_mul`) or
+      `try_into()` with a contract-level error.
+- [ ] **M3** — Reentrancy guard (`reent` require) is entered before any state
+      write in every guarded entry point, and the guard rolls back on `Err`.
+- [ ] **M4** — Escrow amounts and fee math are type-safe (`i128` stroops);
+      no float conversion anywhere in payment paths.
+- [ ] **M5** — Claimable-balance IDs, task IDs, and memo payloads are bounded
+      (≤ 28 bytes) and validated before storage.
+- [ ] **M6** — Pagination cursors bound every collection read/write; no
+      unbounded vector iteration in a single transaction (read ≤ 100 entries,
+      write ≤ 50 entries per tx).
+- [ ] **M7** — TTLs (`extend_ttl`) are refreshed on every access path;
+      temporary storage cannot outlive its intended entity.
+- [ ] **M8** — Events are emitted for every state transition an operator
+      must reconcile, and event payloads never contain secrets.
+- [ ] **M9** — Double-settlement is impossible: release/refund are
+      idempotent or guarded by an explicit status enum check.
+- [ ] **M10** — Admin/config setters validate new values before persisting
+      (limits > 0, addresses non-zero, no self-transfer where forbidden).
+- [ ] **M11** — Upgrade authority is a multisig/dao, not a single
+      developer key; `update_current_contract_wasm` is `require_auth`'d.
+- [ ] **M12** — Tests cover the failure paths (see Fault Injection list),
+      not only happy paths; every `Err(...)` variant has at least one test.
+
+## Pre-Mainnet Security Gate
+
+A mainnet release additionally requires:
+
+- [ ] All Pre-Release Gate, Smart Contracts, and CI/CD items checked above.
+- [ ] All 12 manual Soroban invariants (M1–M12) signed off by a reviewer who
+      did not write the change.
+- [ ] `cargo test`, `cargo clippy --all-targets -- -D warnings`, and
+      `cargo fmt --check` all green on the release commit.
+- [ ] `npm run gate` green on the release commit.
+- [ ] Fault injection suite (`npm run test:fault`) green against the release
+      commit with the production docker-compose topology.
+- [ ] No open HIGH/CRITICAL findings from `security-audit`, `secret-scan`,
+      `container-scan`, or CodeQL for the release commit.
+- [ ] Threat model (`docs/THREAT_MODEL.md`) re-reviewed for any new contract,
+      endpoint, or key-management surface.
+
 ---
 
 ## Sign-Off

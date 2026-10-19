@@ -9,6 +9,7 @@
 import { createLogger } from '../../utils/logger';
 import { createTaskDb, getTaskDb, type PersistedTaskCost, type TaskDb } from '../../db/tasks';
 import { quotaMetricsRegistry } from '../quota/metrics';
+import { recordWalletTokenSpend } from '../quota/walletQuota';
 import {
   activeSnapshots,
   getLedger,
@@ -121,6 +122,15 @@ export function settleTaskCost(taskId: string): TaskCostSnapshot | undefined {
   // read from `task_costs` at scrape time, but the lifetime counter has no
   // durable home, and a persistence failure must not swallow the token count.
   countTaskSpend(snapshot.usedTokens);
+
+  // Fold the settled spend into the wallet's daily Venice-token quota
+  // (Issue #803). Best-effort for the same reason: accounting never fails a
+  // run that already cost money.
+  try {
+    recordWalletTokenSpend(snapshot.walletPublicKey, snapshot.usedTokens);
+  } catch (err) {
+    log.warn({ err, taskId }, 'failed to record wallet token quota spend');
+  }
 
   try {
     taskDb().upsertTaskCost(toPersistedCost(snapshot, now()));

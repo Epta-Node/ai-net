@@ -9,6 +9,7 @@ import {
   createJobStore,
 } from "./jobStore";
 import { JobWorker, type JobWorkerOptions, type JobHandler } from "./worker";
+import { DeadLetterQueue } from "./dlq";
 import { createLogger } from "../utils/logger";
 
 const logger = createLogger({ component: "job-queue" });
@@ -16,6 +17,7 @@ const logger = createLogger({ component: "job-queue" });
 export * from "./jobStore";
 export * from "./worker";
 export * from "./backoff";
+export * from "./dlq";
 
 /**
  * Thrown by {@link JobQueue.enqueueUnique} when a job for the same `taskId`
@@ -49,10 +51,13 @@ export class JobQueue {
   private readonly store: JobStore;
   private worker?: JobWorker;
   private defaultMaxAttempts = 3;
+  /** Dead-letter facade over the same store (issues #802, #739). */
+  private readonly deadLetterQueue: DeadLetterQueue;
 
   constructor(store: JobStore, worker?: JobWorker) {
     this.store = store;
     this.worker = worker;
+    this.deadLetterQueue = new DeadLetterQueue(store, { emitEvents: false });
   }
 
   public enqueue<T = any>(options: EnqueueOptions<T>): Job<T> {
@@ -141,6 +146,30 @@ export class JobQueue {
       this.worker?.trigger();
     }
     return success;
+  }
+
+  /**
+   * The dead-letter facade over this queue's store (issues #802, #739).
+   *
+   * Exposed so admin routes and the operator CLI share one implementation of
+   * list/replay/purge instead of growing a second copy of each query.
+   */
+  public getDeadLetterQueue(): DeadLetterQueue {
+    return this.deadLetterQueue;
+  }
+
+  /**
+   * Delete dead-letter entries older than `olderThanDays`, then kick the
+   * worker so any job another operator just replayed is picked up promptly.
+   *
+   * @returns the number of entries deleted.
+   */
+  public purgeDeadLetters(olderThanDays: number): number {
+    const purged = this.deadLetterQueue.purge(olderThanDays);
+    if (purged > 0) {
+      this.worker?.trigger();
+    }
+    return purged;
   }
 
   /** Attempts given to jobs enqueued without an explicit `maxAttempts` (#752). */

@@ -33,3 +33,17 @@ export class VeniceStatusError extends Error {
     this.status = status;
   }
 }
+
+/**
+ * Thrown when every key in the pool is cooling down, so no upstream call can be
+ * made (#806). It is raised instead of hanging, and it counts as a breaker failure.
+ */
+export class VeniceUnavailableError extends Error {
+  readonly keyCount: number;
+
+  constructor(keyCount: number) {
+    super(`Venice AI is unavailable: all ${keyCount} configured key(s) are cooling down`);
+    this.name = 'VeniceUnavailableError';
+    this.keyCount = keyCount;
+  }
+}

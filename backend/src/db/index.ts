@@ -133,6 +133,7 @@ export function getPaymentPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "payments.db");
     _pool = createPool({
       filePath,
+      name: "payments",
       min: 1,
       max: 4,
       acquireTimeoutMs: 5_000,
@@ -290,3 +291,6 @@ export function createPaymentDb(db: Database.Database): PaymentDb {
     },
   };
 }
+
+/** Pool utilisation and query latency per database (#807), for `/health/deep`. */
+export { getDatabaseMetrics, type DatabaseMetricsSnapshot } from "./metrics";

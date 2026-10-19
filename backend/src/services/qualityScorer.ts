@@ -34,6 +34,11 @@ import { createTaskDb, getTaskDb } from '../db/tasks';
 import { createAgentDb, getAgentDb } from '../db/agents';
 import { createLogger } from '../utils/logger';
 import { config } from '../config';
+import {
+  QualityScoreCache,
+  type QualityScoreCacheOptions,
+  type QualityScoreCacheStats,
+} from './qualityScoreCache';
 
 const log = createLogger({ component: 'QualityScorer' });
 
@@ -62,6 +67,15 @@ export function loadScorerConfig(): QualityScorerConfig {
     reviewThreshold: config.QUALITY_REVIEW_THRESHOLD,
     percentileEnabled: config.QUALITY_PERCENTILE_ENABLED,
     percentileMinSamples: config.QUALITY_PERCENTILE_MIN_SAMPLES,
+  };
+}
+
+/** Result-cache settings from config (#812). Read per scorer instance. */
+function loadScoreCacheOptions(): QualityScoreCacheOptions {
+  return {
+    enabled: config.QUALITY_SCORER_CACHE_ENABLED,
+    ttlMs: config.QUALITY_SCORER_CACHE_TTL_MS,
+    maxEntries: config.QUALITY_SCORER_CACHE_MAX_ENTRIES,
   };
 }
 
@@ -334,22 +348,43 @@ export class QualityScorer {
   private config: QualityScorerConfig;
   /** Historical scores used for percentile normalization. */
   private historicalScores: number[] = [];
+  /** Content-addressed result cache (#812). */
+  private readonly scoreCache: QualityScoreCache;
 
   /**
    * @param rules  Custom per-agent-type rules merged over the built-in defaults.
    * @param config Optional scorer configuration. When omitted, loaded from
    *               process.env via `loadScorerConfig()`. Changing env vars and
    *               recreating the scorer applies new weights without redeploy.
+   * @param cacheOptions Optional result-cache settings. Defaults to the
+   *               `QUALITY_SCORER_CACHE_*` config values.
    */
-  constructor(rules: QualityScoringRules[] = [], config?: QualityScorerConfig) {
+  constructor(
+    rules: QualityScoringRules[] = [],
+    config?: QualityScorerConfig,
+    cacheOptions?: Partial<QualityScoreCacheOptions>,
+  ) {
     this.rulesByAgentType = new Map(rules.map((rule) => [rule.agentType, rule]));
     this.config = config ?? loadScorerConfig();
+    this.scoreCache = new QualityScoreCache({ ...loadScoreCacheOptions(), ...cacheOptions });
   }
 
   /** Reload configuration from process.env. Call after env vars change. */
   reloadConfig(): void {
     this.config = loadScorerConfig();
+    // Cached scores were computed with the previous weights and threshold.
+    this.scoreCache.clear();
     log.info({ config: this.config }, 'quality scorer config reloaded');
+  }
+
+  /** Hit/miss/size counters for the score cache (#812). */
+  getCacheStats(): QualityScoreCacheStats {
+    return this.scoreCache.stats();
+  }
+
+  /** Drop every cached score. Counters are kept. */
+  clearCache(): void {
+    this.scoreCache.clear();
   }
 
   /** Return the current configuration (read-only snapshot). */
@@ -365,6 +400,8 @@ export class QualityScorer {
     try {
       const records = createTaskDb(getTaskDb()).listQualityScores(agentId);
       this.historicalScores = records.map((r) => r.score);
+      // Percentile-normalized scores depend on this distribution.
+      this.scoreCache.clear();
     } catch (err) {
       log.warn({ err }, 'failed to load historical scores for percentile normalization');
     }
@@ -373,6 +410,7 @@ export class QualityScorer {
   /** Set historical scores directly (useful for testing). */
   setHistoricalScores(scores: number[]): void {
     this.historicalScores = [...scores];
+    this.scoreCache.clear();
   }
 
   /** Effective rules for an agent type (defaults merged with custom rules). */
@@ -405,6 +443,21 @@ export class QualityScorer {
    * @param rules   scoring rules to apply
    */
   score(output: unknown, prompt: string | undefined, rules: QualityScoringRules): QualityScore {
+    // Identical output, prompt and rules always score the same, so reuse the
+    // stored result when there is one (#812).
+    const cacheKey = this.scoreCache.keyFor(rules, prompt, output);
+    if (cacheKey !== undefined) {
+      const cached = this.scoreCache.lookup(cacheKey);
+      if (cached) return cached;
+    }
+
+    const score = this.computeScore(output, prompt, rules);
+    if (cacheKey !== undefined) this.scoreCache.store(cacheKey, score);
+    return score;
+  }
+
+  /** Uncached scoring: the three dimensions, percentile normalization, and the review flag. */
+  private computeScore(output: unknown, prompt: string | undefined, rules: QualityScoringRules): QualityScore {
     const completeness = scoreCompleteness(output, rules);
     const relevance = scoreRelevance(output, prompt ?? '', rules);
     const format = scoreFormat(output, rules);

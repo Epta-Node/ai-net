@@ -10,6 +10,8 @@ import { createLogger } from "../utils/logger";
 import { config } from "../config";
 
 import { getConfig } from "../config";
+import { encryptBackupFile } from "./backup/encryption";
+import { AuditLog, ensureAuditChainColumns } from "./auditLog";
 
 const logger = createLogger({ component: "admin-control" });
 
@@ -45,11 +47,26 @@ let auditDb: Database.Database | null = null;
 
 function getAuditDb(): Database.Database {
   if (!auditDb) {
-    const dbPath = config.ADMIN_AUDIT_DB_PATH;
-    auditDb = new Database(dbPath);
-    auditDb.pragma("busy_timeout = 5000");
-    auditDb.pragma("journal_mode = WAL");
-    auditDb.exec(`
+    const configured = config.ADMIN_AUDIT_DB_PATH;
+    auditDb = openAuditDb(configured?.trim() ? configured : DEFAULT_AUDIT_DB);
+  }
+  return auditDb;
+}
+
+/**
+ * Open (and create, including its parent directory) the audit database.
+ *
+ * A configured path that cannot be opened — missing volume, permission
+ * denied — falls back to the default location once, so audit writes degrade
+ * instead of taking the admin API down with them.
+ */
+function openAuditDb(dbPath: string): Database.Database {
+  try {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const db = new Database(dbPath);
+    db.pragma("busy_timeout = 5000");
+    db.pragma("journal_mode = WAL");
+    db.exec(`
       CREATE TABLE IF NOT EXISTS admin_audit_log (
         id         INTEGER PRIMARY KEY AUTOINCREMENT,
         at         TEXT NOT NULL,
@@ -65,8 +82,16 @@ function getAuditDb(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_admin_audit_log_action
         ON admin_audit_log (action);
     `);
+    // Databases created before hash chaining (#808) gain prevHash/hash in place.
+    ensureAuditChainColumns(db);
+    return db;
+  } catch (err) {
+    logger.error({ err, dbPath }, "failed to open admin audit database");
+    if (dbPath !== DEFAULT_AUDIT_DB) {
+      return openAuditDb(DEFAULT_AUDIT_DB);
+    }
+    throw err;
   }
-  return auditDb;
 }
 
 export function setReadOnlyState(enabled: boolean, actor: string, reason?: string): ReadOnlyState {
@@ -111,24 +136,25 @@ function redact(value: unknown): unknown {
   return redacted;
 }
 
+/**
+ * The hash-chained view over the admin audit database (#808). Created per call
+ * because it is a thin wrapper; the connection itself is cached by `getAuditDb`.
+ */
+export function getAdminAuditLog(): AuditLog {
+  return new AuditLog(getAuditDb());
+}
+
 export function recordAdminAudit(entry: AdminAuditEntry): void {
   try {
-    getAuditDb()
-      .prepare(
-        `
-        INSERT INTO admin_audit_log (at, actor, action, target, statusCode, requestId, details)
-        VALUES (@at, @actor, @action, @target, @statusCode, @requestId, @details)
-      `,
-      )
-      .run({
-        at: entry.at,
-        actor: entry.actor,
-        action: entry.action,
-        target: entry.target ?? null,
-        statusCode: entry.statusCode,
-        requestId: entry.requestId ?? null,
-        details: entry.details === undefined ? null : JSON.stringify(redact(entry.details)),
-      });
+    getAdminAuditLog().append({
+      at: entry.at,
+      actor: entry.actor,
+      action: entry.action,
+      target: entry.target ?? null,
+      statusCode: entry.statusCode,
+      requestId: entry.requestId ?? null,
+      details: entry.details === undefined ? null : JSON.stringify(redact(entry.details)),
+    });
   } catch (err) {
     logger.error({ err, action: entry.action }, "failed to write admin audit entry");
   }
@@ -301,7 +327,7 @@ export function vacuumDatabases(): MaintenanceResult[] {
 }
 
 export async function backupDatabases(directory?: string): Promise<MaintenanceResult[]> {
-  const targetDir = directory ?? config.ADMIN_BACKUP_DIR;
+  const targetDir = directory ?? (config.ADMIN_BACKUP_DIR || DEFAULT_BACKUP_DIR);
   fs.mkdirSync(targetDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 
@@ -310,7 +336,9 @@ export async function backupDatabases(directory?: string): Promise<MaintenanceRe
     const file = path.join(targetDir, `${name}-${stamp}.sqlite`);
     try {
       await db.backup(file);
-      results.push({ database: name, ok: true, file });
+      // Encrypt at rest (Issue #747); fails closed when no key is configured.
+      const encryptedFile = encryptBackupFile(file, { source: name });
+      results.push({ database: name, ok: true, file: encryptedFile });
     } catch (err) {
       results.push({
         database: name,

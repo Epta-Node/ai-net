@@ -145,6 +145,7 @@ export function getAgentPool(dbPath?: string): SqlitePool {
     const filePath = dbPath ?? path.join(process.cwd(), "agents.db");
     _agentPool = createPool({
       filePath,
+      name: "agents",
       min: 1,
       max: 4,
       acquireTimeoutMs: 5_000,

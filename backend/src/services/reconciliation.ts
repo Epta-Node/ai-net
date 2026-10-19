@@ -48,6 +48,11 @@ import {
 } from './reconciliation.drift';
 import { ReconciliationMetrics, reconciliationMetrics } from './reconciliation.metrics';
 import {
+  classifyDriftAlert,
+  type DriftAlert,
+  type DriftAlertThresholds,
+} from './reconciliation.alerts';
+import {
   createEventBusReconciliationEventSink,
   createNoopReconciliationEventSink,
   type ReconciliationEventSink,
@@ -79,6 +84,13 @@ export const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000;
 export const DEFAULT_DAILY_INTERVAL_MS = 86_400_000;
 const LIST_BALANCES_MAX_PAGES = 10;
 const LIST_BALANCES_PAGE_LIMIT = 200;
+
+/** Deadline for one drift-alert webhook delivery (#811). */
+const DRIFT_ALERT_TIMEOUT_MS = 5_000;
+/** Drift alerts kept in memory for the admin alerts endpoint (#811). */
+const MAX_RECENT_ALERTS = 1_000;
+/** Task statuses after which a task has settled (#811). */
+const SETTLED_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled', 'canceled']);
 
 /** Sentinel stored as `txHash` when remediation could not find a real hash. */
 const RECONCILED_TX_SENTINEL = 'reconciled-repair';
@@ -565,6 +577,11 @@ export interface ReconciliationServiceOptions {
   eventStore?: EventStore;
   /** Metric registry; defaults to the process-wide one. */
   metrics?: ReconciliationMetrics;
+  /**
+   * Drift percentages that raise warning and critical alerts. Defaults to
+   * `RECONCILIATION_WARNING_DRIFT_PERCENT` (1) and `RECONCILIATION_CRITICAL_DRIFT_PERCENT` (5).
+   */
+  alertThresholds?: Partial<DriftAlertThresholds>;
 }
 
 export class ReconciliationService {
@@ -585,6 +602,8 @@ export class ReconciliationService {
   private readonly maxTxLookups: number;
   private readonly eventSink: ReconciliationEventSink;
   private readonly metrics: ReconciliationMetrics;
+  private readonly alertThresholds: DriftAlertThresholds;
+  private readonly recentAlerts: DriftAlert[] = [];
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
@@ -611,6 +630,12 @@ export class ReconciliationService {
     this.settlementQueue = options.settlementQueue;
     this.maxTxLookups = options.maxTxLookups ?? safeConfig()?.RECONCILIATION_MAX_TX_LOOKUPS ?? 200;
     this.metrics = options.metrics ?? reconciliationMetrics;
+    this.alertThresholds = {
+      warningPercent:
+        options.alertThresholds?.warningPercent ?? safeConfig()?.RECONCILIATION_WARNING_DRIFT_PERCENT ?? 1,
+      criticalPercent:
+        options.alertThresholds?.criticalPercent ?? safeConfig()?.RECONCILIATION_CRITICAL_DRIFT_PERCENT ?? 5,
+    };
     this.eventSink =
       options.eventSink ??
       (options.eventStore
@@ -1094,8 +1119,88 @@ export class ReconciliationService {
   }
 
   /**
-   * Alert on discrepancies: structured logs per discrepancy plus an optional
-   * webhook POST with the full report.
+   * Drift alerts raised in the last `hours` hours, oldest first. Kept in
+   * process memory, so the list restarts empty with the process (#811).
+   */
+  getRecentAlerts(hours: number): DriftAlert[] {
+    const since = this.now() - hours * 60 * 60 * 1000;
+    return this.recentAlerts.filter((alert) => alert.detectedAt.getTime() >= since);
+  }
+
+  /**
+   * Deliver one drift alert. Posts it to the configured webhook with a
+   * {@link DRIFT_ALERT_TIMEOUT_MS} deadline; without a webhook it is only
+   * logged. A delivery failure is logged and never stops reconciliation (#811).
+   */
+  async notifyDrift(alert: DriftAlert): Promise<void> {
+    const payload = {
+      level: alert.level,
+      service: 'ai-net-backend',
+      alert: 'payment_drift_detected',
+      taskId: alert.taskId,
+      balanceId: alert.balanceId,
+      driftType: alert.driftType,
+      driftPercent: alert.driftPercent,
+      expectedXLM: alert.expectedXLM,
+      actualXLM: alert.actualXLM,
+      detectedAt: alert.detectedAt.toISOString(),
+      message: alert.message,
+    };
+
+    if (!this.webhookUrl) {
+      this.logger.warn({ alert: payload }, `Drift alert [${alert.level}] ${alert.message}`);
+      return;
+    }
+    try {
+      const response = await fetch(this.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(DRIFT_ALERT_TIMEOUT_MS),
+      });
+      if (!response.ok) {
+        this.logger.error(
+          { status: response.status, taskId: alert.taskId },
+          'Drift alert webhook returned non-2xx status'
+        );
+      }
+    } catch (err) {
+      this.logger.error({ err, taskId: alert.taskId }, 'Failed to deliver drift alert webhook');
+    }
+  }
+
+  /**
+   * Classify each discrepancy against the alert thresholds and notify for the
+   * ones that breach them. Drift on a task that has not settled yet is exempt:
+   * its escrow is still expected to be in flight.
+   */
+  private async raiseDriftAlerts(report: ReconciliationReport): Promise<void> {
+    const detectedAt = new Date(this.now());
+    for (const discrepancy of report.discrepancies) {
+      if (this.isUnsettledTask(discrepancy.taskId)) continue;
+      const alert = classifyDriftAlert(discrepancy, this.alertThresholds, detectedAt);
+      if (!alert) continue;
+
+      this.metrics.recordDriftAlert(alert.level);
+      this.metrics.setLastDriftPercent(alert.driftPercent);
+      this.recentAlerts.push(alert);
+      if (this.recentAlerts.length > MAX_RECENT_ALERTS) {
+        this.recentAlerts.splice(0, this.recentAlerts.length - MAX_RECENT_ALERTS);
+      }
+      await this.notifyDrift(alert);
+    }
+  }
+
+  /** `true` when the task exists and has not reached a settled status. */
+  private isUnsettledTask(taskId: string | undefined): boolean {
+    if (!taskId || !this.taskState) return false;
+    const task = this.taskState(taskId);
+    return task !== undefined && !SETTLED_TASK_STATUSES.has(task.status.toLowerCase());
+  }
+
+  /**
+   * Alert on discrepancies: structured logs per discrepancy, threshold-based
+   * drift alerts (#811), plus an optional webhook POST with the full report.
    */
   private async alert(report: ReconciliationReport): Promise<void> {
     if (report.discrepancies.length === 0) {
@@ -1112,6 +1217,8 @@ export class ReconciliationService {
         `Reconciliation drift [${discrepancy.driftType}] ${discrepancy.balanceId}`
       );
     }
+
+    await this.raiseDriftAlerts(report);
 
     if (!this.webhookUrl) return;
     try {

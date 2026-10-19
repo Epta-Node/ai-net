@@ -184,6 +184,13 @@ const reconciliationEventPayload = z.object({
   newStatus: z.string().optional(),
 });
 
+/** `agent.evicted` (#804). Identical in every schema version it is written under. */
+const agentEvictedPayload = z.object({
+  agentId: z.string().min(1),
+  reason: z.literal('heartbeat_timeout'),
+  lastSeenAt: z.string().nullable(),
+});
+
 // ---------------------------------------------------------------------------
 // Schema registry — map of version → event type → Zod schema
 // ---------------------------------------------------------------------------
@@ -203,6 +210,7 @@ const schemasByVersion: Record<number, EventPayloadSchemas> = {
     TaskCompleted: v1TaskCompletedPayload,
     TaskFailed: v1TaskFailedPayload,
     ReconciliationEvent: reconciliationEventPayload,
+    'agent.evicted': agentEvictedPayload,
   },
   2: {
     TaskCreated: v2TaskCreatedPayload,
@@ -214,6 +222,7 @@ const schemasByVersion: Record<number, EventPayloadSchemas> = {
     TaskCompleted: v2TaskCompletedPayload,
     TaskFailed: v2TaskFailedPayload,
     ReconciliationEvent: reconciliationEventPayload,
+    'agent.evicted': agentEvictedPayload,
   },
 };
 

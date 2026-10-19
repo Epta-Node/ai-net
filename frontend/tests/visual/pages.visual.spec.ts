@@ -103,3 +103,19 @@ test.describe('Visual regression — task detail', () => {
     });
   }
 });
+
+test.describe('Visual regression — not found page', () => {
+  for (const theme of THEMES) {
+    test(`404 page renders correctly in ${theme} theme`, async ({ page }) => {
+      await preparePage(page);
+      await setTheme(page, theme);
+
+      await page.goto('/this-route-does-not-exist');
+      await expect(page.locator('h1').first()).toBeVisible({ timeout: INITIAL_LOAD_TIMEOUT });
+      await page.waitForLoadState('networkidle');
+      await waitForMotionToSettle(page);
+
+      await expect(page).toHaveScreenshot(`not-found-${theme}.png`, { fullPage: true });
+    });
+  }
+});

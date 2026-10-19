@@ -32,6 +32,8 @@ export const ErrorCode = {
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
   RATE_LIMITED: "RATE_LIMITED",
+  /** A per-wallet daily quota (tasks or Venice tokens) is exhausted (#803). */
+  QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
 
   // ── Payment / Stellar ─────────────────────────────────────────────────────
   PAYMENT_ERROR: "PAYMENT_ERROR",
@@ -65,6 +67,7 @@ export const HTTP_STATUS_FOR_CODE: Record<ErrorCode, number> = {
   AGENT_CHALLENGE_INVALID: 401,
   AGENT_SIGNATURE_INVALID: 401,
   RATE_LIMITED: 429,
+  QUOTA_EXCEEDED: 429,
   PAYMENT_ERROR: 402,
   STELLAR_UNAVAILABLE: 503,
   UPSTREAM_UNAVAILABLE: 502,
@@ -89,6 +92,7 @@ export const DEFAULT_MESSAGE_FOR_CODE: Record<ErrorCode, string> = {
   AGENT_CHALLENGE_INVALID: "The agent challenge is missing, expired, or was issued for another request.",
   AGENT_SIGNATURE_INVALID: "The agent signature does not match the claimed Stellar public key.",
   RATE_LIMITED: "Too many requests. Please slow down.",
+  QUOTA_EXCEEDED: "The daily quota for this wallet has been exhausted. Please try again after the quota resets.",
   PAYMENT_ERROR: "Payment operation failed.",
   STELLAR_UNAVAILABLE: "Stellar network unavailable.",
   UPSTREAM_UNAVAILABLE: "An upstream service is unavailable.",

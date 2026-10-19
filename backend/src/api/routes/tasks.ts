@@ -10,8 +10,10 @@ import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
 import { idempotencyMiddleware } from "../middleware/idempotency";
-import { ValidationError, NotFoundError, AppError, ForbiddenError, ConflictError } from "../../errors";
+import { ValidationError, NotFoundError, AppError, ForbiddenError, ConflictError, UnauthorizedError } from "../../errors";
 import { assertDailyTaskQuota } from "../../services/quota/dailyQuota";
+import { walletQuotaCheck } from "../middleware/quotaCheck";
+import { getWalletQuotaStatus } from "../../services/quota/walletQuota";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
 import { config } from "../../config";
@@ -132,7 +134,7 @@ export function createTasksRouter(
    *               $ref: '#/components/schemas/InternalServerError'
    */
   // POST /api/tasks — idempotent, rate-limited, then Zod-validated
-  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), walletQuotaCheck, (req: Request, res: Response, next: NextFunction): void => {
     try {
       const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
       // Body first, then the header (both spellings accepted), then "anonymous".
@@ -278,6 +280,65 @@ export function createTasksRouter(
       });
 
       res.json({ tasks, total, page, pageSize });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @openapi
+   * /api/tasks/quota:
+   *   get:
+   *     summary: Get the calling wallet's daily task quota
+   *     description: >
+   *       Returns the number of task submissions the wallet made in the trailing
+   *       24 hours against `MAX_DAILY_TASKS_PER_WALLET`, plus the UTC-midnight
+   *       reset time. Requires the `walletpublickey` header.
+   *     tags: [Tasks]
+   *     security:
+   *       - WalletAuth: []
+   *     responses:
+   *       200:
+   *         description: Current quota usage for the wallet
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               required: [used, limit, resetAt]
+   *               properties:
+   *                 used:
+   *                   type: integer
+   *                   example: 3
+   *                 limit:
+   *                   type: integer
+   *                   example: 50
+   *                 resetAt:
+   *                   type: string
+   *                   format: date-time
+   *       401:
+   *         description: Missing wallet identity
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
+   *       429:
+   *         description: Quota exhausted (see `Retry-After`)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/RateLimitError'
+   */
+  tasksRouter.get("/quota", (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const wallet = (req.headers["walletpublickey"] as string | undefined)?.trim();
+      if (!wallet) {
+        throw new UnauthorizedError(
+          "walletpublickey header is required",
+          undefined,
+          res.locals.correlationId as string | undefined,
+        );
+      }
+      res.json(getWalletQuotaStatus(wallet));
     } catch (err) {
       next(err);
     }

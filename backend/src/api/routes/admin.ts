@@ -11,6 +11,7 @@ import {
   auditLogToCsv,
   backupDatabases,
   getReadOnlyState,
+  getAdminAuditLog,
   listAdminAuditLog,
   iterateAdminAuditLog,
   listAgentsForAdmin,
@@ -26,7 +27,12 @@ import {
 import type { ReconciliationRouterOptions } from "./reconciliation";
 import type { ReconciliationTrigger } from "../../services/reconciliation.types";
 import { getCostBudgetStatus } from "../../services/budget";
-import { getVeniceKeyHealthStore } from "../../services/venice/keyHealth";
+import { getActiveVeniceKeyPool } from "../../services/venice/keyPool";
+import type { WatchdogStatus } from "../../services/agentWatchdog";
+import {
+  AUDIT_CHAIN_CSV_HEADER,
+  auditChainRowToCsv,
+} from "../../services/auditLog";
 import { createLogger } from "../../utils/logger";
 import { ValidationError, NotFoundError, AppError } from "../../errors";
 
@@ -56,8 +62,23 @@ const reconciliationSchema = z.object({
   triggeredBy: z.enum(["manual", "scheduled", "release"]).default("manual"),
 });
 
+const reconciliationAlertsQuerySchema = z.object({
+  hours: z.coerce.number().positive().max(720).default(24),
+});
+
 const backupSchema = z.object({
   directory: z.string().min(1).optional(),
+});
+
+/** Query for the hash-chained audit listing (#808). */
+const auditChainQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  action: z.string().min(1).max(200).optional(),
+});
+
+const auditChainExportQuerySchema = z.object({
+  format: z.literal("csv").default("csv"),
 });
 
 /** Shared query-string schema for the paginated job-listing endpoints. */
@@ -73,6 +94,8 @@ const jobListQuerySchema = z.object({
 export interface AdminRouterOptions {
   queue?: JobQueue;
   reconciliation?: ReconciliationRouterOptions;
+  /** Agent watchdog whose status is served at `/watchdog/status` (#804). */
+  watchdog?: { getStatus: () => WatchdogStatus };
 }
 
 function asyncHandler(
@@ -402,6 +425,48 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
 
   /**
    * @openapi
+   * /api/admin/reconciliation/alerts:
+   *   get:
+   *     summary: List recent payment drift alerts
+   *     operationId: listAdminReconciliationAlerts
+   *     description: >
+   *       Drift alerts raised at or above the configured warning or critical
+   *       thresholds (`RECONCILIATION_WARNING_DRIFT_PERCENT`,
+   *       `RECONCILIATION_CRITICAL_DRIFT_PERCENT`) within the last `hours`.
+   *       Kept in process memory, so the list resets when the process restarts.
+   *     tags: [Admin, Reconciliation]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: hours
+   *         required: false
+   *         schema: { type: number, minimum: 0, maximum: 720, default: 24 }
+   *     responses:
+   *       200:
+   *         description: Drift alerts, oldest first
+   *       400:
+   *         description: Invalid query parameters
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.get("/reconciliation/alerts", (req: Request, res: Response, next: NextFunction) => {
+    const parsed = reconciliationAlertsQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
+      return;
+    }
+    res.status(200).json({ alerts: reconciliationService.getRecentAlerts(parsed.data.hours) });
+  });
+
+  /**
+   * @openapi
    * /api/admin/maintenance/vacuum:
    *   post:
    *     summary: Vacuum the application databases
@@ -552,7 +617,7 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
    *         description: Maximum number of entries to export
    *     responses:
    *       200:
-   *         description: Streamed audit log (`{ "entries": [...] }` for JSON, or CSV)
+   *         description: 'Streamed audit log (JSON `{ "entries": [...] }` or CSV text)'
    *       400:
    *         description: Invalid query parameters
    *         content:
@@ -620,6 +685,206 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
         logger.error({ err }, "audit log export failed");
         res.destroy();
       }
+    }),
+  );
+
+  /**
+   * @openapi
+   * /api/admin/watchdog/status:
+   *   get:
+   *     summary: Agent watchdog status (#804)
+   *     operationId: getWatchdogStatus
+   *     description: >
+   *       Whether the watchdog is running, when it last ran and when it runs next,
+   *       how many agents are quarantined, evictions in the last 24 hours, and the
+   *       most recent evictions.
+   *     tags: [Admin, Agents]
+   *     security:
+   *       - adminApiKey: []
+   *     responses:
+   *       200:
+   *         description: Watchdog status
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       501:
+   *         description: The watchdog is not wired in this deployment
+   */
+  router.get("/watchdog/status", (_req: Request, res: Response) => {
+    if (!options.watchdog) {
+      res.status(501).json({
+        error: { code: "NOT_IMPLEMENTED", message: "agent watchdog is not wired" },
+      });
+      return;
+    }
+    res.json(options.watchdog.getStatus());
+  });
+
+  /**
+   * @openapi
+   * /api/admin/venice/keys:
+   *   get:
+   *     summary: Venice API key pool status (#806)
+   *     operationId: getVeniceKeyPoolStatus
+   *     description: >
+   *       Health of each configured Venice key: error rate over the recent window,
+   *       request count, and cooldown expiry. Keys appear only as their last four
+   *       characters.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     responses:
+   *       200:
+   *         description: Key pool status
+   *       401:
+   *         description: Missing or invalid admin API key
+   */
+  router.get("/venice/keys", (_req: Request, res: Response) => {
+    const pool = getActiveVeniceKeyPool();
+    res.json({
+      keys: pool?.getStatus() ?? [],
+      healthyCount: pool?.healthyCount() ?? 0,
+    });
+  });
+
+  /**
+   * @openapi
+   * /api/admin/audit:
+   *   get:
+   *     summary: List hash-chained admin audit entries (#808)
+   *     operationId: listAdminAuditChain
+   *     description: >
+   *       Newest-first, paginated audit entries with their `prevHash` and `hash`.
+   *       Optionally filtered to one action name.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, minimum: 1, default: 1 }
+   *       - in: query
+   *         name: pageSize
+   *         schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+   *       - in: query
+   *         name: action
+   *         schema: { type: string }
+   *         description: Only entries with this exact action, e.g. `admin.agent.suspend`
+   *     responses:
+   *       200:
+   *         description: One page of audit entries
+   *       400:
+   *         description: Invalid query parameters
+   *       401:
+   *         description: Missing or invalid admin API key
+   */
+  router.get("/audit", (req: Request, res: Response, next: NextFunction) => {
+    const parsed = auditChainQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
+      return;
+    }
+    const { page, pageSize, action } = parsed.data;
+    const entries = getAdminAuditLog().list({ page, pageSize, action });
+    res.json({ entries, page, pageSize });
+  });
+
+  /**
+   * @openapi
+   * /api/admin/audit/verify:
+   *   post:
+   *     summary: Verify the audit hash chain (#808)
+   *     operationId: verifyAdminAuditChain
+   *     description: >
+   *       Recomputes every chained hash from the stored fields. Returns
+   *       `valid: false` with `firstBrokenAt` set to the id of the first entry
+   *       that fails. Pre-chaining rows are counted in `legacyRows` and skipped.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     responses:
+   *       200:
+   *         description: Chain verification result
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 valid: { type: boolean }
+   *                 firstBrokenAt: { type: string }
+   *                 checked: { type: integer }
+   *                 legacyRows: { type: integer }
+   *       401:
+   *         description: Missing or invalid admin API key
+   */
+  router.post("/audit/verify", (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.json(getAdminAuditLog().verify());
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @openapi
+   * /api/admin/audit/export:
+   *   get:
+   *     summary: Export the hash-chained audit log as CSV (#808)
+   *     operationId: exportAdminAuditChain
+   *     description: >
+   *       Streams every entry newest-first for compliance review. `prevHash` and
+   *       `hash` are truncated to 16 characters. Formula-like cells are neutralised.
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: format
+   *         schema: { type: string, enum: [csv], default: csv }
+   *     responses:
+   *       200:
+   *         description: CSV export
+   *       400:
+   *         description: Invalid query parameters
+   *       401:
+   *         description: Missing or invalid admin API key
+   */
+  router.get(
+    "/audit/export",
+    asyncHandler(async (req: Request, res: Response) => {
+      const parsed = auditChainExportQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        throw new ValidationError(
+          "Invalid query parameters",
+          { issues: parsed.error.flatten() },
+          res.locals.correlationId as string | undefined,
+        );
+      }
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader("Content-Disposition", 'attachment; filename="audit-chain.csv"');
+      res.write(`${AUDIT_CHAIN_CSV_HEADER}\n`);
+
+      // Honour backpressure so a slow client cannot make the server buffer the export.
+      for (const batch of getAdminAuditLog().iterateRows(AUDIT_EXPORT_MAX_ROWS)) {
+        if (res.destroyed) return;
+        const chunk = batch.map((row) => `${auditChainRowToCsv(row)}\n`).join("");
+        if (!res.write(chunk)) {
+          await new Promise<void>((resolve) => {
+            const done = () => {
+              res.off("drain", done);
+              res.off("close", done);
+              resolve();
+            };
+            res.once("drain", done);
+            res.once("close", done);
+          });
+        }
+      }
+      res.end();
     }),
   );
 
@@ -1119,6 +1384,296 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
 
     res.json({ success: true, message: `Job ${jobId} moved to pending for retry` });
   });
+
+  /**
+   * @openapi
+   * /api/admin/queue/dlq:
+   *   get:
+   *     summary: List dead-letter queue entries (issue #802)
+   *     description: >
+   *       Paginated inspection of jobs that exhausted their retry budget and
+   *       were isolated in the dead-letter queue. Entries include the failure
+   *       reason, retry count and the original payload for triage.
+   *     operationId: getAdminQueueDlq
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: pageSize
+   *         schema: { type: integer, default: 50 }
+   *     responses:
+   *       200:
+   *         description: Paginated dead-letter entries
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 jobs:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/DeadLetterEntry'
+   *                 total: { type: integer }
+   *                 page: { type: integer }
+   *                 pageSize: { type: integer }
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   *   delete:
+   *     summary: Purge dead-letter entries older than N days (issue #802)
+   *     description: >
+   *       Deletes dead-letter entries whose failure occurred before the given
+   *       age threshold. `days=0` (the default) purges the whole queue. Every
+   *       purge is written to the admin audit log and returns the number of
+   *       records removed.
+   *     operationId: deleteAdminQueueDlq
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: days
+   *         schema: { type: integer, minimum: 0, default: 0 }
+   *         description: Only purge entries whose failure is older than this many days
+   *     responses:
+   *       200:
+   *         description: Number of dead-letter records purged
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean, example: true }
+   *                 purged: { type: integer, example: 3 }
+   *                 count: { type: integer, example: 3 }
+   *                 days: { type: integer, example: 30 }
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.get("/dlq", (req: Request, res: Response, next: NextFunction) => {
+    const parsed = jobListQuerySchema
+      .pick({ page: true, pageSize: true })
+      .safeParse(req.query);
+    if (!parsed.success) {
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
+      return;
+    }
+
+    const { page, pageSize } = parsed.data;
+    res.json(jobQueue.getDeadLetterQueue().list({ page, pageSize }));
+  });
+
+  router.delete("/dlq", (req: Request, res: Response, next: NextFunction) => {
+    const parsed = z
+      .object({ days: z.coerce.number().int().min(0).max(36_500).default(0) })
+      .safeParse(req.query);
+    if (!parsed.success) {
+      next(new ValidationError(
+        "Invalid query parameters",
+        { issues: parsed.error.flatten() },
+        res.locals.correlationId as string | undefined,
+      ));
+      return;
+    }
+
+    const { days } = parsed.data;
+    const purged = jobQueue.purgeDeadLetters(days);
+    recordAdminAudit({
+      at: new Date().toISOString(),
+      actor: actorFromRequest(req),
+      action: "queue.dlq.purge",
+      statusCode: 200,
+      requestId:
+        (res.locals.requestId as string | undefined) ??
+        (res.locals.correlationId as string | undefined),
+      details: { days, purged },
+    });
+    res.json({ success: true, purged, count: purged, days });
+  });
+
+  /**
+   * @openapi
+   * /api/admin/queue/dlq/{jobId}/replay:
+   *   post:
+   *     summary: Replay a dead-letter entry (issue #802)
+   *     description: >
+   *       Re-enqueues a parked job with a fresh retry counter so it can be
+   *       processed again. The operation is idempotent: replaying a job that
+   *       is no longer parked returns 404 instead of double-enqueueing it.
+   *     operationId: postAdminQueueDlqReplay
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: path
+   *         name: jobId
+   *         required: true
+   *         schema: { type: string }
+   *         description: Dead-letter job ID to replay
+   *         example: "job_98fe76dc54ba"
+   *     responses:
+   *       202:
+   *         description: Job accepted back onto the queue with a fresh retry budget
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean, example: true }
+   *                 status: { type: string, enum: [requeued], example: requeued }
+   *                 jobId: { type: string, example: job_98fe76dc54ba }
+   *                 message: { type: string, example: "Dead-letter job job_98fe76dc54ba replayed" }
+   *       404:
+   *         description: Job not found or not in dead-letter status
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
+  router.post("/dlq/:jobId/replay", (req: Request, res: Response) => {
+    const jobId = req.params.jobId;
+    const requeued = jobQueue.getDeadLetterQueue().replay(jobId);
+
+    if (!requeued) {
+      res.status(404).json({
+        error: `Dead-letter job ${jobId} not found or not in dead-letter status`,
+      });
+      return;
+    }
+
+    recordAdminAudit({
+      at: new Date().toISOString(),
+      actor: actorFromRequest(req),
+      action: "queue.dlq.replay",
+      target: jobId,
+      statusCode: 202,
+      requestId:
+        (res.locals.requestId as string | undefined) ??
+        (res.locals.correlationId as string | undefined),
+      details: { jobId },
+    });
+    res.status(202).json({
+      success: true,
+      status: "requeued",
+      jobId,
+      message: `Dead-letter job ${jobId} replayed`,
+    });
+  });
+
+  /**
+   * Admin-root aliases of the `/api/admin/queue/dlq*` routes (issue #802).
+   * The queue router is mounted once at `/api/admin/queue` and once at the
+   * admin root, so every operation is reachable — and must be documented —
+   * under both prefixes.
+   *
+   * @openapi
+   * /api/admin/dlq:
+   *   get:
+   *     summary: List dead-letter queue entries (admin-root alias)
+   *     description: Alias of `GET /api/admin/queue/dlq` reached at the admin root.
+   *     operationId: getAdminRootDlq
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: page
+   *         schema: { type: integer, default: 1 }
+   *       - in: query
+   *         name: pageSize
+   *         schema: { type: integer, default: 50 }
+   *     responses:
+   *       200:
+   *         description: Paginated dead-letter entries
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 jobs:
+   *                   type: array
+   *                   items:
+   *                     $ref: '#/components/schemas/DeadLetterEntry'
+   *                 total: { type: integer }
+   *                 page: { type: integer }
+   *                 pageSize: { type: integer }
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   *   delete:
+   *     summary: Purge dead-letter entries older than N days (admin-root alias)
+   *     description: Alias of `DELETE /api/admin/queue/dlq` reached at the admin root.
+   *     operationId: deleteAdminRootDlq
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: query
+   *         name: days
+   *         schema: { type: integer, minimum: 0, default: 0 }
+   *         description: Only purge entries whose failure is older than this many days
+   *     responses:
+   *       200:
+   *         description: Number of dead-letter records purged
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean, example: true }
+   *                 purged: { type: integer, example: 3 }
+   *                 count: { type: integer, example: 3 }
+   *                 days: { type: integer, example: 30 }
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   * /api/admin/dlq/{jobId}/replay:
+   *   post:
+   *     summary: Replay a dead-letter entry (admin-root alias)
+   *     description: Alias of `POST /api/admin/queue/dlq/{jobId}/replay` reached at the admin root.
+   *     operationId: postAdminRootDlqReplay
+   *     tags: [Admin]
+   *     security:
+   *       - adminApiKey: []
+   *     parameters:
+   *       - in: path
+   *         name: jobId
+   *         required: true
+   *         schema: { type: string }
+   *         description: Dead-letter job ID to replay
+   *         example: "job_98fe76dc54ba"
+   *     responses:
+   *       202:
+   *         description: Job accepted back onto the queue with a fresh retry budget
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               properties:
+   *                 success: { type: boolean, example: true }
+   *                 status: { type: string, enum: [requeued], example: requeued }
+   *                 jobId: { type: string, example: job_98fe76dc54ba }
+   *                 message: { type: string, example: "Dead-letter job job_98fe76dc54ba replayed" }
+   *       404:
+   *         description: Job not found or not in dead-letter status
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       503:
+   *         description: ADMIN_API_KEY is not configured
+   */
 
   return router;
 }

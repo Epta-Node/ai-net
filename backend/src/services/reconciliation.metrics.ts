@@ -52,6 +52,23 @@ export class ReconciliationMetrics {
   private runs = 0;
   private runsWithDrift = 0;
   private runsWithRemediation = 0;
+  /** Alerts raised at the warning threshold (#811). */
+  private driftWarnings = 0;
+  /** Alerts raised at the critical threshold (#811). */
+  private driftCritical = 0;
+  /** Drift percentage of the most recent alert (#811). */
+  private lastDriftPercent = 0;
+
+  /** Count one drift alert at the given level (#811). */
+  recordDriftAlert(level: 'warning' | 'critical'): void {
+    if (level === 'critical') this.driftCritical += 1;
+    else this.driftWarnings += 1;
+  }
+
+  /** Record the drift percentage of the most recent alert (#811). */
+  setLastDriftPercent(percent: number): void {
+    this.lastDriftPercent = percent;
+  }
 
   /** Count one detected drift of the given category. */
   recordDriftDetected(type: DriftType, count = 1): void {
@@ -111,6 +128,9 @@ export class ReconciliationMetrics {
     this.runs = 0;
     this.runsWithDrift = 0;
     this.runsWithRemediation = 0;
+    this.driftWarnings = 0;
+    this.driftCritical = 0;
+    this.lastDriftPercent = 0;
   }
 
   /**
@@ -168,6 +188,18 @@ export class ReconciliationMetrics {
     lines.push(
       `reconcile_runs_with_remediation_total ${this.runsWithRemediation}`,
     );
+    lines.push("");
+    lines.push("# HELP reconciliation_drift_warnings_total Drift alerts raised at the warning threshold");
+    lines.push("# TYPE reconciliation_drift_warnings_total counter");
+    lines.push(`reconciliation_drift_warnings_total ${this.driftWarnings}`);
+    lines.push("");
+    lines.push("# HELP reconciliation_drift_critical_total Drift alerts raised at the critical threshold");
+    lines.push("# TYPE reconciliation_drift_critical_total counter");
+    lines.push(`reconciliation_drift_critical_total ${this.driftCritical}`);
+    lines.push("");
+    lines.push("# HELP reconciliation_last_drift_percent Drift percentage of the most recent alert");
+    lines.push("# TYPE reconciliation_last_drift_percent gauge");
+    lines.push(`reconciliation_last_drift_percent ${this.lastDriftPercent}`);
 
     return lines.join("\n") + "\n";
   }

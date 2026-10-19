@@ -380,7 +380,7 @@ describe("idempotency middleware over the real store (#658)", () => {
     for (const res of responses) {
       expect([201, 409]).toContain(res.status);
       if (res.status === 409) {
-        expect(res.body.error.code).toBe("CONFLICT");
+        expect(res.body.error.code).toBe("REQUEST_IN_PROGRESS");
       }
     }
   });

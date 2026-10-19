@@ -163,6 +163,26 @@ export interface ReconciliationEventEvent extends BaseEvent {
   payload: ReconciliationEventPayload;
 }
 
+/**
+ * Emitted when the agent watchdog evicts an agent for missing its heartbeat
+ * (#804). Agents have no task, so `taskId` carries the synthetic stream key
+ * `agent:<agentId>`. It is not a real task id and is never looked up as one.
+ */
+export const AGENT_EVICTED_EVENT = 'agent.evicted' as const;
+
+/** Payload of an {@link AgentEvictedEvent}. */
+export interface AgentEvictedPayload {
+  agentId: string;
+  reason: 'heartbeat_timeout';
+  /** Last heartbeat the registry recorded, or null when it was unparseable. */
+  lastSeenAt: string | null;
+}
+
+export interface AgentEvictedEvent extends BaseEvent {
+  type: typeof AGENT_EVICTED_EVENT;
+  payload: AgentEvictedPayload;
+}
+
 // ---------------------------------------------------------------------------
 // Discriminated union
 // ---------------------------------------------------------------------------
@@ -176,7 +196,8 @@ export type EventType =
   | 'PaymentReleased'
   | 'TaskCompleted'
   | 'TaskFailed'
-  | typeof RECONCILIATION_EVENT;
+  | typeof RECONCILIATION_EVENT
+  | typeof AGENT_EVICTED_EVENT;
 
 export interface TaskCreatedEvent extends BaseEvent {
   type: 'TaskCreated';
@@ -241,7 +262,8 @@ export type AppEvent =
   | PaymentReleasedEvent
   | TaskCompletedEvent
   | TaskFailedEvent
-  | ReconciliationEventEvent;
+  | ReconciliationEventEvent
+  | AgentEvictedEvent;
 
 // ---------------------------------------------------------------------------
 // Guards

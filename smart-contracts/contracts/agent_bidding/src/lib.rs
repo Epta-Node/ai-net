@@ -618,6 +618,86 @@ impl AgentBiddingContract {
         Ok(())
     }
 
+    /// Admin: Slash (burn a percentage of) an agent's staked security bond
+    /// for non-delivery or contract violation. Returns the amount slashed.
+    pub fn slash_agent_bond(
+        env: Env,
+        agent_id: Address,
+        percentage: u32,
+    ) -> Result<i128, Error> {
+        require_admin(&env)?;
+
+        if percentage > 100 {
+            return Err(Error::InvalidReputation);
+        }
+
+        let bond_key = DataKey::AgentBond(agent_id.clone());
+        let current_bond: i128 = env
+            .storage()
+            .persistent()
+            .get(&bond_key)
+            .unwrap_or(0);
+
+        if current_bond <= 0 {
+            return Ok(0);
+        }
+
+        let amount_to_slash = current_bond
+            .checked_mul(percentage as i128)
+            .and_then(|v| v.checked_div(100))
+            .unwrap_or(0);
+
+        let remaining = current_bond.saturating_sub(amount_to_slash);
+        if remaining > 0 {
+            env.storage()
+                .persistent()
+                .set(&bond_key, &remaining);
+        } else {
+            env.storage().persistent().remove(&bond_key);
+        }
+
+        extend_ttl_for_key(&env, &bond_key);
+
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("bond_slsh")),
+            BondSlashed {
+                task_id: Symbol::new(&env, "bond_slash"),
+                bidder: agent_id,
+                penalty_stroops: amount_to_slash,
+                remaining_stroops: remaining,
+            },
+        );
+
+        Ok(amount_to_slash)
+    }
+
+    /// Get an agent's current security bond balance.
+    pub fn get_agent_bond(env: Env, agent_id: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AgentBond(agent_id))
+            .unwrap_or(0)
+    }
+
+    /// Admin: Stake or update an agent's security bond (for locking collateral).
+    pub fn set_agent_bond(env: Env, agent_id: Address, amount: i128) -> Result<(), Error> {
+        require_admin(&env)?;
+
+        if amount < 0 {
+            return Err(Error::InvalidAmount);
+        }
+
+        let bond_key = DataKey::AgentBond(agent_id.clone());
+        if amount > 0 {
+            env.storage().persistent().set(&bond_key, &amount);
+            extend_ttl_for_key(&env, &bond_key);
+        } else {
+            env.storage().persistent().remove(&bond_key);
+        }
+
+        Ok(())
+    }
+
     // ── Submit Sealed Bid ─────────────────────────────────────────────────
 
     /// Submit a sealed bid during the bidding period.

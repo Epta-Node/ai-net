@@ -28,7 +28,13 @@ import { metricsService } from './metrics';
 import { quotaMetricsRegistry } from './quota/metrics';
 import { getQueueRetryMetrics } from '../queue/backoff';
 import { getCostBudgetStatus } from './budget';
-import { getVeniceKeyHealthStore } from './venice/keyHealth';
+import { getSseMetricsSnapshot } from './sseMetrics';
+import { getQualityScoreCacheTotals } from './qualityScoreCache';
+import { getEventStoreColdSizeBytes, getEventStoreHotSizeBytes } from '../events/eventColdArchive';
+import { databasePoolMetrics } from '../db/metrics';
+import { getDbQueryMetricsSnapshot } from '../db/queryMetrics';
+import { getActiveVeniceKeyPool } from './venice/keyPool';
+import { getAgentWatchdogEvictionsTotal } from './agentWatchdog';
 import type { RequestSample } from './metrics.types';
 
 const logger = createLogger({ component: 'prometheus' });
@@ -145,6 +151,7 @@ function collectQueueMetrics(): string {
     let processing = 0;
     let completed = 0;
     let failed = 0;
+    let deadLetter = 0;
 
     for (const row of rows) {
       const count = Number(row.count) || 0;
@@ -153,11 +160,13 @@ function collectQueueMetrics(): string {
         case 'processing': processing = count; break;
         case 'completed': completed = count; break;
         case 'failed': failed = count; break;
+        case 'dead-letter': deadLetter = count; break;
       }
     }
 
     out += formatGauge('ainet_queue_pending', 'Pending jobs in queue', pending);
     out += formatGauge('ainet_queue_processing', 'Currently processing jobs', processing);
+    out += formatGauge('ainet_queue_dlq_depth', 'Jobs parked in the dead-letter queue awaiting replay or purge', deadLetter);
     out += formatCounter('ainet_queue_completed_total', 'Total completed jobs', completed);
     out += formatCounter('ainet_queue_failed_total', 'Total failed jobs', failed);
 
@@ -350,44 +359,102 @@ function collectQuotaMetrics(): string {
   }
 }
 
+/** Task event SSE stream counters (issue #813). */
+function collectSseMetrics(): string {
+  const sse = getSseMetricsSnapshot();
+  let out = '';
+  out += formatGauge('sse_active_connections', 'Open task event SSE streams', sse.activeConnections);
+  out += formatCounter('sse_events_sent_total', 'Task events written to SSE clients', sse.eventsSent);
+  out += formatCounter('sse_events_dropped_total', 'Task events dropped by SSE backpressure', sse.eventsDropped);
+  out += formatCounter(
+    'sse_connections_timed_out_total',
+    'SSE streams closed for a client that stopped accepting writes',
+    sse.connectionsTimedOut,
+  );
+  return out;
+}
+
 /**
- * Venice fallback key health (issue #741).
- *
- * Keys are labelled by `key_id` — the truncated SHA-256 identity from the
- * health store — so this family is safe to expose on a scrape endpoint that
- * may be reachable beyond the admin plane; the key itself never appears.
+ * SQLite query latency histogram, pool utilisation and slow-query counters
+ * (issue #807). Pools that have not been opened yet are omitted.
  */
-function collectVeniceKeyHealthMetrics(): string {
-  try {
-    const snapshots = getVeniceKeyHealthStore().snapshot();
-    if (snapshots.length === 0) return '';
+function collectDbMetrics(): string {
+  const queries = getDbQueryMetricsSnapshot();
+  const pools = databasePoolMetrics();
+  let out = '';
 
-    let out = '';
-    out += '# HELP ainet_venice_key_health Whether a Venice API key is usable right now: 1 healthy, 0.5 degraded, 0 cooling down\n';
-    out += '# TYPE ainet_venice_key_health gauge\n';
-    out += '# HELP ainet_venice_key_error_rate Rolling failure ratio per Venice key (0..1)\n';
-    out += '# TYPE ainet_venice_key_error_rate gauge\n';
-    out += '# HELP ainet_venice_key_latency_milliseconds Smoothed request latency per Venice key in ms (0 before the first call)\n';
-    out += '# TYPE ainet_venice_key_latency_milliseconds gauge\n';
-    out += '# HELP ainet_venice_key_quota_events_total Quota rejections (HTTP 429) observed per Venice key\n';
-    out += '# TYPE ainet_venice_key_quota_events_total counter\n';
-
-    for (const key of snapshots) {
-      const labels = {
-        provider: escapeLabelValue(key.id),
-        key_id: escapeLabelValue(key.keyId),
-      };
-      const status = key.state === 'healthy' ? 1 : key.state === 'degraded' ? 0.5 : 0;
-      out += formatGauge('ainet_venice_key_health', 'Whether a Venice API key is usable right now: 1 healthy, 0.5 degraded, 0 cooling down', status, labels);
-      out += formatGauge('ainet_venice_key_error_rate', 'Rolling failure ratio per Venice key (0..1)', key.errorRate, labels);
-      out += formatGauge('ainet_venice_key_latency_milliseconds', 'Smoothed request latency per Venice key in ms (0 before the first call)', key.avgLatencyMs ?? 0, labels);
-      out += formatCounter('ainet_venice_key_quota_events_total', 'Quota rejections (HTTP 429) observed per Venice key', key.quotaEvents, labels);
+  out += '# HELP db_query_duration_seconds SQLite statement duration in seconds\n';
+  out += '# TYPE db_query_duration_seconds histogram\n';
+  for (const [db, series] of Object.entries(queries.databases)) {
+    for (const [operation, op] of Object.entries(series.operations)) {
+      if (!op) continue;
+      const labels = `db="${escapeLabelValue(db)}",operation="${operation}"`;
+      let cumulative = 0;
+      for (const bucket of op.buckets) {
+        cumulative += bucket.count;
+        out += `db_query_duration_seconds_bucket{${labels},le="${bucket.le}"} ${cumulative}\n`;
+      }
+      out += `db_query_duration_seconds_bucket{${labels},le="+Inf"} ${op.count}\n`;
+      out += `db_query_duration_seconds_sum{${labels}} ${op.sumSeconds}\n`;
+      out += `db_query_duration_seconds_count{${labels}} ${op.count}\n`;
     }
-    return out;
-  } catch (err) {
-    logger.debug({ err }, 'venice key health metrics unavailable');
-    return '';
   }
+
+  out += '# HELP db_pool_connections_active Connections currently checked out, per database\n';
+  out += '# TYPE db_pool_connections_active gauge\n';
+  for (const [db, pool] of Object.entries(pools)) {
+    out += `db_pool_connections_active{db="${escapeLabelValue(db)}"} ${pool.activeConnections}\n`;
+  }
+
+  out += '# HELP db_pool_connections_waiting Callers waiting for a free connection, per database\n';
+  out += '# TYPE db_pool_connections_waiting gauge\n';
+  for (const [db, pool] of Object.entries(pools)) {
+    out += `db_pool_connections_waiting{db="${escapeLabelValue(db)}"} ${pool.pendingAcquires}\n`;
+  }
+
+  out += '# HELP db_slow_queries_total Statements at or above SLOW_QUERY_THRESHOLD_MS, per database\n';
+  out += '# TYPE db_slow_queries_total counter\n';
+  for (const [db, series] of Object.entries(queries.databases)) {
+    out += `db_slow_queries_total{db="${escapeLabelValue(db)}"} ${series.slowQueries}\n`;
+  }
+  return out;
+}
+
+/** Agent watchdog evictions since process start (issue #804). */
+function collectWatchdogMetrics(): string {
+  return formatCounter(
+    'agent_watchdog_evictions_total',
+    'Agents evicted for missing their heartbeat grace period',
+    getAgentWatchdogEvictionsTotal(),
+  );
+}
+
+/** Venice API keys currently available for rotation (issue #806). */
+function collectVeniceKeyPoolMetrics(): string {
+  const pool = getActiveVeniceKeyPool();
+  return formatGauge(
+    'venice_key_pool_healthy_count',
+    'Venice API keys not currently cooling down',
+    pool?.healthyCount() ?? 0,
+  );
+}
+
+/** Event database and cold archive sizes on disk (issue #809). */
+function collectEventStoreMetrics(): string {
+  let out = '';
+  out += formatGauge('event_store_hot_size_bytes', 'Event database file size in bytes', getEventStoreHotSizeBytes());
+  out += formatGauge('event_store_cold_size_bytes', 'Cold event archive size in bytes', getEventStoreColdSizeBytes());
+  return out;
+}
+
+/** Quality scorer result cache counters (issue #812). */
+function collectQualityScoreCacheMetrics(): string {
+  const totals = getQualityScoreCacheTotals();
+  let out = '';
+  out += formatCounter('quality_scorer_cache_hits_total', 'Quality score cache hits', totals.hits);
+  out += formatCounter('quality_scorer_cache_misses_total', 'Quality score cache misses', totals.misses);
+  out += formatGauge('quality_scorer_cache_size', 'Entries in the quality score cache', totals.size);
+  return out;
 }
 
 function collectProcessMetrics(): string {
@@ -441,7 +508,17 @@ export function generatePrometheusMetrics(): string {
   body += '\n';
   body += collectQuotaMetrics();
   body += '\n';
-  body += collectVeniceKeyHealthMetrics();
+  body += collectSseMetrics();
+  body += '\n';
+  body += collectQualityScoreCacheMetrics();
+  body += '\n';
+  body += collectEventStoreMetrics();
+  body += '\n';
+  body += collectDbMetrics();
+  body += '\n';
+  body += collectVeniceKeyPoolMetrics();
+  body += '\n';
+  body += collectWatchdogMetrics();
   body += '\n';
   body += collectProcessMetrics();
 
