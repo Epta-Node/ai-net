@@ -93,6 +93,10 @@ Each contract/module has a designated audit focus area:
 3. Fault injection tests pass in CI.
 4. Reconciliation job detects drift within 5 minutes.
 5. i18n parity test confirms en/zh key equality.
+6. Automated controls (`security-audit`, `secret-scan`, `container-scan`,
+   CodeQL — see *Automated Controls* in `SECURITY_CHECKLIST.md`) are green
+   for the release commit, and the manual Soroban invariants (M1–M12) have
+   been signed off by a second reviewer.
 
 ---
 
