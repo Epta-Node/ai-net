@@ -31,6 +31,7 @@ const LANGUAGE_OPTIONS: Record<
 > = {
   en: { flag: '🇬🇧', nativeName: 'English', shortLabel: 'EN' },
   zh: { flag: '🇨🇳', nativeName: '中文', shortLabel: '中文' },
+  es: { flag: '🇪🇸', nativeName: 'Español', shortLabel: 'ES' },
 }
 
 const TopNav: React.FC<TopNavProps> = ({ 
