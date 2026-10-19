@@ -344,6 +344,11 @@ const TaskDetailPage: React.FC = () => {
               {task?.status || 'queued'}
             </div>
           </div>
+          {/* The visible status is hidden on small screens; this live region
+              announces every task / stream status change regardless (#726). */}
+          <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {`${t('common.status')}: ${task?.status || 'queued'}. ${t('page.task.wsStatus', { status: wsBadge.label })}`}
+          </span>
           <button
             onClick={refetch}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-[var(--surface-elevated)] hover:bg-[var(--surface-muted)] border border-[var(--border-strong)] transition"

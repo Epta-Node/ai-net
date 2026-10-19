@@ -61,6 +61,9 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
   const location = useLocation()
   const navigate = useNavigate()
   const drawerRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+  const lastPathname = useRef(location.pathname)
+  const [routeAnnouncement, setRouteAnnouncement] = useState('')
 
   // Re-read when the identity changes, so connecting a wallet adopts that
   // wallet's saved preference instead of carrying over the anonymous one.
@@ -84,6 +87,25 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
 
   useEffect(() => {
     setIsDrawerOpen(false)
+  }, [location.pathname])
+
+  // Client-side navigation never moves focus or fires a page load, so screen
+  // reader and keyboard users are left on the clicked link. Move focus to the
+  // main landmark and announce the new page title (Issue #726). Keyed on the
+  // last pathname, not a first-render flag, so a fresh page load keeps the
+  // browser's own focus order even under StrictMode's double effect run.
+  useEffect(() => {
+    if (lastPathname.current === location.pathname) return
+    lastPathname.current = location.pathname
+    mainRef.current?.focus({ preventScroll: true })
+    // Read the title after the new route has painted its heading.
+    const frame = window.requestAnimationFrame(() => {
+      const title = document.getElementById('page-title')?.textContent?.trim()
+      if (title) setRouteAnnouncement(t('a11y.navigatedTo', { page: title }))
+    })
+    return () => window.cancelAnimationFrame(frame)
+    // `t` is left out on purpose: a language switch is not a navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
 
   useEffect(() => {
@@ -159,7 +181,12 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
         )}
       </AnimatePresence>
 
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="route-announcer">
+        {routeAnnouncement}
+      </div>
+
       <main
+        ref={mainRef}
         id="main-content"
         className={`main-content ${!isMobile && sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
         tabIndex={-1}

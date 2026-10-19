@@ -334,6 +334,7 @@
   "nav.group.work": "工作",
   "nav.group.account": "账户",
   "a11y.skipToContent": "跳到主要内容",
+  "a11y.navigatedTo": "已导航至 {{page}}",
   "a11y.dismissNotification": "关闭通知",
   "palette.label": "命令面板",
   "palette.placeholder": "搜索智能体、任务或页面…",
