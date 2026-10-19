@@ -20,6 +20,7 @@ Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provide
 10. [Downtime Handling & Graceful Shutdown](#10-downtime-handling--graceful-shutdown)
 11. [Backup & Disaster Recovery](#11-backup--disaster-recovery)
 12. [Troubleshooting & Common Errors](#12-troubleshooting--common-errors)
+13. [Incident Runbooks](#13-incident-runbooks)
 
 ---
 
@@ -620,3 +621,21 @@ The bundled collector (Jaeger all-in-one with OTLP enabled) exposes OTLP/gRPC on
 - **Repository**: [GitHub Epta-Node/ai-net](https://github.com/Epta-Node/ai-net)
 - **Issues**: Report bugs or feature requests on the GitHub Issue Tracker.
 - **Stellar Developer Discord**: Join `#soroban` and `#ecosystem` channels for protocol support.
+
+---
+
+## 13. Incident Runbooks
+
+Step-by-step resolution procedures for the five most common production incidents are maintained in a dedicated appendix:
+
+**[docs/operations/runbooks.md](operations/runbooks.md)**
+
+Runbooks covered:
+
+1. Agent goes offline mid-task
+2. Payment reconciliation drift
+3. Stellar transaction stuck in pending
+4. Venice AI — all keys cooling down
+5. Disk space warning — archive directory full
+
+Each runbook follows the format: **Symptoms → Diagnosis commands → Resolution steps → Verification**.
