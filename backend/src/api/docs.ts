@@ -598,6 +598,45 @@ List endpoints support standardized query parameters:
               type: "array",
               items: { $ref: "#/components/schemas/QueueJob" },
             },
+            veniceKeyHealth: {
+              type: "array",
+              description:
+                "Per-key health of the Venice fallback chain (issue #741). Keys are identified by a truncated SHA-256 keyId; the key itself is never returned.",
+              items: {
+                type: "object",
+                required: ["id", "keyId", "state"],
+                properties: {
+                  id: { type: "string", example: "primary" },
+                  keyId: { type: "string", example: "9f86d081884c7d65" },
+                  state: {
+                    type: "string",
+                    enum: ["healthy", "degraded", "cooldown"],
+                    example: "healthy",
+                  },
+                  cooldownUntil: {
+                    type: "number",
+                    format: "int64",
+                    nullable: true,
+                    description: "Epoch ms until which the key is skipped by the rotation",
+                  },
+                  successes: { type: "integer", example: 42 },
+                  failures: { type: "integer", example: 1 },
+                  quotaEvents: {
+                    type: "integer",
+                    example: 1,
+                    description: "HTTP 429 rejections observed for this key",
+                  },
+                  errorRate: {
+                    type: "number",
+                    example: 0.023,
+                    description: "Failures / attempts over the rolling window",
+                  },
+                  avgLatencyMs: { type: "number", nullable: true, example: 812 },
+                  lastSuccessAt: { type: "number", format: "int64", nullable: true },
+                  lastFailureAt: { type: "number", format: "int64", nullable: true },
+                },
+              },
+            },
           },
         },
         WebSocketHandshake: {

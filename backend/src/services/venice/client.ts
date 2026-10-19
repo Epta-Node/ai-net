@@ -1,10 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { createLogger } from '../../utils/logger.js';
-import { CircuitBreaker } from './circuitBreaker.js';
+import { CircuitBreaker, type CircuitMetrics, type CircuitState, type CircuitTransition } from './circuitBreaker.js';
 import { trackCircuitBreaker } from '../circuitBreaker.js';
 import { CircuitOpenError, TokenBudgetExceededError, VeniceStatusError } from './errors.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
+import {
+  getVeniceKeyHealthStore,
+  type VeniceKeyFailureKind,
+  type VeniceKeyHealthSnapshot,
+  type VeniceKeyHealthStore,
+} from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
 import type {
   AgentType,
@@ -99,6 +105,25 @@ function shouldFailoverToNextProvider(err: Error): boolean {
   return err.status >= 500;
 }
 
+/**
+ * Bucket a provider failure for the key-health store (issue #741).
+ *
+ * The status code is what matters: a 429 is a property of the key's quota
+ * window rather than of the service, so it is the only kind that earns the
+ * key a cooldown. A 401 may be a misconfigured deployment-wide secret, and a
+ * 5xx is usually the service itself — cooling those keys down would drop a
+ * chain that is already failing over for a reason that has nothing to do with
+ * which key was used.
+ */
+function classifyVeniceFailure(err: Error): VeniceKeyFailureKind {
+  if (err instanceof VeniceStatusError) {
+    if (err.status === 429) return 'quota';
+    if (err.status === 401) return 'auth';
+    return 'server';
+  }
+  return 'transport';
+}
+
 /** A completed upstream call: the text plus what it cost in tokens. */
 interface FetchOutcome {
   content: string;
@@ -148,6 +173,8 @@ export class VeniceClient implements VeniceClientLike {
   private readonly breaker: CircuitBreaker;
   private readonly cache: VeniceResponseCache;
   private readonly deduplicator: RequestDeduplicator;
+  /** Per-key health backing the fallback rotation (issue #741). */
+  private readonly keyHealth: VeniceKeyHealthStore;
   private readonly modelVersion: string;
   private readonly timeoutMs: number;
   private readonly maxRetries: number;
@@ -164,7 +191,7 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   constructor(config: VeniceClientConfig) {
-    this.breaker = config.circuitBreaker ?? new CircuitBreaker({ name: 'venice' });
+    this.breaker = config.circuitBreaker ?? this.createBreaker(config);
     // Expose this breaker to `/health/deep`; untracked again in dispose().
     this.circuitUnsubscribers.push(trackCircuitBreaker(this.breaker));
 
@@ -195,6 +222,12 @@ export class VeniceClient implements VeniceClientLike {
     } else {
       this.providers = this.buildProvidersFromEnv(config);
     }
+
+    // Per-key health is process-wide by default: every client built from the
+    // same env keys feeds one history, which `/api/admin/status` and the
+    // metrics surface then read from.
+    this.keyHealth = config.keyHealth ?? getVeniceKeyHealthStore();
+    this.keyHealth.register(this.providers);
 
     const cacheConfig = config.cacheConfig ?? {};
     this.cache =
@@ -366,6 +399,14 @@ export class VeniceClient implements VeniceClientLike {
     return [...this.providers];
   }
 
+  /**
+   * Redacted per-key health for the fallback chain (issue #741): cooldowns,
+   * error rates and latency, identified by `keyId` — never by the key itself.
+   */
+  getKeyHealth(): VeniceKeyHealthSnapshot[] {
+    return this.keyHealth.snapshot();
+  }
+
   /** Current cache hit rate (0..1) for monitoring. */
   getCacheHitRate(): number {
     return this.cache.getHitRate();
@@ -452,6 +493,9 @@ export class VeniceClient implements VeniceClientLike {
 
     try {
       this.breaker.assertClosed();
+      // Only a HALF_OPEN admit reserves a probe slot; a CLOSED admit reserves
+      // none, so `release()` must not run for those calls.
+      probeHeld = this.breaker.getState() === 'HALF_OPEN';
     } catch (e) {
       if (this.enableCacheFallback && !options?.force) {
         const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
@@ -462,55 +506,76 @@ export class VeniceClient implements VeniceClientLike {
           this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
           return stale;
         }
-        throw e;
       }
+      throw e;
+    }
 
+    try {
       const force = options?.force === true;
       const cacheKey = buildCacheKey(promptForLogging, agentType, this.modelVersion);
 
-    if (!force) {
-      const cached = this.cache.get(promptForLogging, agentType, this.modelVersion);
-      if (cached !== null) {
-        log.info(
-          { agentType, model, modelVersion: this.modelVersion, hitRate: this.cache.getHitRate() },
-          'venice cache hit',
-        );
-        this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
-        return cached;
+      if (!force) {
+        const cached = this.cache.get(promptForLogging, agentType, this.modelVersion);
+        if (cached !== null) {
+          log.info(
+            { agentType, model, modelVersion: this.modelVersion, hitRate: this.cache.getHitRate() },
+            'venice cache hit',
+          );
+          this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+          return cached;
+        }
       }
 
-    const runFetch = (): Promise<FetchOutcome> =>
-      this.runVeniceFetch({ messages, model, options, maxTokens, promptForLogging, agentType });
+      const runFetch = (): Promise<FetchOutcome> =>
+        this.runVeniceFetch({
+          messages,
+          model,
+          options,
+          maxTokens,
+          promptForLogging,
+          agentType,
+          settleSuccess,
+          settleFailure,
+        });
 
-    let outcome: FetchOutcome;
-    try {
-      outcome = force ? await runFetch() : await this.deduplicator.dedup(cacheKey, runFetch);
-    } catch (err) {
-      // Graceful degradation: if all providers failed and we have stale cache, return it
-      if (this.enableCacheFallback && !force) {
-        const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
-        if (stale !== null) {
-          log.warn(
-            { agentType, model, error: err instanceof Error ? err.message : String(err) },
-            'venice all providers failed — serving stale cache (graceful degradation)',
-          );
-          // We *tried* to spend here, so estimate rather than reporting zero:
-          // the failed attempt did consume provider compute.
-          this.reportUsage(options, estimateUsage(promptForLogging, ''));
-          return stale;
+      let outcome: FetchOutcome;
+      try {
+        outcome = force ? await runFetch() : await this.deduplicator.dedup(cacheKey, runFetch);
+      } catch (err) {
+        // Graceful degradation: if all providers failed and we have stale cache, return it
+        if (this.enableCacheFallback && !force) {
+          const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
+          if (stale !== null) {
+            log.warn(
+              { agentType, model, error: err instanceof Error ? err.message : String(err) },
+              'venice all providers failed — serving stale cache (graceful degradation)',
+            );
+            // We *tried* to spend here, so estimate rather than reporting zero:
+            // the failed attempt did consume provider compute.
+            this.reportUsage(options, estimateUsage(promptForLogging, ''));
+            return stale;
+          }
         }
         throw err;
       }
 
-    // Report here rather than inside runVeniceFetch: the deduplicator shares
-    // one promise across concurrent identical requests, and each caller passed
-    // its own onUsage callback and budget context.
-    this.reportUsage(options, outcome.usage);
+      // Report here rather than inside runVeniceFetch: the deduplicator shares
+      // one promise across concurrent identical requests, and each caller passed
+      // its own onUsage callback and budget context.
+      this.reportUsage(options, outcome.usage);
 
-    if (!force) {
-      this.cache.set(promptForLogging, agentType, this.modelVersion, outcome.content);
+      if (!force) {
+        this.cache.set(promptForLogging, agentType, this.modelVersion, outcome.content);
+      }
+      return outcome.content;
+    } finally {
+      // A call that never reached the network (cache hit above, or an error
+      // raised before the fetch settled the probe) hands its HALF_OPEN slot
+      // back, so the probe budget is not leaked.
+      if (probeHeld && !settled) {
+        this.breaker.release();
+      }
     }
-    return outcome.content;
   }
 
   /** Fire the caller's usage callback, if any. Never throws into the caller. */
@@ -542,10 +607,19 @@ export class VeniceClient implements VeniceClientLike {
     maxTokens: number;
     promptForLogging: string;
     agentType: string;
+    /**
+     * Settle the caller's HALF_OPEN probe exactly once. Supplied by
+     * `createCompletion`, which owns the admission; when absent the fetch
+     * settles the breaker itself so a standalone call still reports its outcome.
+     */
+    settleSuccess?: () => void;
+    settleFailure?: () => void;
   }): Promise<FetchOutcome> {
     const requestId = randomUUID();
     const start = Date.now();
     let retries = 0;
+    const succeed = settleSuccess ?? ((): void => { this.breaker.recordSuccess(); });
+    const fail = settleFailure ?? ((): void => { this.breaker.recordFailure(); });
 
     const body = JSON.stringify({
       model,
@@ -556,9 +630,12 @@ export class VeniceClient implements VeniceClientLike {
 
     let lastError: Error | undefined;
 
-    // Try providers in order (fallback chain)
-    for (let pIndex = 0; pIndex < this.providers.length; pIndex++) {
-      const provider = this.providers[pIndex]!;
+    // Try providers in health order (fallback chain): a key inside a quota
+    // cooldown sorts last so the call does not pay for a known 429 (issue #741).
+    const chain = this.keyHealth.order(this.providers);
+    for (let pIndex = 0; pIndex < chain.length; pIndex++) {
+      const provider = chain[pIndex]!;
+      const attemptStart = Date.now();
 
       try {
         const response = await this.fetchWithRetryForProvider(
@@ -578,7 +655,8 @@ export class VeniceClient implements VeniceClientLike {
         // anything.
         const usage = parseUsage(data) ?? estimateUsage(promptForLogging, content);
 
-        this.breaker.recordSuccess();
+        this.keyHealth.recordSuccess(provider.name ?? 'primary', Date.now() - attemptStart);
+        succeed();
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'ok', retries, provider.name, usage);
         return { content, usage };
       } catch (err) {
@@ -586,14 +664,27 @@ export class VeniceClient implements VeniceClientLike {
           throw err;
         }
         lastError = err instanceof Error ? err : new Error(String(err));
+        this.keyHealth.recordFailure(
+          provider.name ?? 'primary',
+          classifyVeniceFailure(lastError),
+          Date.now() - attemptStart,
+        );
         // A 401 may still succeed on a fallback holding a different key, so it
         // fails over; other 4xx statuses will be rejected by every provider and
         // only serve to amplify load, so they fail fast.
         const mayFailover = shouldFailoverToNextProvider(lastError);
-        if (mayFailover && pIndex < this.providers.length - 1) {
-          const nextProvider = this.providers[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
+        if (mayFailover && pIndex < chain.length - 1) {
+          const nextProvider = chain[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
           log.warn(
-            { agentType, model, failedProvider: provider.name, nextProvider, error: lastError.message, retries },
+            {
+              agentType,
+              model,
+              failedProvider: provider.name,
+              failedKeyId: this.keyHealth.keyIdFor(provider.name ?? 'primary'),
+              nextProvider,
+              error: lastError.message,
+              retries,
+            },
             'venice provider failed — failing over to next provider',
           );
           // small backoff before failover to next provider
@@ -601,7 +692,7 @@ export class VeniceClient implements VeniceClientLike {
           continue;
         }
         // Last provider failed — record failure for circuit breaker
-        settleFailure();
+        fail();
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'error', retries, provider.name);
         // If we have stale cache fallback enabled, the caller (createCompletion) will handle it
         throw lastError;
@@ -609,7 +700,7 @@ export class VeniceClient implements VeniceClientLike {
     }
 
     // Should not reach here, but fallback
-    settleFailure();
+    fail();
     throw lastError ?? new Error('Venice AI is unreachable (all providers failed)');
   }
 
@@ -672,8 +763,13 @@ export class VeniceClient implements VeniceClientLike {
     let delivered = 0;
     let lastError: Error | undefined;
 
-    for (let pIndex = 0; pIndex < this.providers.length; pIndex++) {
-      const provider = this.providers[pIndex]!;
+    try {
+    // Health-ordered chain, same as runVeniceFetch: keys inside a quota
+    // cooldown sort last (issue #741).
+    const chain = this.keyHealth.order(this.providers);
+    for (let pIndex = 0; pIndex < chain.length; pIndex++) {
+      const provider = chain[pIndex]!;
+      const attemptStart = Date.now();
       // Per-attempt buffer. Reset up front so no state leaks between providers.
       let accumulated = '';
       const deltas: string[] = [];
@@ -704,7 +800,9 @@ export class VeniceClient implements VeniceClientLike {
             const delta = parsed?.choices?.[0]?.delta?.content;
             if (typeof delta === 'string' && delta.length > 0) {
               accumulated += delta;
-              onChunk(delta);
+              // Buffered rather than delivered here: the caller only sees an
+              // attempt's output once that attempt completes (issue #661).
+              deltas.push(delta);
             }
           } catch (err) {
             // A complete-but-unparseable frame is counted and surfaced rather
@@ -727,21 +825,9 @@ export class VeniceClient implements VeniceClientLike {
           const result = await reader.read();
           done = result.done;
           if (result.value) {
-            const text = decoder.decode(result.value, { stream: !done });
-            const lines = text.split('\n');
-            for (const line of lines) {
-              if (!line.startsWith('data: ')) continue;
-              const payload = line.slice(6).trim();
-              if (payload === '[DONE]') continue;
-              try {
-                const parsed = JSON.parse(payload);
-                const delta = parsed?.choices?.[0]?.delta?.content;
-                if (typeof delta === 'string' && delta.length > 0) {
-                  accumulated += delta;
-                  deltas.push(delta);
-                }
-              }
-            }
+            // `stream: true` keeps a multi-byte UTF-8 sequence that straddles
+            // a chunk boundary intact; the final read flushes the decoder.
+            buffer += decoder.decode(result.value, { stream: !done });
           }
 
           // Everything up to the last newline is a complete line; the remainder
@@ -771,7 +857,8 @@ export class VeniceClient implements VeniceClientLike {
         for (const delta of deltas) onChunk(delta);
         delivered = accumulated.length;
 
-        this.breaker.recordSuccess();
+        this.keyHealth.recordSuccess(provider.name ?? 'primary', Date.now() - attemptStart);
+        settleSuccess();
         // SSE frames only carry deltas, so there is no provider usage block to
         // read. Estimate from the prompt and everything we actually received;
         // the completion side is exact because we buffered it.
@@ -788,18 +875,36 @@ export class VeniceClient implements VeniceClientLike {
         const droppedChars = accumulated.length;
         accumulated = '';
         lastError = err instanceof Error ? err : new Error(String(err));
+        this.keyHealth.recordFailure(
+          provider.name ?? 'primary',
+          classifyVeniceFailure(lastError),
+          Date.now() - attemptStart,
+        );
         const mayFailover = shouldFailoverToNextProvider(lastError);
-        if (mayFailover && pIndex < this.providers.length - 1) {
-          log.warn({ agentType, model, failedProvider: provider.name, error: lastError.message, droppedChars }, 'venice stream provider failed — failover');
+        if (mayFailover && pIndex < chain.length - 1) {
+          const nextProvider = chain[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
+          log.warn(
+            {
+              agentType,
+              model,
+              failedProvider: provider.name,
+              failedKeyId: this.keyHealth.keyIdFor(provider.name ?? 'primary'),
+              nextProvider,
+              error: lastError.message,
+              droppedChars,
+            },
+            'venice stream provider failed — failover',
+          );
           await this.sleep(100);
           continue;
         }
-        this.breaker.recordFailure();
+        settleFailure();
         this.logRequest(requestId, agentType, model, prompt, Date.now() - start, 'error', retries, provider.name);
         throw new Error(
           `Venice stream error after ${delivered} characters delivered: ${lastError.message}`
         );
       }
+    }
 
       settleFailure();
       throw lastError ?? new Error('Venice stream failed (all providers)');

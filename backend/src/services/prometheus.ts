@@ -15,6 +15,7 @@
  *  • Per-wallet daily quota gauges and rejection counter (Issue #738)
  *  • Task token budget / spend gauges
  *  • LLM cost by agent type and model, and daily cost budget gauges (Issue #750)
+ *  • Venice fallback key health: status, error rate, latency, quota events (Issue #741)
  *  • Process uptime and memory gauges
  *
  * The collector reads live data from the existing {@link MetricsService},
@@ -27,6 +28,7 @@ import { metricsService } from './metrics';
 import { quotaMetricsRegistry } from './quota/metrics';
 import { getQueueRetryMetrics } from '../queue/backoff';
 import { getCostBudgetStatus } from './budget';
+import { getVeniceKeyHealthStore } from './venice/keyHealth';
 import type { RequestSample } from './metrics.types';
 
 const logger = createLogger({ component: 'prometheus' });
@@ -348,6 +350,46 @@ function collectQuotaMetrics(): string {
   }
 }
 
+/**
+ * Venice fallback key health (issue #741).
+ *
+ * Keys are labelled by `key_id` — the truncated SHA-256 identity from the
+ * health store — so this family is safe to expose on a scrape endpoint that
+ * may be reachable beyond the admin plane; the key itself never appears.
+ */
+function collectVeniceKeyHealthMetrics(): string {
+  try {
+    const snapshots = getVeniceKeyHealthStore().snapshot();
+    if (snapshots.length === 0) return '';
+
+    let out = '';
+    out += '# HELP ainet_venice_key_health Whether a Venice API key is usable right now: 1 healthy, 0.5 degraded, 0 cooling down\n';
+    out += '# TYPE ainet_venice_key_health gauge\n';
+    out += '# HELP ainet_venice_key_error_rate Rolling failure ratio per Venice key (0..1)\n';
+    out += '# TYPE ainet_venice_key_error_rate gauge\n';
+    out += '# HELP ainet_venice_key_latency_milliseconds Smoothed request latency per Venice key in ms (0 before the first call)\n';
+    out += '# TYPE ainet_venice_key_latency_milliseconds gauge\n';
+    out += '# HELP ainet_venice_key_quota_events_total Quota rejections (HTTP 429) observed per Venice key\n';
+    out += '# TYPE ainet_venice_key_quota_events_total counter\n';
+
+    for (const key of snapshots) {
+      const labels = {
+        provider: escapeLabelValue(key.id),
+        key_id: escapeLabelValue(key.keyId),
+      };
+      const status = key.state === 'healthy' ? 1 : key.state === 'degraded' ? 0.5 : 0;
+      out += formatGauge('ainet_venice_key_health', 'Whether a Venice API key is usable right now: 1 healthy, 0.5 degraded, 0 cooling down', status, labels);
+      out += formatGauge('ainet_venice_key_error_rate', 'Rolling failure ratio per Venice key (0..1)', key.errorRate, labels);
+      out += formatGauge('ainet_venice_key_latency_milliseconds', 'Smoothed request latency per Venice key in ms (0 before the first call)', key.avgLatencyMs ?? 0, labels);
+      out += formatCounter('ainet_venice_key_quota_events_total', 'Quota rejections (HTTP 429) observed per Venice key', key.quotaEvents, labels);
+    }
+    return out;
+  } catch (err) {
+    logger.debug({ err }, 'venice key health metrics unavailable');
+    return '';
+  }
+}
+
 function collectProcessMetrics(): string {
   const mem = process.memoryUsage();
   const uptimeSeconds = Math.floor(process.uptime());
@@ -398,6 +440,8 @@ export function generatePrometheusMetrics(): string {
   body += collectLlmMetrics(samples);
   body += '\n';
   body += collectQuotaMetrics();
+  body += '\n';
+  body += collectVeniceKeyHealthMetrics();
   body += '\n';
   body += collectProcessMetrics();
 

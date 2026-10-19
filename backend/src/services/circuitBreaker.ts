@@ -37,9 +37,13 @@ export interface CircuitBreakerEvent {
 }
 
 export class CircuitOpenError extends Error {
-  constructor(name: string) {
+  /** State the breaker was in when it shed the call, when the thrower knows it. */
+  readonly state?: CircuitState;
+
+  constructor(name: string, state?: CircuitState) {
     super(`Circuit breaker OPEN for service: ${name}`);
     this.name = 'CircuitOpenError';
+    this.state = state;
   }
 }
 
@@ -193,17 +197,28 @@ export function getAllCircuitBreakerStatuses(): ReturnType<CircuitBreaker['getSt
 // ── Tracked breakers — instances owned by their callers ──────────────────────
 
 /**
+ * Contract for breakers that are visible to health checks: a name plus a
+ * status snapshot. Structural, so caller-owned breakers that are not instances
+ * of the class above (e.g. the Venice-scoped breaker in
+ * `services/venice/circuitBreaker.ts`) can be tracked too.
+ */
+export interface CircuitBreakerLike {
+  readonly name: string;
+  getStatus(): CircuitBreakerStatus;
+}
+
+/**
  * Breakers constructed directly (e.g. one per `VeniceClient`) rather than via
  * the named registry. Several instances may share a name, so health checks
  * aggregate them with {@link summarizeCircuitBreakers}.
  */
-const tracked = new Set<CircuitBreaker>();
+const tracked = new Set<CircuitBreakerLike>();
 
 /**
  * Make a caller-owned breaker visible to health checks.
  * Returns an unsubscribe function; call it when the owner is disposed.
  */
-export function trackCircuitBreaker(breaker: CircuitBreaker): () => void {
+export function trackCircuitBreaker(breaker: CircuitBreakerLike): () => void {
   tracked.add(breaker);
   return () => {
     tracked.delete(breaker);
@@ -242,7 +257,7 @@ function maxNullable(a: number | null, b: number | null): number | null {
  * owning client has not been constructed).
  */
 export function summarizeCircuitBreakers(name: string): CircuitBreakerSummary | null {
-  const instances = new Set<CircuitBreaker>();
+  const instances = new Set<CircuitBreakerLike>();
   const registered = registry.get(name);
   if (registered) instances.add(registered);
   for (const breaker of tracked) {

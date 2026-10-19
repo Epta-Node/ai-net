@@ -70,6 +70,10 @@ const envSchema = z.object({
   VENICE_PROVIDER_MAX_RETRIES: z.coerce.number().int().positive().default(3),
   VENICE_FALLBACK_API_KEYS: z.string().optional(),
   VENICE_FALLBACK_BASE_URLS: z.string().optional(),
+  /** How long a Venice key that returned 429 is skipped by the rotation (issue #741). */
+  VENICE_KEY_COOLDOWN_MS: z.coerce.number().int().positive().default(60_000),
+  /** Upper bound for the escalated quota cooldown after repeated 429s. */
+  VENICE_KEY_COOLDOWN_MAX_MS: z.coerce.number().int().positive().default(900_000),
 
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required").default("./data/ai-net.db"),
   DB_MIGRATIONS_DIR: z.string().optional(),
