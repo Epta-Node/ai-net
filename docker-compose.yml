@@ -12,28 +12,43 @@ services:
       - STELLAR_NETWORK=standalone
       - ENABLE_SOROBAN_RPC=true
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:8000/ | grep -q 'Stellar' || exit 1"]
+      # Horizon answering and Soroban RPC reporting healthy. (Horizon's root
+      # JSON never contains "Stellar", so the old grep never passed.)
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf http://localhost:8000/ > /dev/null &&
+          curl -sf -X POST -H 'content-type: application/json'
+          -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}'
+          http://localhost:8000/soroban/rpc | grep -q '"healthy"'
       interval: 5s
       timeout: 5s
       retries: 10
+      # Quickstart needs a while to bring up core + Soroban RPC.
+      start_period: 120s
 
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    # Fixed tag so CI can prebuild with a layer cache and `up --no-build`.
+    image: ai-net-backend:local
     container_name: ai-net-backend
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=development
       - PORT=3000
-      - DATABASE_URL=sqlite:///app/data/ai_net.db
+      # A filesystem path: resolveDatabasePath() rejects URL schemes.
+      - DATABASE_URL=/app/backend/data/ai-net.db
+      # "local" selects the standalone passphrase and allows the node's http URLs.
+      - STELLAR_NETWORK=local
       - SOROBAN_RPC_URL=http://stellar-standalone:8000/soroban/rpc
       - STELLAR_HORIZON_URL=http://stellar-standalone:8000
       - VENICE_API_KEY=${VENICE_API_KEY:-mock_local_key}
       - SKIP_STELLAR_ACCOUNT_VERIFY=true
     volumes:
-      - sqlite_data:/app/data
+      - sqlite_data:/app/backend/data
     depends_on:
       stellar-standalone:
         condition: service_healthy
@@ -55,6 +70,22 @@ services:
       - VITE_API_BASE_URL=http://localhost:3000
       - VITE_STELLAR_NETWORK=standalone
       - VITE_SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Integration smoke runner (issue #753), only started with `--profile test`:
+  #   docker compose --profile test up --build --exit-code-from smoke smoke
+  # Stock node image, no install step: the script uses Node built-ins only.
+  smoke:
+    profiles: ["test"]
+    image: node:24-alpine
+    working_dir: /smoke
+    volumes:
+      - ./tests/e2e/compose-smoke.mjs:/smoke/compose-smoke.mjs:ro
+    environment:
+      - SMOKE_BASE_URL=http://backend:3000
+    command: ["node", "compose-smoke.mjs"]
     depends_on:
       backend:
         condition: service_healthy
