@@ -12,7 +12,7 @@
     "test": "jest --runInBand --forceExit",
     "test:sqlite": "jest --config jest.sqlite.config.js --runInBand --forceExit",
     "test:coverage": "jest --coverage --runInBand --forceExit",
-    "test:contract": "jest tests/openapiContract.test.ts --runInBand --forceExit",
+    "test:contract": "jest tests/openapiContract.test.ts tests/openapiRouteDiff.test.ts --runInBand --forceExit",
     "test:e2e": "jest --config ../tests/e2e/jest.config.js --runInBand --forceExit",
     "test:performance": "ts-node tests/performance/run.ts",
     "validate:env": "ts-node --transpile-only scripts/validate-env-example.ts",
