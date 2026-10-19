@@ -32,6 +32,9 @@ services:
       - STELLAR_HORIZON_URL=http://stellar-standalone:8000
       - VENICE_API_KEY=${VENICE_API_KEY:-mock_local_key}
       - SKIP_STELLAR_ACCOUNT_VERIFY=true
+      - OTEL_SAMPLING_RATE=${OTEL_SAMPLING_RATE:-1}
+      # Set to http://otel-collector:4318 when running `--profile monitoring`.
+      - OTEL_EXPORTER_ENDPOINT=${OTEL_EXPORTER_ENDPOINT:-}
     volumes:
       - sqlite_data:/app/data
     depends_on:
@@ -58,6 +61,45 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+
+  # ── Observability stack (issue #853 / #856) ─────────────────────────────────
+  # Started only with `docker compose --profile monitoring up` so the base
+  # stack keeps its default footprint.
+  otel-collector:
+    image: jaegertracing/all-in-one:1.57
+    container_name: ai-net-otel-collector
+    profiles: ["monitoring"]
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "16686:16686"
+
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: ai-net-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./backend/grafana/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: ai-net-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/ai-net-dashboard.json
+    volumes:
+      - ./backend/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./backend/grafana/ai-net-dashboard.json:/var/lib/grafana/dashboards/ai-net-dashboard.json:ro
+    depends_on:
+      - prometheus
 
 volumes:
   sqlite_data:

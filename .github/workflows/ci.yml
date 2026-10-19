@@ -590,3 +590,68 @@ jobs:
       - name: Skip notice
         if: env.STELLAR_COORDINATOR_SECRET == '' || env.VENICE_API_KEY == ''
         run: echo "Integration secrets not configured — skipping integration tests."
+
+  # ── Security scanning (issue #854) ──────────────────────────────────────────
+  # Advisory jobs, deliberately NOT wired into `ci-gate`: a flaky upstream
+  # scanner must never block a feature PR, while findings still surface on
+  # every run. Branch protection may require them separately if desired.
+  security-audit:
+    name: security-audit (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+
+      - name: Audit dependencies (fail on high+)
+        run: npm audit --audit-level=high
+
+  secret-scan:
+    name: secret-scan (trufflehog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Scan git history for leaked credentials
+        uses: trufflesecurity/trufflehog@main
+        with:
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  container-scan:
+    name: container-scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t ai-net-backend:scan .
+
+      - name: Scan image for HIGH/CRITICAL CVEs
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ai-net-backend:scan
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true

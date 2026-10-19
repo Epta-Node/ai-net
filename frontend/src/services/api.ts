@@ -7,6 +7,7 @@ import {
 } from '../types/api';
 import { progressStart, progressDone, progressError } from '../context/RouteProgressContext';
 import { readWalletSession } from './walletSession';
+import { getTraceparent } from './tracing';
 
 export class ApiError extends Error {
   statusCode: number;
@@ -46,6 +47,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     while (true) {
       const headers = {
         'Content-Type': 'application/json',
+        traceparent: getTraceparent(),
         ...getAuthHeader(),
         ...(init?.headers || {}),
       };

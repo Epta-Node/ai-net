@@ -593,6 +593,28 @@ sudo systemctl start ainet-node
 
 ---
 
+## 13. Distributed Tracing & OpenTelemetry Export (Issue #856)
+
+The backend keeps an in-memory trace store (see `docs/HEALTH_REFERENCE.md` for the `GET /health/traces/:correlationId` query) and propagates a W3C `traceparent` header end-to-end: the request-id middleware parses incoming `traceparent`, the frontend attaches one per session, the coordinator stamps one on outgoing work, and Venice API calls carry the active context as a `traceparent` request header. Escrow transactions (`lock` and `release`) additionally embed the W3C trace id in the Stellar memo (truncated to the 28-byte memo limit) so an on-chain claim can be tied back to the request that produced it.
+
+**Configuration**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OTEL_SAMPLING_RATE` | `1` | Fraction of spans stored in the queryable trace store, `0`–`1`. Error spans (`status=failed`) are **always** recorded regardless of rate, so lowering the rate never hides failures. |
+| `OTEL_EXPORTER_ENDPOINT` | unset | When set, every ended span is exported as OTLP/HTTP JSON to `${OTEL_EXPORTER_ENDPOINT}/v1/traces`. Export is fire-and-forget; failures are logged never raised. |
+
+**Running with the collector**
+
+```bash
+docker compose --profile monitoring up -d otel-collector
+OTEL_EXPORTER_ENDPOINT=http://otel-collector:4318 docker compose up -d backend
+```
+
+The bundled collector (Jaeger all-in-one with OTLP enabled) exposes OTLP/gRPC on `4317`, OTLP/HTTP on `4318`, and the Jaeger UI on `http://localhost:16686` — search by the `correlationId`/trace id shown in API responses.
+
+---
+
 ## 📞 Support & Community
 
 - **Repository**: [GitHub Epta-Node/ai-net](https://github.com/Epta-Node/ai-net)
