@@ -18,7 +18,7 @@ declare module '@stellar/stellar-sdk' {
   }
 
   export class Server {
-    constructor(serverURL: string);
+    constructor(serverURL: string, opts?: { allowHttp?: boolean });
     loadAccount(publicKey: string): Promise<AccountResponse>;
     submitTransaction(tx: Transaction): Promise<HorizonResponse>;
     claimableBalances(): ClaimableBalanceCallBuilder;
@@ -28,7 +28,7 @@ declare module '@stellar/stellar-sdk' {
 
   export namespace Horizon {
     export class Server {
-      constructor(serverURL: string);
+      constructor(serverURL: string, opts?: { allowHttp?: boolean });
       loadAccount(publicKey: string): Promise<AccountResponse>;
       submitTransaction(tx: Transaction): Promise<HorizonResponse>;
       claimableBalances(): ClaimableBalanceCallBuilder;

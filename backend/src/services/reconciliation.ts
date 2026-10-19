@@ -33,7 +33,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { Horizon, Asset } from '@stellar/stellar-sdk';
 import { createLogger } from '../utils/logger';
-import { getConfig } from '../config';
+import { getConfig, stellarClientOptions } from '../config';
 import { createPaymentDb, getDb, type PaymentDb, type PaymentRecord } from '../db/index';
 import type { EventStore } from '../events/eventStore';
 import {
@@ -173,7 +173,10 @@ export class HorizonClaimableBalanceProvider implements ClaimableBalanceProvider
   private readonly server: Horizon.Server;
 
   constructor(horizonUrl?: string) {
-    this.server = new Horizon.Server(horizonUrl ?? getConfig().STELLAR_HORIZON_URL);
+    this.server = new Horizon.Server(
+      horizonUrl ?? getConfig().STELLAR_HORIZON_URL,
+      stellarClientOptions(),
+    );
   }
 
   async getBalance(balanceId: string): Promise<ClaimableBalanceOnChain | null> {
@@ -227,7 +230,10 @@ export class HorizonClaimTransactionProvider implements ClaimTransactionProvider
   private readonly server: Horizon.Server;
 
   constructor(horizonUrl?: string) {
-    this.server = new Horizon.Server(horizonUrl ?? getConfig().STELLAR_HORIZON_URL);
+    this.server = new Horizon.Server(
+      horizonUrl ?? getConfig().STELLAR_HORIZON_URL,
+      stellarClientOptions(),
+    );
   }
 
   async findClaim(balanceId: string): Promise<ClaimTransactionOnChain | null> {

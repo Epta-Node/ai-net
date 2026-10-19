@@ -16,7 +16,7 @@ import {
 } from "./utils";
 import { tracingService } from "../services/tracing";
 import { currentTraceId } from "../services/traceContext";
-import { getConfig } from "../config";
+import { getConfig, stellarClientOptions } from "../config";
 import { getCircuitBreaker } from "../services/circuitBreaker.js";
 
 const MAX_RETRIES = 5;
@@ -75,7 +75,7 @@ export class PaymentService {
     private hooks: PaymentServiceHooks = {}
   ) {
     const config = getConfig();
-    this.server = new Server(config.STELLAR_HORIZON_URL);
+    this.server = new Server(config.STELLAR_HORIZON_URL, stellarClientOptions(config));
     this.networkPassphrase = config.STELLAR_NETWORK_PASSPHRASE;
   }
 

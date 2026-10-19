@@ -1,7 +1,7 @@
 import { z } from "zod";
-
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pkg = require("../../package.json");
+// An import (not a bare require) makes tsc emit dist/package.json, so the same
+// relative path resolves from both src/ and the compiled dist/src/.
+import pkg from "../../package.json";
 
 /**
  * Reject known placeholder values for secret-bearing configuration keys.
@@ -543,6 +543,15 @@ export const config = new Proxy({} as Config, {
     return getConfig()[property];
   },
 });
+
+/**
+ * Options for Horizon / Soroban RPC clients. The SDK rejects plain-http URLs
+ * unless `allowHttp` is set; only the local standalone network (the docker
+ * compose Stellar node) is served over http, so nothing else may skip TLS.
+ */
+export function stellarClientOptions(cfg: Config = getConfig()): { allowHttp: boolean } {
+  return { allowHttp: cfg.STELLAR_NETWORK === "local" };
+}
 
 export function ttlForRoute(group: "agents" | "stats" | "health"): number {
   const cfg = getConfig();
