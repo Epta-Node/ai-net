@@ -8,6 +8,8 @@ import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
 import './TopNav.css'
 import useTheme from '../../hooks/useTheme'
+import { useWalletBalance } from '../../hooks/useWalletBalance'
+import { useAnimatedCounter } from '../../hooks/useAnimatedCounter'
 import { Sun, Moon, Monitor } from 'lucide-react'
 
 interface TopNavProps {
@@ -31,6 +33,7 @@ const LANGUAGE_OPTIONS: Record<
 > = {
   en: { flag: '🇬🇧', nativeName: 'English', shortLabel: 'EN' },
   zh: { flag: '🇨🇳', nativeName: '中文', shortLabel: '中文' },
+  es: { flag: '🇪🇸', nativeName: 'Español', shortLabel: 'ES' },
 }
 
 const TopNav: React.FC<TopNavProps> = ({ 
@@ -46,6 +49,12 @@ const TopNav: React.FC<TopNavProps> = ({
   const { mode, setMode } = useTheme()
 
   const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
+
+  const { balanceXLM, isLoading: balanceLoading } = useWalletBalance(
+    connected && ready && publicKey ? publicKey : null
+  )
+  const numericBalance = balanceXLM ? parseFloat(balanceXLM) || 0 : 0
+  const animatedBalance = useAnimatedCounter(Math.round(numericBalance * 100)) / 100
 
   // The title mirrors the sidebar's labels via the shared nav config, so the
   // page heading and the highlighted nav entry can never disagree.
@@ -159,6 +168,15 @@ const TopNav: React.FC<TopNavProps> = ({
                 data-testid="wallet-pubkey"
               >
                 {truncateKey(publicKey)}
+              </span>
+              <span
+                className="wallet-chip connected"
+                id="wallet-balance-display"
+                data-testid="wallet-balance"
+                title={balanceXLM ? `${balanceXLM} XLM` : 'Loading balance...'}
+                style={{ fontSize: '11px', fontWeight: 600 }}
+              >
+                {balanceLoading && !balanceXLM ? '...' : `${animatedBalance.toFixed(2)} XLM`}
               </span>
               {networkLabel && (
                 <span

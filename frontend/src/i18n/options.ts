@@ -34,3 +34,17 @@ export const i18nBaseOptions: InitOptions = {
     escapeValue: false,
   },
 };
+
+/** RTL languages list for layout direction calculation (#820) */
+export const RTL_LANGUAGES: readonly string[] = ['ar', 'he', 'fa', 'ur'];
+
+export const isRtlLanguage = (lng: string): boolean => {
+  if (!lng) return false;
+  const code = lng.split('-')[0].toLowerCase();
+  return RTL_LANGUAGES.includes(code);
+};
+
+export const getTextDirection = (lng: string): 'rtl' | 'ltr' => {
+  return isRtlLanguage(lng) ? 'rtl' : 'ltr';
+};
+

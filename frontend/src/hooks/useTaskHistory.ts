@@ -103,6 +103,68 @@ export function formatDuration(ms: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+// ─── Cursor merging & virtualisation (#816) ──────────────────────────────────
+
+/** Default page size requested from the cursor endpoint. */
+export const DEFAULT_TASK_PAGE_SIZE = 50;
+
+/**
+ * Appends a cursor page to the tasks already loaded. A task that shows up in
+ * two cursor windows (clock skew between pages) is kept once, in its original
+ * position, updated to the newer copy so a status change isn't lost. New tasks
+ * are appended in page order; display sorting happens in `filteredTasks`.
+ */
+export function mergeTaskPages(existing: TaskResponse[], incoming: TaskResponse[]): TaskResponse[] {
+  const byId = new Map<string, TaskResponse>();
+  for (const task of existing) byId.set(task.taskId, task);
+  for (const task of incoming) byId.set(task.taskId, task);
+  return Array.from(byId.values());
+}
+
+export interface VirtualRange {
+  start: number;
+  /** Exclusive end index. */
+  end: number;
+  /** Space above the first rendered row, in px. */
+  offsetTop: number;
+  totalHeight: number;
+}
+
+/**
+ * Rows to render for a fixed-height virtual list: only the rows in the
+ * viewport plus `overscan` on each side, so the DOM size stays constant no
+ * matter how many tasks are loaded.
+ */
+export function getVirtualRange(
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  itemCount: number,
+  overscan = 5,
+): VirtualRange {
+  const totalHeight = itemCount * rowHeight;
+  if (itemCount === 0 || rowHeight <= 0) return { start: 0, end: 0, offsetTop: 0, totalHeight: 0 };
+  const visible = Math.ceil(viewportHeight / rowHeight);
+  // Clamp so an over-scrolled position still renders the last screenful.
+  const first = Math.min(
+    Math.floor(Math.max(0, scrollTop) / rowHeight),
+    Math.max(0, itemCount - visible),
+  );
+  const start = Math.max(0, first - overscan);
+  const end = Math.min(itemCount, first + visible + overscan);
+  return { start, end, offsetTop: start * rowHeight, totalHeight };
+}
+
+/** True when the scroll position is within `threshold` px of the bottom. */
+export function shouldFetchNextPage(
+  scrollTop: number,
+  viewportHeight: number,
+  totalHeight: number,
+  threshold = 200,
+): boolean {
+  return totalHeight > 0 && scrollTop + viewportHeight >= totalHeight - threshold;
+}
+
 // ─── Filter logic ─────────────────────────────────────────────────────────────
 
 function taskMatchesFilters(
@@ -161,6 +223,8 @@ export interface UseTaskHistoryResult {
   /** Tasks matching current filters within the zoom window */
   filteredTasks: TaskResponse[];
   loading: boolean;
+  /** True while a follow-up page (not the first) is loading — show the bottom spinner. */
+  isFetchingNextPage: boolean;
   error: string | null;
   /** Currently applied filters */
   filters: TaskHistoryFilters;
@@ -191,10 +255,12 @@ export interface UseTaskHistoryResult {
 export function useTaskHistory(
   filters: TaskHistoryFilters,
   updateFilters: (next: Partial<TaskHistoryFilters>) => void,
-  resetFilters: () => void
+  resetFilters: () => void,
+  pageSize: number = DEFAULT_TASK_PAGE_SIZE
 ): UseTaskHistoryResult {
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<[string | null, string | null]>([
     null,
@@ -206,6 +272,7 @@ export function useTaskHistory(
 
   const fetchTasks = useCallback(async (cursor?: string | null) => {
     setLoading(true);
+    setIsFetchingNextPage(!!cursor);
     setError(null);
     try {
       // Read through the shared session layer (#477) so this stays in step with
@@ -218,7 +285,7 @@ export function useTaskHistory(
       }
 
       // Build cursor-based query params
-      const qs = new URLSearchParams({ limit: '50' });
+      const qs = new URLSearchParams({ limit: String(pageSize) });
       if (cursor) qs.set('cursor', cursor);
       if (filters.status && filters.status !== 'all') qs.set('status', filters.status);
 
@@ -269,25 +336,16 @@ export function useTaskHistory(
         fetchedTasks = Array.isArray(fallback) ? fallback : [];
       }
 
-      setAllTasks((prev) => {
-        if (!cursor) return fetchedTasks;
-
-        const seenIds = new Set(prev.map((task) => task.taskId));
-        const appendedTasks = fetchedTasks.filter((task) => {
-          if (seenIds.has(task.taskId)) return false;
-          seenIds.add(task.taskId);
-          return true;
-        });
-        return [...prev, ...appendedTasks];
-      });
+      setAllTasks((prev) => (cursor ? mergeTaskPages(prev, fetchedTasks) : fetchedTasks));
       setNextCursor(newCursor);
       setHasNextPage(morePages);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load task history');
     } finally {
       setLoading(false);
+      setIsFetchingNextPage(false);
     }
-  }, [filters.status]);
+  }, [filters.status, pageSize]);
 
   useEffect(() => {
     // `fetchTasks` is recreated only when `filters.status` changes, so this
@@ -351,6 +409,7 @@ export function useTaskHistory(
     allTasks,
     filteredTasks,
     loading,
+    isFetchingNextPage,
     error,
     filters,
     updateFilters,
