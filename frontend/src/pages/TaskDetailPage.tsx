@@ -8,6 +8,7 @@ import 'reactflow/dist/style.css';
 import { TaskDetailTimeline } from '../components/dashboard/TaskDetailTimeline';
 import { PaymentTimeline } from '../components/dashboard/PaymentTimeline';
 import { TaskCostPanel } from '../components/tasks/TaskCostPanel';
+import { ConnectionStatus } from '../components/tasks/ConnectionStatus';
 import { getTaskCost } from '../services/api';
 import type { TaskCost } from '../types/api';
 import { Skeleton, SkeletonText } from '../components/common/Skeleton';
@@ -85,8 +86,18 @@ export const TaskDetailSkeleton: React.FC = () => {
 const TaskDetailPage: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
-  const { task, loading, error, wsStatus, reconnectStream, nodes, payments, outputs, refetch } =
-    useTaskMonitor(id);
+  const {
+    task,
+    loading,
+    error,
+    wsStatus,
+    reconnectIn,
+    reconnectStream,
+    nodes,
+    payments,
+    outputs,
+    refetch,
+  } = useTaskMonitor(id);
 
   // Token cost (Issue #390). Fetched separately from the task monitor because
   // the backend owns the ledger: while the task runs, cost only exists in the
@@ -283,6 +294,8 @@ const TaskDetailPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConnectionStatus status={wsStatus} reconnectIn={reconnectIn ?? 0} />
 
       {/* Details Header */}
       <div className="glass-panel flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

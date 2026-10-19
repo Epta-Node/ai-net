@@ -1,10 +1,10 @@
 // src/components/dashboard/KpiCard.tsx
 import React from 'react';
-import { Area, AreaChart, ResponsiveContainer } from 'recharts';
 import { motion } from 'framer-motion';
 import styles from './KpiCard.module.css';
 import { useAnimatedCounter } from '../../hooks/useAnimatedCounter';
 import { Skeleton } from '../common/Skeleton';
+import { Sparkline } from '../common/Sparkline';
 
 interface KpiCardProps {
   title: string;
@@ -15,14 +15,11 @@ interface KpiCardProps {
 }
 
 export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, loading }) => {
-  const chartData = (sparklineData ?? []).map((v, i) => ({ x: i, y: v }));
-
   // Numeric values animate with spring count-up; strings (e.g. "98.12%") render as-is
   const numericValue = typeof value === 'number' ? value : null;
   const displayValue = useAnimatedCounter(numericValue ?? 0);
 
   const isZero = numericValue !== null && numericValue === 0;
-  const gradientId = `spark-${title.replace(/\s+/g, '-')}`;
 
   if (loading) {
     return (
@@ -57,28 +54,9 @@ export const KpiCard: React.FC<KpiCardProps> = ({ title, value, sparklineData, l
         <div className={styles.value}>{value}</div>
       )}
 
-      {chartData.length > 0 && (
+      {sparklineData && sparklineData.length > 0 && (
         <div className={styles.sparkline} aria-hidden="true">
-          <ResponsiveContainer width="100%" height={40}>
-            <AreaChart data={chartData} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0.4} />
-                  <stop offset="100%" stopColor="var(--color-accent, #8884d8)" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <Area
-                type="monotone"
-                dataKey="y"
-                stroke="var(--color-accent, #8884d8)"
-                fill={`url(#${gradientId})`}
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive
-                animationDuration={600}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          <Sparkline data={sparklineData} height={40} />
         </div>
       )}
     </motion.div>

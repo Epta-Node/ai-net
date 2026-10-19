@@ -64,12 +64,15 @@ export const useTaskMonitor = (taskId: string | undefined) => {
   const {
     isConnected,
     status: wsStatus,
+    reconnectAttempt,
+    reconnectIn,
     reconnect: reconnectStream,
   } = useTaskWebSocket({
     taskId: taskId || '',
     onMessage: handleWebSocketMessage,
     walletPublicKey: publicKey ?? undefined,
     requireAuthentication: true,
+    stopReconnecting: task?.status === 'completed' || task?.status === 'failed',
   });
 
   const fetchTask = async (id: string) => {
@@ -121,6 +124,8 @@ export const useTaskMonitor = (taskId: string | undefined) => {
     loading,
     error,
     wsStatus,
+    reconnectAttempt,
+    reconnectIn,
     reconnectStream,
     nodes: nodeState.nodes,
     payments: paymentState.payments,
