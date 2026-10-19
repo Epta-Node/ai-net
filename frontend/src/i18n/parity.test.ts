@@ -64,6 +64,26 @@ describe('i18n parity', () => {
     expect(duplicates).toEqual([]);
   });
 
+  it('en.json has no keys missing from es.json', () => {
+    const missingInEs = enKeys.filter((k) => !esKeys.includes(k));
+    expect(missingInEs).toEqual([]);
+  });
+
+  it('es.json has no keys missing from en.json', () => {
+    const missingInEn = esKeys.filter((k) => !enKeys.includes(k));
+    expect(missingInEn).toEqual([]);
+  });
+
+  it('no duplicate keys within es.json', () => {
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    for (const key of esKeys) {
+      if (seen.has(key)) duplicates.push(key);
+      seen.add(key);
+    }
+    expect(duplicates).toEqual([]);
+  });
+
   it('es.json has the same keys as en.json', () => {
     expect(esKeys).toEqual(enKeys);
   });

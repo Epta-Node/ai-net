@@ -224,4 +224,95 @@ describe('useWalletBalance', () => {
 
     vi.useRealTimers()
   })
+
+  it('calculates reservedXLM and availableXLM correctly (#822)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          balances: [{ asset_type: 'native', balance: '50.0000000' }],
+          subentry_count: 2,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    )
+
+    const { result } = renderHook(() =>
+      useWalletBalance({ publicKey: WALLET_A, pollIntervalMs: 5000 })
+    )
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.balanceXLM).toBe('50.0000000')
+    // (2 + 2) * 0.5 = 2.0000000
+    expect(result.current.reservedXLM).toBe('2.0000000')
+    expect(result.current.availableXLM).toBe('48.0000000')
+    expect(result.current.lastUpdatedAt).toBeInstanceOf(Date)
+  })
+
+  it('triggers immediate refetch when refresh() is called (#822)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(makeAccountResponse('100.0000000')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+
+    const { result } = renderHook(() =>
+      useWalletBalance({ publicKey: WALLET_A, pollIntervalMs: 60_000 })
+    )
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const callsBefore = fetchSpy.mock.calls.length
+
+    act(() => {
+      result.current.refresh()
+    })
+
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBe(callsBefore + 1))
+  })
+
+  it('pauses polling when document visibilityState is hidden (#822)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(makeAccountResponse('100.0000000')), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+
+    Object.defineProperty(document, 'visibilityState', {
+      value: 'hidden',
+      writable: true,
+      configurable: true,
+    })
+
+    const { result } = renderHook(() =>
+      useWalletBalance({ publicKey: WALLET_A, pollIntervalMs: 5000, pauseWhenHidden: true })
+    )
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const callsBefore = fetchSpy.mock.calls.length
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000)
+    })
+
+    // Should not poll while hidden
+    expect(fetchSpy.mock.calls.length).toBe(callsBefore)
+
+    // Becoming visible triggers immediate resume
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'visible',
+        writable: true,
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+
+    await waitFor(() => expect(fetchSpy.mock.calls.length).toBe(callsBefore + 1))
+
+    vi.useRealTimers()
+  })
 })
+

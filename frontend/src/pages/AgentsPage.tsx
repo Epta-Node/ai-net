@@ -4,6 +4,8 @@ import { useSearchParams } from 'react-router-dom'
 import { useAgentRegistry } from '../hooks/useAgentRegistry'
 import { AgentTable } from '../components/agents/AgentTable'
 import { AgentFilterBar } from '../components/agents/AgentFilterBar'
+import { AgentFilters } from '../components/agents/AgentFilters'
+import { AgentCard } from '../components/agents/AgentCard'
 import { AgentDetailModal } from '../components/agents/AgentDetailModal'
 import { Skeleton, SkeletonTable } from '../components/common/Skeleton'
 import type { AgentRecord } from '../types/api'
@@ -93,6 +95,16 @@ function AgentsPage() {
     [filters, updateFilters]
   )
 
+  const handleToggleCapability = useCallback(
+    (cap: string) => {
+      const nextCaps = filters.capabilities.includes(cap)
+        ? filters.capabilities.filter((c) => c !== cap)
+        : [...filters.capabilities, cap]
+      updateFilters({ capabilities: nextCaps })
+    },
+    [filters.capabilities, updateFilters]
+  )
+
   const capabilities = useMemo(() => allCapabilities(agents), [agents])
   const domain = useMemo(() => priceDomain(agents), [agents])
   const visibleAgents = useMemo(
@@ -125,7 +137,19 @@ function AgentsPage() {
       ) : loading && agents.length === 0 ? (
         <AgentsPageSkeleton />
       ) : (
-        <div className="fade-in">
+        <div className="fade-in space-y-4">
+          <AgentFilters
+            searchQuery={filters.query ?? ''}
+            onSearchChange={(q) => updateFilters({ query: q })}
+            selectedCapabilities={filters.capabilities}
+            onToggleCapability={handleToggleCapability}
+            availableCapabilities={capabilities}
+            sortBy={filters.sortBy ?? 'relevance'}
+            onSortChange={(sortBy) => updateFilters({ sortBy })}
+            resultCount={visibleAgents.length}
+            onReset={resetFilters}
+          />
+
           <AgentFilterBar
             filters={filters}
             availableCapabilities={capabilities}
@@ -135,14 +159,48 @@ function AgentsPage() {
             onRefresh={refetch}
           />
 
-          <AgentTable
-            agents={visibleAgents}
-            loading={loading}
-            sortKey={filters.sortKey}
-            sortDir={filters.sortDir}
-            onSort={handleSort}
-            onRowClick={setSelected}
-          />
+          {visibleAgents.length === 0 ? (
+            <div
+              data-testid="agents-empty"
+              className="my-8 rounded-2xl border border-[var(--border-subtle,#262626)] bg-[var(--surface-sunken,#141414)] p-12 text-center"
+            >
+              <p className="text-base text-gray-300">
+                {filters.query
+                  ? `No agents match '${filters.query}'`
+                  : t('page.agents.empty', 'No agents match your criteria')}
+              </p>
+              <button
+                type="button"
+                data-testid="clear-filters-btn"
+                onClick={resetFilters}
+                className="mt-4 rounded-xl bg-[var(--primary,#9333ea)] px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
+              >
+                Clear filters
+              </button>
+            </div>
+          ) : (
+            <>
+              <div data-testid="agents-grid" className="my-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleAgents.map((agent) => (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    searchQuery={filters.query}
+                    onClick={setSelected}
+                  />
+                ))}
+              </div>
+
+              <AgentTable
+                agents={visibleAgents}
+                loading={loading}
+                sortKey={filters.sortKey}
+                sortDir={filters.sortDir}
+                onSort={handleSort}
+                onRowClick={setSelected}
+              />
+            </>
+          )}
         </div>
       )}
 
