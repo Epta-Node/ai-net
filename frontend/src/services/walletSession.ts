@@ -164,3 +164,141 @@ export function setCompletedWizardPreference(): void {
     // See safeGet.
   }
 }
+
+// ── Session expiry timer (#828) ──────────────────────────────────────────────
+
+export interface SessionConfig {
+  /** How long a session lasts in ms. Default: 3 600 000 (1 hour). */
+  sessionTtlMs?: number
+  /** How far before expiry the warning fires. Default: 120 000 (2 min). */
+  warningBeforeExpiryMs?: number
+  /** Minimum ms between activity-driven extensions. Default: 30 000. */
+  extensionThrottleMs?: number
+}
+
+type TimerCallback = () => void
+
+const DEFAULT_SESSION_TTL_MS = 3_600_000
+const DEFAULT_WARNING_BEFORE_EXPIRY_MS = 120_000
+const DEFAULT_EXTENSION_THROTTLE_MS = 30_000
+
+/**
+ * Tracks wallet session lifetime and fires callbacks before expiry and on
+ * expiry. Activity (click, keydown, scroll) extends the session subject to
+ * a throttle so that automated polling cannot reset the clock constantly.
+ *
+ * Usage:
+ *   const timer = new SessionTimer({ onWarning: showModal, onExpiry: signOut })
+ *   timer.start()
+ *   // later:
+ *   timer.stop()
+ */
+export class SessionTimer {
+  private readonly sessionTtlMs: number
+  private readonly warningBeforeExpiryMs: number
+  private readonly extensionThrottleMs: number
+
+  private warningCbs: TimerCallback[] = []
+  private expiryCbs: TimerCallback[] = []
+
+  private warningTimer: ReturnType<typeof setTimeout> | null = null
+  private expiryTimer: ReturnType<typeof setTimeout> | null = null
+
+  private sessionStart = 0
+  private lastExtensionAt = 0
+  private running = false
+
+  private readonly boundOnActivity: () => void
+
+  constructor(config: SessionConfig = {}) {
+    this.sessionTtlMs = config.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS
+    this.warningBeforeExpiryMs =
+      config.warningBeforeExpiryMs ?? DEFAULT_WARNING_BEFORE_EXPIRY_MS
+    this.extensionThrottleMs =
+      config.extensionThrottleMs ?? DEFAULT_EXTENSION_THROTTLE_MS
+    this.boundOnActivity = this._onActivity.bind(this)
+  }
+
+  onWarning(cb: TimerCallback): this {
+    this.warningCbs.push(cb)
+    return this
+  }
+
+  onExpiry(cb: TimerCallback): this {
+    this.expiryCbs.push(cb)
+    return this
+  }
+
+  getTimeUntilExpiry(): number {
+    if (!this.running) return 0
+    const elapsed = Date.now() - this.sessionStart
+    return Math.max(0, this.sessionTtlMs - elapsed)
+  }
+
+  start(): void {
+    if (this.running) return
+    this.running = true
+    this.sessionStart = Date.now()
+    this.lastExtensionAt = this.sessionStart
+    this._scheduleTimers()
+    this._attachActivityListeners()
+  }
+
+  extendSession(): void {
+    if (!this.running) return
+    this.sessionStart = Date.now()
+    this.lastExtensionAt = this.sessionStart
+    this._clearTimers()
+    this._scheduleTimers()
+  }
+
+  stop(): void {
+    this.running = false
+    this._clearTimers()
+    this._detachActivityListeners()
+  }
+
+  private _scheduleTimers(): void {
+    const warningDelay = this.sessionTtlMs - this.warningBeforeExpiryMs
+    this.warningTimer = setTimeout(() => {
+      this.warningCbs.forEach((cb) => cb())
+    }, Math.max(0, warningDelay))
+
+    this.expiryTimer = setTimeout(() => {
+      this.running = false
+      this._detachActivityListeners()
+      this.expiryCbs.forEach((cb) => cb())
+    }, this.sessionTtlMs)
+  }
+
+  private _clearTimers(): void {
+    if (this.warningTimer !== null) {
+      clearTimeout(this.warningTimer)
+      this.warningTimer = null
+    }
+    if (this.expiryTimer !== null) {
+      clearTimeout(this.expiryTimer)
+      this.expiryTimer = null
+    }
+  }
+
+  private _onActivity(): void {
+    const now = Date.now()
+    if (now - this.lastExtensionAt < this.extensionThrottleMs) return
+    this.extendSession()
+  }
+
+  private _attachActivityListeners(): void {
+    if (typeof window === 'undefined') return
+    window.addEventListener('click', this.boundOnActivity, { passive: true })
+    window.addEventListener('keydown', this.boundOnActivity, { passive: true })
+    window.addEventListener('scroll', this.boundOnActivity, { passive: true })
+  }
+
+  private _detachActivityListeners(): void {
+    if (typeof window === 'undefined') return
+    window.removeEventListener('click', this.boundOnActivity)
+    window.removeEventListener('keydown', this.boundOnActivity)
+    window.removeEventListener('scroll', this.boundOnActivity)
+  }
+}
