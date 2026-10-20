@@ -142,7 +142,7 @@ describe("OpenAPI response contract", () => {
         const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false });
         const validate = ajv.compile(schema as object);
 
-        const res = await request(app).get(path).set("Accept", "application/json");
+        const res = await request(app.httpServer).get(path).set("Accept", "application/json");
 
         expect(res.status).toBe(200);
         const valid = validate(res.body);

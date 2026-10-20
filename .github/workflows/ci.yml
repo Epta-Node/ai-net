@@ -25,6 +25,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       contracts: ${{ steps.filter.outputs.contracts }}
+      compose: ${{ steps.filter.outputs.compose }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -42,6 +43,12 @@ jobs:
               - 'tests/e2e/**'
             contracts:
               - 'smart-contracts/**'
+              - '.github/workflows/ci.yml'
+            compose:
+              - 'backend/**'
+              - 'docker-compose.yml'
+              - '.dockerignore'
+              - 'tests/e2e/compose-smoke.mjs'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -642,6 +649,61 @@ jobs:
           message: ${{ steps.summary.outputs.MESSAGE }}
 
   # ── Required aggregator gate ────────────────────────────────────────────────
+  # ── Docker Compose integration (issue #753) ─────────────────────────────────
+  # Builds the real backend image and runs tests/e2e/compose-smoke.mjs against
+  # the compose `test` profile (Stellar standalone + backend), then checks the
+  # backend exits cleanly on SIGTERM. Catches image, wiring and env breakage
+  # that the in-process suites cannot see.
+  integration-compose:
+    name: integration-compose
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.compose == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (GitHub Actions layer cache)
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-compose.yml
+          targets: backend
+          load: true
+          set: |
+            backend.cache-from=type=gha,scope=compose-backend
+            backend.cache-to=type=gha,mode=max,scope=compose-backend
+
+      - name: Run compose smoke suite
+        run: docker compose --profile test up --no-build --exit-code-from smoke smoke
+
+      - name: Check graceful shutdown
+        run: |
+          docker compose stop -t 30 backend
+          code=$(docker compose ps -a backend --format '{{.ExitCode}}')
+          echo "backend exit code: $code"
+          test "$code" = "0"
+
+      - name: Collect compose logs
+        if: failure()
+        run: docker compose --profile test logs --no-color --timestamps > compose-logs.txt
+
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: compose-logs.txt
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile test down -v
+
   # Branch protection should require this single check. It passes only when all
   # non-skipped dependencies succeeded; skipped (path-filtered) counts as success
   # so frontend-only or backend-only PRs can still be green.
@@ -658,6 +720,7 @@ jobs:
         e2e-backend-heavy,
         e2e-frontend-smoke,
         e2e-frontend-heavy,
+        integration-compose,
       ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -672,9 +735,10 @@ jobs:
           echo "e2e-backend-heavy: ${{ needs.e2e-backend-heavy.result }}"
           echo "e2e-frontend-smoke: ${{ needs.e2e-frontend-smoke.result }}"
           echo "e2e-frontend-heavy: ${{ needs.e2e-frontend-heavy.result }}"
+          echo "integration-compose: ${{ needs.integration-compose.result }}"
 
           fail=0
-          for job in "${{ needs.changes.result }}" "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.contracts.result }}"; do
+          for job in "${{ needs.changes.result }}" "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.contracts.result }}" "${{ needs.integration-compose.result }}"; do
             if [[ "$job" == "failure" || "$job" == "cancelled" ]]; then
               echo "❌ Required job failed: $job"
               fail=1

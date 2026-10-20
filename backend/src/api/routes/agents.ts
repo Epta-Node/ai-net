@@ -11,7 +11,7 @@ import {
 import { NotFoundError, ValidationError, AppError } from "../../errors";
 import { cacheMiddleware } from "../middleware/cache";
 import { invalidateAgentsCache } from "../../cache/invalidation";
-import { ttlForRoute, getConfig } from "../../config";
+import { ttlForRoute, getConfig, stellarClientOptions } from "../../config";
 import { isEnabled } from "../../services/featureFlags";
 import {
   AGENT_AUTH_PURPOSES,
@@ -83,7 +83,8 @@ const AgentChallengeRequestSchema = z.object({
 });
 
 const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
-const getHorizon = () => new Horizon.Server(getConfig().STELLAR_HORIZON_URL);
+const getHorizon = () =>
+  new Horizon.Server(getConfig().STELLAR_HORIZON_URL, stellarClientOptions());
 
 /**
  * Purposes that may still be called unsigned while the `agent_ownership_proof`

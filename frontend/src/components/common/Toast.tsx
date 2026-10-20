@@ -20,9 +20,9 @@ export function ToastContainer({ toasts, onDismiss }: ToastContainerProps) {
   const { t } = useTranslation();
 
   return (
-    <div className="toast-container" aria-live="polite" aria-atomic="true">
+    <div className="toast-container" role="status" aria-live="polite">
       {toasts.map((toast) => (
-        <div key={toast.id} className={`toast toast--${toast.type}`} role="alert" aria-live="polite">
+        <div key={toast.id} className={`toast toast--${toast.type}`}>
           <span className="toast__content">
             <span className={`toast__icon toast__icon--${toast.type}`} data-testid={`toast-icon-${toast.type}`}>
               {icons[toast.type]}

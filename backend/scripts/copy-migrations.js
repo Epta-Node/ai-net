@@ -7,7 +7,8 @@ const fs = require("fs");
 const path = require("path");
 
 const SRC = path.join(__dirname, "..", "src", "db", "migrations");
-const DEST = path.join(__dirname, "..", "dist", "db", "migrations");
+// tsconfig rootDir is ".", so compiled code lives under dist/src/.
+const DEST = path.join(__dirname, "..", "dist", "src", "db", "migrations");
 
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });

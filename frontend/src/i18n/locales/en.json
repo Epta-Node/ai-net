@@ -361,6 +361,7 @@
   "nav.group.work": "Work",
   "nav.group.account": "Account",
   "a11y.skipToContent": "Skip to content",
+  "a11y.navigatedTo": "Navigated to {{page}}",
   "a11y.dismissNotification": "Dismiss notification",
   "palette.label": "Command palette",
   "palette.placeholder": "Search agents, tasks, or pages...",

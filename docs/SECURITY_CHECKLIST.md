@@ -16,7 +16,21 @@ Unchecked items must have a tracked issue with owner and ETA.
 - [ ] **T7** — CSRF: SameSite=Strict cookies on all auth tokens
 - [ ] **T8** — Rate limiting: all API endpoints have rate limits configured
 - [ ] **T9** — Error messages: no stack traces or internal details leaked to clients
-- [ ] **T10** — Logging: no secrets or PII in log output
+- [ ] **T10** — Logging: no secrets or PII in log output (see [Log Redaction](#log-redaction); `backend/src/utils/logger.redaction.test.ts` passes)
+
+## Log Redaction
+
+All backend logging goes through `backend/src/utils/logger.ts`. Redaction runs in three layers, so a single missed rule doesn't leak a secret:
+
+1. **Pino `redact` paths** censor known keys (`apiKey`, `token`, `signature`, `jwt`, `veniceApiKey`, `headers.authorization`, `headers.cookie`, `headers["x-api-key"]`, `prompt`, `completion`, ...) with `[REDACTED]`.
+2. **Recursive sanitizer** (`sanitizeLogPayload`) runs on every log argument and every `logger.child()` binding:
+   - keys matching `secret|token|api_key|password|authorization|cookie|private_key|seed|signature|jwt|credential` become `[REDACTED]`
+   - prompt, completion and request/response body keys become `[REDACTED_BODY]`
+   - Stellar secret seeds, `Bearer ...` tokens, JWTs and `key=value` secrets are scrubbed out of free-text strings
+   - Stellar addresses become `[REDACTED_ADDRESS]`; fields longer than 500 chars are truncated
+3. **Whitelisting serializers** for `req` and `res` emit only `id`, `method`, `path` (query string dropped), `ip` and `statusCode`. Headers and bodies are never serialized.
+
+When adding a new secret-bearing field, add its key to `SECRET_KEY_RE` and a payload to the canary test. The canary test logs a known secret through every path above and fails if it appears in the output.
 
 ## Smart Contracts
 
