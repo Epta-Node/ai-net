@@ -2,6 +2,7 @@ import type { CircuitBreaker, CircuitTransition } from './circuitBreaker.js';
 import type { CircuitMetrics, CircuitState } from './circuitBreaker.js';
 import type { VeniceResponseCache } from './cache.js';
 import type { RequestDeduplicator } from './dedup.js';
+import type { VeniceKeyHealthStore } from './keyHealth.js';
 
 export type AgentType = 'research' | 'risk' | 'coding' | 'design' | 'report';
 
@@ -84,6 +85,8 @@ export interface VeniceClientConfig {
   cache?: VeniceResponseCache;
   /** Inject a custom deduplicator (mainly for tests). */
   deduplicator?: RequestDeduplicator;
+  /** Inject a custom key-health store (mainly for tests); defaults to the process-wide one. */
+  keyHealth?: VeniceKeyHealthStore;
 
   // ── Circuit breaker tuning (issue #495) ───────────────────────────────────
   /**

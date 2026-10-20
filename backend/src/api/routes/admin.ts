@@ -1013,6 +1013,8 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
           },
       activeJobs: active.jobs,
       deadLetterJobs: deadLetter.jobs,
+      // Redacted (keyId-only) health of the Venice fallback keys — issue #741.
+      veniceKeyHealth: getVeniceKeyHealthStore().snapshot(),
     });
   });
 
@@ -1056,6 +1058,8 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
             concurrency: 0,
             pollIntervalMs: 0,
           },
+      // Redacted (keyId-only) health of the Venice fallback keys — issue #741.
+      veniceKeyHealth: getVeniceKeyHealthStore().snapshot(),
     });
   });
 

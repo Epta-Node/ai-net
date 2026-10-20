@@ -11,6 +11,12 @@ import {
 } from './keyPool.js';
 import { VeniceResponseCache, buildCacheKey } from './cache.js';
 import { RequestDeduplicator } from './dedup.js';
+import {
+  getVeniceKeyHealthStore,
+  type VeniceKeyFailureKind,
+  type VeniceKeyHealthSnapshot,
+  type VeniceKeyHealthStore,
+} from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
 import { currentTraceContext, toW3cTraceparent } from '../traceContext.js';
 import type {
@@ -115,6 +121,25 @@ function shouldFailoverToNextProvider(err: Error): boolean {
   if (err.status === 401) return true;
   if (err.status === 429) return true;
   return err.status >= 500;
+}
+
+/**
+ * Bucket a provider failure for the key-health store (issue #741).
+ *
+ * The status code is what matters: a 429 is a property of the key's quota
+ * window rather than of the service, so it is the only kind that earns the
+ * key a cooldown. A 401 may be a misconfigured deployment-wide secret, and a
+ * 5xx is usually the service itself — cooling those keys down would drop a
+ * chain that is already failing over for a reason that has nothing to do with
+ * which key was used.
+ */
+function classifyVeniceFailure(err: Error): VeniceKeyFailureKind {
+  if (err instanceof VeniceStatusError) {
+    if (err.status === 429) return 'quota';
+    if (err.status === 401) return 'auth';
+    return 'server';
+  }
+  return 'transport';
 }
 
 /** A completed upstream call: the text plus what it cost in tokens. */
@@ -419,6 +444,14 @@ export class VeniceClient implements VeniceClientLike {
     return [...this.providers];
   }
 
+  /**
+   * Redacted per-key health for the fallback chain (issue #741): cooldowns,
+   * error rates and latency, identified by `keyId` — never by the key itself.
+   */
+  getKeyHealth(): VeniceKeyHealthSnapshot[] {
+    return this.keyHealth.snapshot();
+  }
+
   /** Current cache hit rate (0..1) for monitoring. */
   getCacheHitRate(): number {
     return this.cache.getHitRate();
@@ -522,7 +555,10 @@ export class VeniceClient implements VeniceClientLike {
         // the call rather than let it through.
         throw e;
       }
+      throw e;
+    }
 
+    try {
       const force = options?.force === true;
       const cacheKey = buildCacheKey(promptForLogging, agentType, this.modelVersion);
 
@@ -617,6 +653,8 @@ export class VeniceClient implements VeniceClientLike {
     const requestId = randomUUID();
     const start = Date.now();
     let retries = 0;
+    const succeed = settleSuccess ?? ((): void => { this.breaker.recordSuccess(); });
+    const fail = settleFailure ?? ((): void => { this.breaker.recordFailure(); });
 
     const body = JSON.stringify({
       model,
@@ -664,6 +702,11 @@ export class VeniceClient implements VeniceClientLike {
           throw err;
         }
         lastError = err instanceof Error ? err : new Error(String(err));
+        this.keyHealth.recordFailure(
+          provider.name ?? 'primary',
+          classifyVeniceFailure(lastError),
+          Date.now() - attemptStart,
+        );
         // A 401 may still succeed on a fallback holding a different key, so it
         // fails over; other 4xx statuses will be rejected by every provider and
         // only serve to amplify load, so they fail fast.
@@ -676,7 +719,15 @@ export class VeniceClient implements VeniceClientLike {
         if (mayFailover && pIndex < this.providers.length - 1) {
           const nextProvider = this.providers[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
           log.warn(
-            { agentType, model, failedProvider: provider.name, nextProvider, error: lastError.message, retries },
+            {
+              agentType,
+              model,
+              failedProvider: provider.name,
+              failedKeyId: this.keyHealth.keyIdFor(provider.name ?? 'primary'),
+              nextProvider,
+              error: lastError.message,
+              retries,
+            },
             'venice provider failed — failing over to next provider',
           );
           // small backoff before failover to next provider
@@ -684,7 +735,7 @@ export class VeniceClient implements VeniceClientLike {
           continue;
         }
         // Last provider failed — record failure for circuit breaker
-        settleFailure();
+        fail();
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'error', retries, provider.name);
         // If we have stale cache fallback enabled, the caller (createCompletion) will handle it
         throw lastError;
@@ -698,7 +749,7 @@ export class VeniceClient implements VeniceClientLike {
     }
 
     // Should not reach here, but fallback
-    settleFailure();
+    fail();
     throw lastError ?? new Error('Venice AI is unreachable (all providers failed)');
   }
 
@@ -794,7 +845,9 @@ export class VeniceClient implements VeniceClientLike {
             const delta = parsed?.choices?.[0]?.delta?.content;
             if (typeof delta === 'string' && delta.length > 0) {
               accumulated += delta;
-              onChunk(delta);
+              // Buffered rather than delivered here: the caller only sees an
+              // attempt's output once that attempt completes (issue #661).
+              deltas.push(delta);
             }
           } catch (err) {
             // A complete-but-unparseable frame is counted and surfaced rather
@@ -889,9 +942,26 @@ export class VeniceClient implements VeniceClientLike {
         const droppedChars = accumulated.length;
         accumulated = '';
         lastError = err instanceof Error ? err : new Error(String(err));
+        this.keyHealth.recordFailure(
+          provider.name ?? 'primary',
+          classifyVeniceFailure(lastError),
+          Date.now() - attemptStart,
+        );
         const mayFailover = shouldFailoverToNextProvider(lastError);
-        if (mayFailover && pIndex < this.providers.length - 1) {
-          log.warn({ agentType, model, failedProvider: provider.name, error: lastError.message, droppedChars }, 'venice stream provider failed — failover');
+        if (mayFailover && pIndex < chain.length - 1) {
+          const nextProvider = chain[pIndex + 1]!.name ?? `fallback-${pIndex + 1}`;
+          log.warn(
+            {
+              agentType,
+              model,
+              failedProvider: provider.name,
+              failedKeyId: this.keyHealth.keyIdFor(provider.name ?? 'primary'),
+              nextProvider,
+              error: lastError.message,
+              droppedChars,
+            },
+            'venice stream provider failed — failover',
+          );
           await this.sleep(100);
           continue;
         }
