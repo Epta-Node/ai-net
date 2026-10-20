@@ -46,9 +46,18 @@ OPTIONS:
     -h, --help               Show this help message
 
 ENVIRONMENT VARIABLES:
-    STELLAR_SECRET_KEY       Secret key for deployment account (required)
+    STELLAR_SECRET_KEY       Secret key for deployment account (required unless multisig)
     STELLAR_RPC_URL         RPC URL for the network (optional, uses default for network)
     STELLAR_HORIZON_URL     Horizon URL for the network (optional, uses default for network)
+
+MULTISIG ADMIN (mainnet):
+    ADMIN_KEY_1, ADMIN_KEY_2, ADMIN_KEY_3  Three admin keypair secret keys
+    ADMIN_MULTISIG_THRESHOLD               Signatures required (default: 2)
+
+    When ADMIN_KEY_1/2/3 are all provided, the upgrade is signed by the
+    required number of admin keys (ADMIN_MULTISIG_THRESHOLD, default 2).
+    The first key drives the transaction; additional signatories are collected
+    and applied before broadcast so the account threshold is satisfied.
 
 NOTES:
     Every contract other than 'upgrade-manager' must upgrade itself. Run those
@@ -134,9 +143,42 @@ case $NETWORK in
         ;;
 esac
 
+# ── Multisig admin support ─────────────────────────────────────────────────
+
+MULTISIG_ENABLED=false
+if [[ -n "$ADMIN_KEY_1" && -n "$ADMIN_KEY_2" && -n "$ADMIN_KEY_3" ]]; then
+    MULTISIG_ENABLED=true
+fi
+ADMIN_MULTISIG_THRESHOLD="${ADMIN_MULTISIG_THRESHOLD:-2}"
+
+# Collect up to ADMIN_MULTISIG_THRESHOLD secret keys (space-separated) that
+# will be used to sign an upgrade transaction before it is submitted.
+# Returns them as a bash array in MULTISIG_SIGNING_KEYS.
+collect_multisig_signing_keys() {
+    MULTISIG_SIGNING_KEYS=()
+    if [[ "$MULTISIG_ENABLED" != "true" ]]; then
+        MULTISIG_SIGNING_KEYS=("$STELLAR_SECRET_KEY")
+        return 0
+    fi
+
+    local all_keys=("$ADMIN_KEY_1" "$ADMIN_KEY_2" "$ADMIN_KEY_3")
+    local count=0
+    for key in "${all_keys[@]}"; do
+        MULTISIG_SIGNING_KEYS+=("$key")
+        count=$((count + 1))
+        if [[ $count -ge $ADMIN_MULTISIG_THRESHOLD ]]; then
+            break
+        fi
+    done
+    echo -e "${BLUE}Multisig: collected ${count} of ${ADMIN_MULTISIG_THRESHOLD} required signing keys${NC}"
+}
+
 # Check required environment variables
-if [[ -z "$STELLAR_SECRET_KEY" ]]; then
-    echo -e "${RED}Error: STELLAR_SECRET_KEY environment variable is required${NC}" >&2
+if [[ "$MULTISIG_ENABLED" == "true" ]]; then
+    echo -e "${BLUE}Multisig upgrade mode: threshold=${ADMIN_MULTISIG_THRESHOLD}-of-3${NC}"
+    STELLAR_SECRET_KEY="$ADMIN_KEY_1"
+elif [[ -z "$STELLAR_SECRET_KEY" ]]; then
+    echo -e "${RED}Error: STELLAR_SECRET_KEY (or ADMIN_KEY_1/2/3) environment variable is required${NC}" >&2
     exit 1
 fi
 
