@@ -6,9 +6,11 @@
  * `x-signature`. Shared by `BaseAgent.register()` and `HeartbeatClient` so the
  * two agent entry points in this repo cannot drift from the server contract.
  */
-import { Keypair } from "@stellar/stellar-sdk";
-import type { AgentAuthPurpose } from "../api/agentSignature";
-import { buildAgentAuthMessage, hashAgentPayload } from "../api/agentSignature";
+import { Keypair } from '@stellar/stellar-sdk';
+import type { AgentAuthPurpose } from '../api/agentSignature';
+import { buildAgentAuthMessage, hashAgentPayload } from '../api/agentSignature';
+import { getConfig } from '../config';
+import { fetchWithTimeout } from '../utils/timeout';
 
 export interface AgentAuthRequest {
   apiBaseUrl: string;
@@ -23,8 +25,8 @@ export interface AgentAuthRequest {
 }
 
 export interface SignedAgentHeaders {
-  "x-challenge": string;
-  "x-signature": string;
+  'x-challenge': string;
+  'x-signature': string;
 }
 
 interface ChallengeResponse {
@@ -35,8 +37,8 @@ interface ChallengeResponse {
 
 function authHeaders(apiBaseUrl: string, body: unknown): RequestInit {
   return {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   };
 }
@@ -49,11 +51,11 @@ function authHeaders(apiBaseUrl: string, body: unknown): RequestInit {
  * server only tolerates while the migration flag is on.
  */
 export async function signAgentRequest(
-  request: AgentAuthRequest,
+  request: AgentAuthRequest
 ): Promise<SignedAgentHeaders | null> {
   if (!request.secret) return null;
 
-  const base = request.apiBaseUrl.replace(/\/$/, "");
+  const base = request.apiBaseUrl.replace(/\/$/, '');
   const challengeBody = {
     purpose: request.purpose,
     publicKey: request.publicKey,
@@ -63,9 +65,10 @@ export async function signAgentRequest(
 
   let issued: ChallengeResponse;
   try {
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `${base}/api/agents/challenge`,
       authHeaders(base, challengeBody),
+      getConfig().TIMEOUT_BUDGET_READ_MS
     );
     if (!response.ok) return null;
     issued = (await response.json()) as ChallengeResponse;
@@ -77,10 +80,10 @@ export async function signAgentRequest(
 
   try {
     const keypair = Keypair.fromSecret(request.secret);
-    const signature = keypair.sign(Buffer.from(issued.message, "utf8"));
+    const signature = keypair.sign(Buffer.from(issued.message, 'utf8'));
     return {
-      "x-challenge": issued.challenge,
-      "x-signature": signature.toString("base64"),
+      'x-challenge': issued.challenge,
+      'x-signature': signature.toString('base64'),
     };
   } catch {
     return null;

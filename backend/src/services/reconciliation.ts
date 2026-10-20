@@ -33,6 +33,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { Horizon, Asset } from '@stellar/stellar-sdk';
 import { createLogger } from '../utils/logger';
+import { fetchWithTimeout } from '../utils/timeout';
 import { getConfig } from '../config';
 import { createPaymentDb, getDb, type PaymentDb, type PaymentRecord } from '../db/index';
 import type { EventStore } from '../events/eventStore';
@@ -57,10 +58,7 @@ import {
   createNoopReconciliationEventSink,
   type ReconciliationEventSink,
 } from './reconciliation.events';
-import {
-  makeReconciliationEvent,
-  type ReconciliationEventPayload,
-} from '../events/eventTypes';
+import { makeReconciliationEvent, type ReconciliationEventPayload } from '../events/eventTypes';
 import type {
   ClaimableBalanceOnChain,
   ClaimTransactionOnChain,
@@ -178,10 +176,7 @@ export class HorizonClaimableBalanceProvider implements ClaimableBalanceProvider
 
   async getBalance(balanceId: string): Promise<ClaimableBalanceOnChain | null> {
     try {
-      const record = await this.server
-        .claimableBalances()
-        .claimableBalance(balanceId)
-        .call();
+      const record = await this.server.claimableBalances().claimableBalance(balanceId).call();
       return mapClaimableBalanceRecord(record);
     } catch (err) {
       // 404 (already claimed / never created) or any query error → not found.
@@ -195,12 +190,11 @@ export class HorizonClaimableBalanceProvider implements ClaimableBalanceProvider
   async listBalances(): Promise<ClaimableBalanceOnChain[]> {
     const balances: ClaimableBalanceOnChain[] = [];
     try {
-      let page: import('@stellar/stellar-sdk').ClaimableBalancePage | null =
-        await this.server
-          .claimableBalances()
-          .forAsset(Asset.native())
-          .limit(LIST_BALANCES_PAGE_LIMIT)
-          .call();
+      let page: import('@stellar/stellar-sdk').ClaimableBalancePage | null = await this.server
+        .claimableBalances()
+        .forAsset(Asset.native())
+        .limit(LIST_BALANCES_PAGE_LIMIT)
+        .call();
       let pages = 0;
       while (page && page.records && page.records.length > 0 && pages < LIST_BALANCES_MAX_PAGES) {
         for (const record of page.records) {
@@ -232,11 +226,7 @@ export class HorizonClaimTransactionProvider implements ClaimTransactionProvider
 
   async findClaim(balanceId: string): Promise<ClaimTransactionOnChain | null> {
     try {
-      const page = await this.server
-        .transactions()
-        .forClaimableBalance(balanceId)
-        .limit(1)
-        .call();
+      const page = await this.server.transactions().forClaimableBalance(balanceId).limit(1).call();
       const record = page.records[0];
       return record ? mapTransactionRecord(record) : null;
     } catch (err) {
@@ -295,7 +285,10 @@ export interface PendingDriftStore {
   /** All unresolved drifts, newest first. */
   list(includeAcknowledged?: boolean): PendingDrift[];
   /** Mark a drift resolved and clear it from the pending set. */
-  resolve(id: string, resolution: NonNullable<PendingDrift['resolution']>): PendingDrift | undefined;
+  resolve(
+    id: string,
+    resolution: NonNullable<PendingDrift['resolution']>
+  ): PendingDrift | undefined;
   /** Forget drifts that no longer reproduce. */
   retain(ids: readonly string[]): void;
 }
@@ -345,10 +338,10 @@ export function createSqlitePendingDriftStore(db?: Database.Database): PendingDr
       occurrences       = reconcile_pending_drift.occurrences + 1
   `);
   const listStmt = database.prepare(
-    'SELECT * FROM reconcile_pending_drift WHERE acknowledged = 0 ORDER BY lastSeenAt DESC',
+    'SELECT * FROM reconcile_pending_drift WHERE acknowledged = 0 ORDER BY lastSeenAt DESC'
   );
   const listAllStmt = database.prepare(
-    'SELECT * FROM reconcile_pending_drift ORDER BY lastSeenAt DESC',
+    'SELECT * FROM reconcile_pending_drift ORDER BY lastSeenAt DESC'
   );
   const getStmt = database.prepare('SELECT * FROM reconcile_pending_drift WHERE id = ?');
   const resolveStmt = database.prepare(`
@@ -430,13 +423,7 @@ export function createSqlitePendingDriftStore(db?: Database.Database): PendingDr
     resolve(id, resolution): PendingDrift | undefined {
       const existing = getStmt.get(id) as DriftRow | undefined;
       if (!existing) return undefined;
-      resolveStmt.run(
-        resolution.status,
-        resolution.txHash,
-        resolution.at,
-        resolution.by,
-        id,
-      );
+      resolveStmt.run(resolution.status, resolution.txHash, resolution.at, resolution.by, id);
       const updated = getStmt.get(id) as DriftRow;
       return rowToPending(updated);
     },
@@ -611,30 +598,32 @@ export class ReconciliationService {
 
   constructor(options: ReconciliationServiceOptions) {
     this.paymentDb = options.paymentDb;
-    this.onChainProvider =
-      options.onChainProvider ?? new HorizonClaimableBalanceProvider();
-    this.claimProvider =
-      options.claimProvider ?? new HorizonClaimTransactionProvider();
+    this.onChainProvider = options.onChainProvider ?? new HorizonClaimableBalanceProvider();
+    this.claimProvider = options.claimProvider ?? new HorizonClaimTransactionProvider();
     this.releaseResolver = createReleaseTransactionResolver(this.claimProvider);
     this.taskState = options.taskState;
-    this.reportStore =
-      options.reportStore ?? createSqliteReconciliationReportStore();
-    this.pendingDriftStore =
-      options.pendingDriftStore ?? createSqlitePendingDriftStore();
+    this.reportStore = options.reportStore ?? createSqliteReconciliationReportStore();
+    this.pendingDriftStore = options.pendingDriftStore ?? createSqlitePendingDriftStore();
     this.webhookUrl = options.webhookUrl ?? safeConfig()?.RECONCILIATION_WEBHOOK_URL;
     this.logger = options.logger ?? log;
     this.now = options.now ?? (() => Date.now());
-    this.escrowExpiryMs = options.escrowExpiryMs ?? safeConfig()?.RECONCILIATION_ESCROW_EXPIRY_MS ?? 86_400_000;
-    this.remediationEnabled = options.remediationEnabled ?? safeConfig()?.RECONCILIATION_REMEDIATION_ENABLED ?? true;
+    this.escrowExpiryMs =
+      options.escrowExpiryMs ?? safeConfig()?.RECONCILIATION_ESCROW_EXPIRY_MS ?? 86_400_000;
+    this.remediationEnabled =
+      options.remediationEnabled ?? safeConfig()?.RECONCILIATION_REMEDIATION_ENABLED ?? true;
     this.settler = options.settler;
     this.settlementQueue = options.settlementQueue;
     this.maxTxLookups = options.maxTxLookups ?? safeConfig()?.RECONCILIATION_MAX_TX_LOOKUPS ?? 200;
     this.metrics = options.metrics ?? reconciliationMetrics;
     this.alertThresholds = {
       warningPercent:
-        options.alertThresholds?.warningPercent ?? safeConfig()?.RECONCILIATION_WARNING_DRIFT_PERCENT ?? 1,
+        options.alertThresholds?.warningPercent ??
+        safeConfig()?.RECONCILIATION_WARNING_DRIFT_PERCENT ??
+        1,
       criticalPercent:
-        options.alertThresholds?.criticalPercent ?? safeConfig()?.RECONCILIATION_CRITICAL_DRIFT_PERCENT ?? 5,
+        options.alertThresholds?.criticalPercent ??
+        safeConfig()?.RECONCILIATION_CRITICAL_DRIFT_PERCENT ??
+        5,
     };
     this.eventSink =
       options.eventSink ??
@@ -667,11 +656,16 @@ export class ReconciliationService {
       const onChainBalances = await this.onChainProvider.listBalances();
 
       const verifications = await this.verifyReleases(localRecords);
-      const detection = detectPaymentDrift(localRecords, onChainBalances, {
-        escrowExpiryMs: this.escrowExpiryMs,
-        now: () => nowMs,
-        ...(this.taskState ? { taskState: this.taskState } : {}),
-      }, verifications);
+      const detection = detectPaymentDrift(
+        localRecords,
+        onChainBalances,
+        {
+          escrowExpiryMs: this.escrowExpiryMs,
+          now: () => nowMs,
+          ...(this.taskState ? { taskState: this.taskState } : {}),
+        },
+        verifications
+      );
 
       // 1. Report every drift first, so detection metrics and events are
       //    recorded even when remediation subsequently fails.
@@ -773,7 +767,7 @@ export class ReconciliationService {
     id: string,
     status: NonNullable<PendingDrift['resolution']>['status'],
     txHash: string,
-    by: string,
+    by: string
   ): PendingDrift | undefined {
     const pending = this.pendingDriftStore.list(true).find((d) => d.id === id);
     if (!pending || !pending.taskId || !pending.nodeId) {
@@ -904,7 +898,11 @@ export class ReconciliationService {
       acknowledged: false,
     });
     this.logger.warn(
-      { driftType: discrepancy.driftType, balanceId: discrepancy.balanceId, action: remediation.action },
+      {
+        driftType: discrepancy.driftType,
+        balanceId: discrepancy.balanceId,
+        action: remediation.action,
+      },
       'Drift requires manual review — parked in the pending-drift queue'
     );
   }
@@ -1075,12 +1073,16 @@ export class ReconciliationService {
     discrepancy: ReconciliationDiscrepancy,
     kind: 'drift' | 'remediation'
   ): void {
-    const previous = kind === 'remediation'
-      ? (discrepancy.remediation?.action === 'mark_orphaned' ? 'locked' : undefined)
-      : undefined;
-    const newStatus = kind === 'remediation'
-      ? this.currentStatus(discrepancy, discrepancy.remediation?.action)
-      : undefined;
+    const previous =
+      kind === 'remediation'
+        ? discrepancy.remediation?.action === 'mark_orphaned'
+          ? 'locked'
+          : undefined
+        : undefined;
+    const newStatus =
+      kind === 'remediation'
+        ? this.currentStatus(discrepancy, discrepancy.remediation?.action)
+        : undefined;
     const payload: ReconciliationEventPayload = {
       runId,
       kind,
@@ -1095,9 +1097,7 @@ export class ReconciliationService {
       ...(newStatus ? { newStatus } : {}),
     };
     try {
-      this.eventSink.emit(
-        makeReconciliationEvent(discrepancy.taskId ?? 'reconciliation', payload)
-      );
+      this.eventSink.emit(makeReconciliationEvent(discrepancy.taskId ?? 'reconciliation', payload));
     } catch (err) {
       this.logger.error({ err }, 'failed to emit RECONCILIATION_EVENT');
     }
@@ -1152,12 +1152,15 @@ export class ReconciliationService {
       return;
     }
     try {
-      const response = await fetch(this.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(DRIFT_ALERT_TIMEOUT_MS),
-      });
+      const response = await fetchWithTimeout(
+        this.webhookUrl,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        DRIFT_ALERT_TIMEOUT_MS
+      );
       if (!response.ok) {
         this.logger.error(
           { status: response.status, taskId: alert.taskId },
@@ -1222,11 +1225,15 @@ export class ReconciliationService {
 
     if (!this.webhookUrl) return;
     try {
-      const response = await fetch(this.webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(report),
-      });
+      const response = await fetchWithTimeout(
+        this.webhookUrl,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(report),
+        },
+        DRIFT_ALERT_TIMEOUT_MS
+      );
       if (!response.ok) {
         this.logger.warn(
           { status: response.status },
@@ -1295,9 +1302,7 @@ export function createSettlerFromCoordinatorSecret(): EscrowSettler | undefined 
 }
 
 /** Default service wired to the production payment DB, Horizon and task DB. */
-export function createDefaultReconciliationService(
-  paymentDb?: PaymentDb
-): ReconciliationService {
+export function createDefaultReconciliationService(paymentDb?: PaymentDb): ReconciliationService {
   const taskDb = (() => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
@@ -1313,9 +1318,9 @@ export function createDefaultReconciliationService(
     ...(taskDb
       ? {
           taskState: createTaskStateResolver((taskId) => {
-            const row = taskDb.prepare('SELECT status, updatedAt FROM tasks WHERE id = ?').get(taskId) as
-              | { status: string; updatedAt: string }
-              | undefined;
+            const row = taskDb
+              .prepare('SELECT status, updatedAt FROM tasks WHERE id = ?')
+              .get(taskId) as { status: string; updatedAt: string } | undefined;
             return row ?? undefined;
           }),
         }

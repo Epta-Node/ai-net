@@ -1,4 +1,6 @@
-import { signAgentRequest } from "./agentAuthClient";
+import { signAgentRequest } from './agentAuthClient';
+import { getConfig } from '../config';
+import { fetchWithTimeout } from '../utils/timeout';
 
 export interface HeartbeatClientOptions {
   apiBaseUrl: string;
@@ -71,7 +73,7 @@ export class HeartbeatClient {
       const signed = this.publicKey
         ? await signAgentRequest({
             apiBaseUrl: this.apiBaseUrl,
-            purpose: "heartbeat",
+            purpose: 'heartbeat',
             publicKey: this.publicKey,
             secret: this.secret,
             agentId: this.agentId,
@@ -81,10 +83,12 @@ export class HeartbeatClient {
 
       const init: RequestInit = { method: 'POST' };
       if (signed) init.headers = { ...signed };
-      const response = await fetch(url, init);
+      const response = await fetchWithTimeout(url, init, getConfig().TIMEOUT_BUDGET_READ_MS);
       if (!response.ok) {
         this.consecutiveFailures += 1;
-        console.warn(`[Heartbeat] Heartbeat failed for ${this.agentId}: ${response.status} (failure #${this.consecutiveFailures})`);
+        console.warn(
+          `[Heartbeat] Heartbeat failed for ${this.agentId}: ${response.status} (failure #${this.consecutiveFailures})`
+        );
         if (this.consecutiveFailures >= this.failureThreshold && this.onFailureThresholdReached) {
           this.onFailureThresholdReached(this.consecutiveFailures);
         }
@@ -93,11 +97,14 @@ export class HeartbeatClient {
       }
     } catch (err) {
       this.consecutiveFailures += 1;
-      console.warn(`[Heartbeat] Heartbeat error for ${this.agentId}:`, err instanceof Error ? err.message : 'unknown', `(failure #${this.consecutiveFailures})`);
+      console.warn(
+        `[Heartbeat] Heartbeat error for ${this.agentId}:`,
+        err instanceof Error ? err.message : 'unknown',
+        `(failure #${this.consecutiveFailures})`
+      );
       if (this.consecutiveFailures >= this.failureThreshold && this.onFailureThresholdReached) {
         this.onFailureThresholdReached(this.consecutiveFailures);
       }
     }
   }
 }
-
