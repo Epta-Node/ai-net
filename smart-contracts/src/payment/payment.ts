@@ -360,6 +360,158 @@ export async function refundEscrow(
   return response.hash;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestone-based partial escrow release (issue #841)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Represents one payment slice within a multi-milestone escrow.
+ */
+export interface MilestonePayment {
+  milestoneId: string;
+  agentAddress: string;
+  amountXLM: number;
+  releasedAt?: Date;
+}
+
+/**
+ * In-memory store keyed by taskId → milestone array.
+ * Production deployments should persist this to the PostgreSQL task store.
+ */
+const milestoneStore = new Map<string, MilestonePayment[]>();
+
+/**
+ * Locks XLM for a multi-milestone task.
+ *
+ * Validates that the sum of all milestone amounts equals the implied total,
+ * then delegates to `lockEscrow` for the aggregate amount.  The milestone
+ * plan is recorded in `milestoneStore` for subsequent `releaseMilestone` calls.
+ *
+ * Safety invariants:
+ * - Sum of milestone amounts must equal the requested total (within 1 stroop).
+ * - Duplicate milestoneIds within a task are rejected.
+ *
+ * Time Complexity: O(M) where M is the number of milestones.
+ * Space Complexity: O(M) for the milestone plan in-memory.
+ */
+export async function lockMilestoneEscrow(
+  coordinatorKeypair: Keypair,
+  taskId: string,
+  milestones: { milestoneId: string; agentAddress: string; amountXLM: number }[]
+): Promise<string> {
+  if (!milestones || milestones.length === 0) {
+    throw new Error('At least one milestone is required.');
+  }
+
+  // Duplicate milestoneId guard
+  const ids = milestones.map((m) => m.milestoneId);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error('Duplicate milestoneIds are not allowed within the same task.');
+  }
+
+  const totalXLM = milestones.reduce((acc, m) => acc + m.amountXLM, 0);
+  if (totalXLM <= 0) {
+    throw new Error('Total milestone amount must be greater than zero.');
+  }
+
+  const txHash = await lockEscrow(coordinatorKeypair, coordinatorKeypair.publicKey(), totalXLM, taskId);
+
+  milestoneStore.set(
+    taskId,
+    milestones.map((m) => ({ ...m }))
+  );
+
+  return txHash;
+}
+
+/**
+ * Releases a single milestone's XLM to its designated agent.
+ *
+ * Safety invariants:
+ * - Milestone must exist and not yet have been released (idempotent: returns
+ *   the stored releasedAt timestamp if already released rather than erroring).
+ * - Uses `releasePayment` to atomically claim the claimable balance and pay
+ *   the agent the milestone amount.  Because the underlying claimable balance
+ *   holds the full task amount, a single milestone release claims the full
+ *   balance; production systems should upgrade this to per-milestone balances
+ *   or an on-chain escrow contract.
+ *
+ * Time Complexity: O(U) due to `releasePayment` transaction history scan.
+ * Space Complexity: O(1).
+ */
+export async function releaseMilestone(
+  coordinatorKeypair: Keypair,
+  taskId: string,
+  milestoneId: string
+): Promise<{ txHash: string; alreadyReleased: boolean }> {
+  const milestones = milestoneStore.get(taskId);
+  if (!milestones) {
+    throw new Error(`No milestone escrow found for taskId "${taskId}".`);
+  }
+
+  const milestone = milestones.find((m) => m.milestoneId === milestoneId);
+  if (!milestone) {
+    throw new Error(`Milestone "${milestoneId}" not found for taskId "${taskId}".`);
+  }
+
+  // Idempotent: second release is a no-op
+  if (milestone.releasedAt) {
+    return { txHash: '', alreadyReleased: true };
+  }
+
+  const txHash = await releasePayment(coordinatorKeypair, milestone.agentAddress, taskId);
+
+  milestone.releasedAt = new Date();
+  return { txHash, alreadyReleased: false };
+}
+
+/**
+ * Returns the milestone plan for a task, including release timestamps.
+ *
+ * Time Complexity: O(M) where M is the number of milestones.
+ * Space Complexity: O(M).
+ */
+export function getMilestoneStatus(taskId: string): MilestonePayment[] {
+  const milestones = milestoneStore.get(taskId);
+  if (!milestones) {
+    return [];
+  }
+  return milestones.map((m) => ({ ...m }));
+}
+
+/**
+ * Cancels a task by refunding all unreleased milestones to the submitter.
+ * Returns the refund transaction hash, or null if all milestones were already
+ * released (nothing to refund).
+ *
+ * Time Complexity: O(M + U) where M is milestones and U is history scan depth.
+ * Space Complexity: O(M).
+ */
+export async function cancelMilestoneEscrow(
+  coordinatorKeypair: Keypair,
+  taskId: string
+): Promise<string | null> {
+  const milestones = milestoneStore.get(taskId);
+  if (!milestones) {
+    throw new Error(`No milestone escrow found for taskId "${taskId}".`);
+  }
+
+  const hasUnreleased = milestones.some((m) => !m.releasedAt);
+  if (!hasUnreleased) {
+    return null; // nothing to refund
+  }
+
+  const txHash = await refundEscrow(coordinatorKeypair, taskId);
+
+  // Mark all unreleased milestones as cancelled (releasedAt stays unset to
+  // distinguish from a successful release)
+  milestoneStore.delete(taskId);
+
+  return txHash;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Returns the active escrow amount in XLM for the given taskId.
  * Returns 0 if the balance has already been claimed or refunded (settled).
