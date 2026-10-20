@@ -132,3 +132,14 @@ pub struct AdminChangedEvent {
     pub old_admin: Address,
     pub new_admin: Address,
 }
+
+/// Minimum duration a listing must stay active before price updates (48 hours).
+pub const MINIMUM_LISTING_DURATION: u64 = 48 * 60 * 60;
+
+/// Price history entry for detecting manipulation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceHistoryEntry {
+    pub timestamp: u64,
+    pub price_stroops: i128,
+}

@@ -9,6 +9,7 @@ import { useTransactionHistory } from '../hooks/useTransactionHistory'
 import { SendXLMForm } from '../components/wallet/SendXLMForm'
 import { PaymentChart } from '../components/wallet/PaymentChart'
 import { TransactionTable } from '../components/wallet/TransactionTable'
+import { ExportButton } from '../components/wallet/ExportButton'
 import { WalletWizard } from '../components/wallet/WalletWizard'
 import { WalletConnectPanel } from '../components/wallet/WalletConnectPanel'
 import { NetworkMismatchBanner } from '../components/wallet/NetworkMismatchBanner'
@@ -63,7 +64,13 @@ export function WalletPageSkeleton() {
 function WalletPage() {
   const { t } = useTranslation()
   const { publicKey, connected, ready, connectionMethod, disconnect, hasCompletedWizard } = useWallet()
-  const { balance, balances, loading: balanceLoading, error: balanceError } = useWalletBalance(publicKey)
+  const {
+    balance,
+    balances,
+    loading: balanceLoading,
+    error: balanceError,
+    lastUpdatedAt,
+  } = useWalletBalance(publicKey)
   const { showToast } = useToast()
   const { transactions, loading: txLoading, error: txError } = useTransactionHistory(publicKey)
   const [secretInput, setSecretInput] = React.useState('')
@@ -268,6 +275,15 @@ function WalletPage() {
         <div className={styles.balanceSection}>
           <p className={styles.balanceTitle}>{t('wallet.availableBalance')}</p>
           {balanceDisplay}
+          {lastUpdatedAt && (
+            <p
+              className={styles.lastUpdatedText}
+              data-testid="balance-last-updated"
+              style={{ fontSize: '0.75rem', color: 'var(--text-muted, #888)', marginTop: '4px' }}
+            >
+              Updated just now
+            </p>
+          )}
         </div>
 
         {balanceChips}
@@ -319,6 +335,9 @@ function WalletPage() {
           <SendXLMForm />
         </div>
         <div className={styles.historySection}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+            <ExportButton transactions={transactions} />
+          </div>
           <PaymentChart transactions={transactions} />
           <TransactionTable
             transactions={transactions}

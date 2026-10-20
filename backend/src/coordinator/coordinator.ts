@@ -207,6 +207,13 @@ export class Coordinator {
    */
   private readonly budgetLimits: BudgetLimits;
   private readonly ledgers = new Map<string, TaskBudgetLedger>();
+  /**
+   * Task ids whose escrow release failed after the node's work already
+   * completed (#852). Checked when the DAG settles so the task lands on the
+   * distinct `payment_failed` status instead of a generic `failed`, and
+   * cleared once the final status has been written.
+   */
+  private readonly paymentFailedTasks = new Set<string>();
 
   constructor(options: CoordinatorOptions = {}) {
     this.bus = options.eventBus ?? eventBus;
@@ -414,13 +421,22 @@ export class Coordinator {
         if (completed.size + failed.size !== dag.length) return;
         settled = true;
 
-        const status = failed.size === 0 ? 'completed' : 'failed';
+        // Agent failures stay primary — a broken node means the task failed
+        // on its merits. Otherwise a recorded payment fault outranks a clean
+        // DAG, landing on the distinct `payment_failed` status (#852).
+        const status =
+          failed.size > 0
+            ? 'failed'
+            : this.paymentFailedTasks.has(taskId)
+              ? 'payment_failed'
+              : 'completed';
         updateTaskIfPresent(taskId, { status, dag });
+        this.paymentFailedTasks.delete(taskId);
 
         // Settle the billing snapshot before emitting task_completed/failed:
         // a client that reacts to the event and immediately reads /cost should
         // not race the write.
-        this.settleCost(taskId, status);
+        this.settleCost(taskId, status === 'completed' ? 'completed' : 'failed');
 
         if (status === 'completed') {
           onProgress?.(100);
@@ -438,10 +454,14 @@ export class Coordinator {
 
         // Close the DAG span.
         if (dagSpan) {
-          tracingService.endSpan(dagSpan.spanId, status, {
-            completedCount: completed.size,
-            failedCount: failed.size,
-          });
+          tracingService.endSpan(
+            dagSpan.spanId,
+            status === 'completed' ? 'completed' : 'failed',
+            {
+              completedCount: completed.size,
+              failedCount: failed.size,
+            }
+          );
         }
 
         resolve();
@@ -763,7 +783,21 @@ export class Coordinator {
         'task.execution_trace'
       );
 
-      const txHash = await this.paymentService.release(taskId, node.nodeId);
+      let txHash: string;
+      try {
+        txHash = await this.paymentService.release(taskId, node.nodeId);
+      } catch (err) {
+        // The node's work succeeded but the escrow release did not (#852).
+        // Record a task-level payment fault so settlement surfaces the
+        // distinct `payment_failed` status, and keep the node completed so
+        // reconciliation can still see — and re-drive — the locked escrow.
+        this.paymentFailedTasks.add(taskId);
+        this.log.error({ taskId, nodeId: node.nodeId, err }, 'payment release failed');
+        if (nodeSpan) {
+          tracingService.endSpan(nodeSpan.spanId, 'completed', { paymentRelease: 'failed' });
+        }
+        return 'completed';
+      }
       this.bus.emit(taskId, {
         type: 'payment_released',
         taskId,

@@ -14,6 +14,7 @@
     "test:coverage": "npm --prefix backend run test:coverage && npm --prefix frontend run test:coverage",
     "test:e2e": "jest --config tests/e2e/jest.config.js --runInBand",
     "test:e2e:coverage": "jest --config tests/e2e/jest.config.js --runInBand --coverage",
+    "test:fault": "jest --config tests/e2e/jest.fault.config.js --runInBand",
     "validate:env": "npm --prefix backend run validate:env",
     "i18n:check": "npm --prefix frontend run i18n:check",
     "size": "npm --prefix frontend run size",

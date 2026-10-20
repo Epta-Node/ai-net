@@ -27,9 +27,20 @@ for (const [file, keys] of localeKeys) {
   const extra = keys.filter((key) => !baseKeys.includes(key))
   if (missing.length || extra.length) {
     failed = true
-    console.error(`${file}: missing [${missing.join(', ')}]; extra [${extra.join(', ')}]`)
+    console.error(`\n[ERROR] Parity mismatch in ${file}:`)
+    if (missing.length) {
+      console.error(`  Missing keys (${missing.length}):`)
+      missing.forEach((k) => console.error(`    - ${k}`))
+    }
+    if (extra.length) {
+      console.error(`  Extra keys (${extra.length}):`)
+      extra.forEach((k) => console.error(`    + ${k}`))
+    }
   }
 }
 
-if (failed) process.exit(1)
+if (failed) {
+  console.error('\nCI failure: i18n locale keys are out of parity with en.json.')
+  process.exit(1)
+}
 console.log(`i18n parity check passed for ${files.join(', ')}`)

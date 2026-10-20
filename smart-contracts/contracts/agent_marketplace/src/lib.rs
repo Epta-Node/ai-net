@@ -36,6 +36,10 @@ pub enum DataKey {
     QueuedAction(u32),
     /// Agent Registry contract used for eligibility checks (optional).
     AgentRegistry,
+    /// Track listings per agent+capability to prevent duplication.
+    AgentCapabilityListing(Symbol, Symbol),
+    /// Price history for a listing (to track manipulation).
+    PriceHistory(Symbol),
 }
 
 #[contract]
@@ -301,6 +305,8 @@ impl AgentMarketplaceContract {
     }
 
     /// List a service on the marketplace.
+    /// Prevents the same agent from listing the same capability multiple times
+    /// (deduplication). Updates must wait MINIMUM_LISTING_DURATION before price changes.
     pub fn list_service(
         env: Env,
         listing_id: Symbol,
@@ -324,6 +330,23 @@ impl AgentMarketplaceContract {
             return Err(Error::AlreadyExists);
         }
 
+        let dedup_key = DataKey::AgentCapabilityListing(agent_id.clone(), capability.clone());
+        if let Some(existing_id) = env
+            .storage()
+            .persistent()
+            .get::<_, Symbol>(&dedup_key)
+        {
+            if let Some(existing) = env
+                .storage()
+                .persistent()
+                .get::<_, ServiceListing>(&DataKey::ServiceListing(existing_id.clone()))
+            {
+                if existing.active {
+                    return Err(Error::AlreadyExists);
+                }
+            }
+        }
+
         let listing = ServiceListing {
             listing_id: listing_id.clone(),
             agent_id: agent_id.clone(),
@@ -336,8 +359,18 @@ impl AgentMarketplaceContract {
         };
 
         env.storage().persistent().set(&key, &listing);
+        env.storage()
+            .persistent()
+            .set(&dedup_key, &listing_id.clone());
 
-        // Index by capability
+        let price_history_key = DataKey::PriceHistory(listing_id.clone());
+        let mut history: Vec<PriceHistoryEntry> = Vec::new(&env);
+        history.push_back(PriceHistoryEntry {
+            timestamp: env.ledger().timestamp(),
+            price_stroops,
+        });
+        env.storage().persistent().set(&price_history_key, &history);
+
         let cap_key = DataKey::ListingsByCapability(capability.clone());
         let mut ids: Vec<Symbol> = env
             .storage()
@@ -638,6 +671,76 @@ impl AgentMarketplaceContract {
                 total_ratings: 0,
                 rating_sum: 0,
             })
+    }
+
+    /// Update a service listing's price. Must respect minimum listing duration.
+    /// Once MINIMUM_LISTING_DURATION has passed, owner can update price.
+    pub fn update_listing_price(
+        env: Env,
+        listing_id: Symbol,
+        new_price_stroops: i128,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+
+        if new_price_stroops <= 0 {
+            return Err(Error::InvalidPrice);
+        }
+
+        let key = DataKey::ServiceListing(listing_id.clone());
+        let mut listing: ServiceListing = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(Error::NotFound)?;
+
+        listing.owner.require_auth();
+
+        if !listing.active {
+            return Err(Error::ServiceNotAvailable);
+        }
+
+        let price_history_key = DataKey::PriceHistory(listing_id.clone());
+        let mut history: Vec<PriceHistoryEntry> = env
+            .storage()
+            .persistent()
+            .get(&price_history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if let Some(last_entry) = history.last() {
+            let now = env.ledger().timestamp();
+            if now.saturating_sub(last_entry.timestamp) < MINIMUM_LISTING_DURATION {
+                return Err(Error::InvalidPrice);
+            }
+        }
+
+        history.push_back(PriceHistoryEntry {
+            timestamp: env.ledger().timestamp(),
+            price_stroops: new_price_stroops,
+        });
+
+        listing.price_stroops = new_price_stroops;
+        env.storage().persistent().set(&key, &listing);
+        env.storage().persistent().set(&price_history_key, &history);
+
+        env.events().publish(
+            (symbol_short!("market"), symbol_short!("price_upd")),
+            ServiceListedEvent {
+                listing_id,
+                agent_id: listing.agent_id,
+                capability: listing.capability,
+                price_stroops: new_price_stroops,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Get price history for a listing to detect manipulation patterns.
+    pub fn get_price_history(env: Env, listing_id: Symbol) -> Vec<PriceHistoryEntry> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PriceHistory(listing_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 }
 

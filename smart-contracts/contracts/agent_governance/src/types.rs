@@ -104,6 +104,9 @@ pub const MAX_CALLDATA_LEN: u32 = 4_096;
 /// pruned first; a pruned history yields zero weight for very old snapshots.
 pub const MAX_CHECKPOINTS: u32 = 32;
 
+/// Timelock delay: 48 hours before a proposal execution can commence.
+pub const PROPOSAL_TIMELOCK_SECS: u64 = 48 * 60 * 60;
+
 /// Compute an agent's voting power from its stake and reputation score.
 pub fn voting_power(stake: i128, reputation: u32) -> i128 {
     stake.saturating_add((reputation as i128).saturating_mul(REPUTATION_POWER_UNIT))
@@ -163,6 +166,8 @@ pub enum ProposalStatus {
     /// Voting closed, quorum or majority not met, or the execution payload
     /// invocation failed — the proposal failed.
     Failed = 2,
+    /// Passing proposal queued for execution (in timelock).
+    Queued = 3,
 }
 
 /// The three vote options.
@@ -189,6 +194,18 @@ pub struct ExecutionPayload {
     pub calldata: Bytes,
     /// Optional SHA-256 of `calldata`; verified at creation if supplied.
     pub expected_hash: Option<BytesN<32>>,
+}
+
+/// Queued proposal execution record.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QueuedProposal {
+    /// Proposal ID.
+    pub proposal_id: u64,
+    /// Timestamp when the proposal passed voting.
+    pub passed_at: u64,
+    /// Earliest ledger timestamp at which execution is permitted.
+    pub can_execute_at: u64,
 }
 
 /// On-chain governance proposal record.
@@ -266,6 +283,8 @@ pub enum DataKey {
     ParamRegistry,
     /// Bounded [`PowerCheckpoint`] history for an agent.
     Checkpoints(Address),
+    /// Queued proposal waiting for timelock (by proposal ID).
+    QueuedProposal(u64),
 }
 
 // ─── Event payloads ──────────────────────────────────────────────────────────

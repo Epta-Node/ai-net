@@ -89,3 +89,33 @@ export function childSpanContext(overrides?: Partial<Pick<TraceContextData, 'tas
     taskId: overrides?.taskId ?? parent.taskId,
   };
 }
+
+/**
+ * W3C Trace Context helpers (#856). Our trace/span ids are UUID v4s; the W3C
+ * `traceparent` header requires lowercase hex — 32 chars for the trace id and
+ * 16 for the span id — so the dashes are stripped and the value is padded/
+ * truncated to length. Exported for propagation into HTTP headers, payment
+ * transaction memos, and OTLP payloads.
+ */
+
+/** 32-char lowercase hex trace id derived from a UUID traceId. */
+export function toW3cTraceId(traceId: string): string {
+  return traceId.replace(/-/g, '').toLowerCase().padStart(32, '0').slice(0, 32);
+}
+
+/** 16-char lowercase hex span id derived from a UUID spanId. */
+export function toW3cSpanId(spanId: string): string {
+  return spanId.replace(/-/g, '').toLowerCase().padStart(16, '0').slice(0, 16);
+}
+
+/**
+ * Build a `traceparent` header value (`00-<trace-id>-<span-id>-<flags>`).
+ * Flags bit 0 = sampled.
+ */
+export function toW3cTraceparent(
+  traceId: string,
+  spanId: string,
+  sampled = true
+): string {
+  return `00-${toW3cTraceId(traceId)}-${toW3cSpanId(spanId)}-${sampled ? '01' : '00'}`;
+}

@@ -28,8 +28,13 @@ export interface UseTaskWebSocketOptions {
   requireAuthentication?: boolean;
   /** Base host for the stream. Defaults to localhost:3001 (matching the server). */
   baseUrl?: string;
-  /** Maximum automatic reconnect attempts before giving up. Default 5. */
+  /** Maximum automatic reconnect attempts before giving up. Default 8. */
   maxReconnectAttempts?: number;
+  /**
+   * When true (e.g. the task reached a terminal state), a dropped socket is
+   * not retried and any pending retry is cancelled.
+   */
+  stopReconnecting?: boolean;
   /**
    * Maximum random jitter (ms) added to each reconnect backoff to avoid a
    * thundering herd of clients reconnecting at once. Default 0 so the base
@@ -72,6 +77,15 @@ function getDefaultWsBaseUrl(): string {
 
 const DEFAULT_BASE_URL = getDefaultWsBaseUrl();
 
+export const MAX_RECONNECT_DELAY_MS = 30_000;
+
+/** Backoff before reconnect attempt `attempt` (0 based): 1s, 2s, 4s … capped at 30s, plus jitter. */
+export function reconnectDelayMs(attempt: number, maxJitterMs = 0): number {
+  const base = Math.min(1000 * Math.pow(2, attempt), MAX_RECONNECT_DELAY_MS);
+  const jitter = maxJitterMs > 0 ? Math.floor(Math.random() * maxJitterMs) : 0;
+  return base + jitter;
+}
+
 /** Build the event cursor only to be truthy for positive sequences. */
 const seqCursor = (seq: number | undefined): number | undefined =>
   typeof seq === 'number' && Number.isInteger(seq) && seq >= 0 ? seq : undefined;
@@ -90,12 +104,17 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
     signChallenge,
     requireAuthentication,
     baseUrl = DEFAULT_BASE_URL,
-    maxReconnectAttempts = 5,
+    maxReconnectAttempts = 8,
     maxJitterMs = 0,
+    stopReconnecting = false,
   } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [status, setStatus] = useState<WebSocketStatus>('connecting');
+  const [reconnectAttempt, setReconnectAttempt] = useState(0);
+  const [reconnectIn, setReconnectIn] = useState(0);
+  const stopReconnectingRef = useRef(stopReconnecting);
+  stopReconnectingRef.current = stopReconnecting;
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef<number>(0);
@@ -177,6 +196,8 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
       setStatus('connected');
       setIsConnected(true);
       reconnectAttemptRef.current = 0; // reset reconnect attempts on a live socket
+      setReconnectAttempt(0);
+      setReconnectIn(0);
       gapRetriedRef.current = false;
       // Auth is challenge-response: the server sends `auth_challenge` first
       // (see onmessage below). Nothing is sent here so a stale or replayed
@@ -277,7 +298,8 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
 
       // Never auto-reconnect after an intentional shutdown (component unmount
       // or explicit disconnect()).
-      if (manualCloseRef.current) {
+      if (manualCloseRef.current || stopReconnectingRef.current) {
+        setReconnectIn(0);
         return;
       }
 
@@ -289,15 +311,18 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
       }
 
       if (reconnectAttemptRef.current < maxReconnectAttempts) {
-        const baseDelay = 1000 * Math.pow(2, reconnectAttemptRef.current);
-        const jitter = maxJitterMs > 0 ? Math.floor(Math.random() * maxJitterMs) : 0;
-        const delay = Math.max(0, baseDelay + jitter);
+        const delay = reconnectDelayMs(reconnectAttemptRef.current, maxJitterMs);
         reconnectAttemptRef.current += 1;
+        setReconnectAttempt(reconnectAttemptRef.current);
+        setReconnectIn(delay);
         clearReconnectTimeout();
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectTimeoutRef.current = null;
+          setReconnectIn(0);
           connectWebSocket();
         }, delay);
+      } else {
+        setReconnectIn(0);
       }
     };
   }, [
@@ -309,6 +334,14 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
     maxJitterMs,
     clearReconnectTimeout,
   ]);
+
+  // A task that has finished will never send more events, so drop any pending retry.
+  useEffect(() => {
+    if (stopReconnecting) {
+      clearReconnectTimeout();
+      setReconnectIn(0);
+    }
+  }, [stopReconnecting, clearReconnectTimeout]);
 
   const reconnect = useCallback(() => {
     reconnectAttemptRef.current = 0;
@@ -348,6 +381,8 @@ export const useTaskWebSocket = (options: UseTaskWebSocketOptions) => {
   return {
     isConnected,
     status,
+    reconnectAttempt,
+    reconnectIn,
     reconnect,
     disconnect,
   };

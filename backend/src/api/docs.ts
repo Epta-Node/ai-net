@@ -210,9 +210,10 @@ List endpoints support standardized query parameters:
         IdParam: generateOpenApiSchema(IdParamSchema),
         TaskStatus: {
           type: "string",
-          enum: ["queued", "running", "completed", "failed", "cancelled"],
+          enum: ["queued", "running", "completed", "failed", "cancelled", "payment_failed"],
           example: "queued",
-          description: "Current lifecycle state of the task orchestration.",
+          description:
+            "Current lifecycle state of the task orchestration. `payment_failed` means every node completed but an escrow release failed.",
         },
         NodeStatus: {
           type: "string",

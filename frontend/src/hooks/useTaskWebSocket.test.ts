@@ -1,5 +1,5 @@
 import { renderHook, act } from '@testing-library/react';
-import { useTaskWebSocket, UseTaskWebSocketOptions } from './useTaskWebSocket';
+import { reconnectDelayMs, useTaskWebSocket, UseTaskWebSocketOptions } from './useTaskWebSocket';
 import type { DAGEvent } from '../types/api';
 import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest';
 
@@ -279,15 +279,15 @@ describe('useTaskWebSocket', () => {
 
     renderHook(() => useTaskWebSocket(mockOptions));
 
-    // Simulate 5 disconnections (max attempts)
-    for (let i = 0; i < 5; i++) {
+    // Simulate 8 disconnections (max attempts)
+    for (let i = 0; i < 8; i++) {
       act(() => {
         MockWebSocket.instance!.simulateClose();
         vi.advanceTimersByTime(1000 * Math.pow(2, i));
       });
     }
 
-    // 6th disconnection should not schedule another reconnection
+    // 9th disconnection should not schedule another reconnection
     const timeoutCallsBefore = setTimeoutSpy.mock.calls.length;
 
     act(() => {
@@ -324,6 +324,48 @@ describe('useTaskWebSocket', () => {
     act(() => MockWebSocket.instance!.simulateOpen());
     expect(result.current.status).toBe('connected');
     expect(result.current.isConnected).toBe(true);
+  });
+
+  it('caps the reconnect backoff at 30s', () => {
+    expect([0, 1, 2, 3, 4, 5, 7].map((n) => reconnectDelayMs(n))).toEqual([
+      1000, 2000, 4000, 8000, 16000, 30000, 30000,
+    ]);
+  });
+
+  it('spreads jittered reconnects across the jitter window', () => {
+    const delays = Array.from({ length: 100 }, () => reconnectDelayMs(0, 6000));
+    expect(Math.min(...delays)).toBeGreaterThanOrEqual(1000);
+    expect(Math.max(...delays)).toBeLessThan(7000);
+    expect(new Set(delays).size).toBeGreaterThan(50);
+  });
+
+  it('exposes the attempt and countdown while reconnecting', () => {
+    const { result } = renderHook(() =>
+      useTaskWebSocket({ taskId: 'test-task', onMessage: vi.fn() })
+    );
+
+    act(() => MockWebSocket.instance!.simulateOpen());
+    act(() => MockWebSocket.instance!.simulateClose());
+    expect(result.current.reconnectAttempt).toBe(1);
+    expect(result.current.reconnectIn).toBe(1000);
+
+    act(() => vi.advanceTimersByTime(1000));
+    act(() => MockWebSocket.instance!.simulateOpen());
+    expect(result.current.reconnectAttempt).toBe(0);
+    expect(result.current.reconnectIn).toBe(0);
+  });
+
+  it('does not reconnect once the task has reached a terminal state', () => {
+    const setTimeoutSpy = vi.spyOn(global, 'setTimeout');
+    renderHook(() =>
+      useTaskWebSocket({ taskId: 'test-task', onMessage: vi.fn(), stopReconnecting: true })
+    );
+    const callsBefore = setTimeoutSpy.mock.calls.length;
+
+    act(() => MockWebSocket.instance!.simulateClose());
+
+    expect(setTimeoutSpy.mock.calls.length).toBe(callsBefore);
+    setTimeoutSpy.mockRestore();
   });
 
   it('does not open a socket when taskId is empty', () => {

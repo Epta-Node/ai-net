@@ -12,6 +12,9 @@ module.exports = {
   rootDir: path.resolve(__dirname, '../../backend'),
   roots: ['<rootDir>/../tests/e2e'],
   testMatch: ['<rootDir>/../tests/e2e/**/*.test.ts'],
+  // The fault injection suite (#852) runs standalone via `npm run test:fault`
+  // (jest.fault.config.js) so its retry-backoff scenarios never slow this run.
+  testPathIgnorePatterns: ['/node_modules/', 'fault-injection\\.test\\.ts$'],
   moduleNameMapper: {
     '^@stellar/stellar-sdk$': '<rootDir>/node_modules/@stellar/stellar-sdk',
     '^supertest$': '<rootDir>/node_modules/supertest',

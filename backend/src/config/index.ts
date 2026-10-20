@@ -94,6 +94,23 @@ const envSchema = z.object({
   /** Job queue depth at which `/health/deep` reports the queue as degraded. */
   HEALTH_QUEUE_DEPTH_WARN: z.coerce.number().int().positive().default(1_000),
 
+  // ── Distributed tracing / OpenTelemetry export (issue #856) ────────────────
+  /**
+   * Fraction of spans sampled into in-memory traces, in `[0, 1]`. `1` records
+   * every span, `0` records none — error spans (`status === 'failed'`) are
+   * always recorded regardless of rate, so failures never disappear.
+   */
+  OTEL_SAMPLING_RATE: z.coerce.number().min(0).max(1).default(1),
+  /**
+   * When set, every ended span is exported as OTLP/HTTP JSON to
+   * `${OTEL_EXPORTER_ENDPOINT}/v1/traces` (an OpenTelemetry Collector).
+   * An empty value means "unset", matching the other optional keys.
+   */
+  OTEL_EXPORTER_ENDPOINT: z.preprocess(
+    (v) => (v === "" || v === undefined ? undefined : v),
+    z.string().url().optional(),
+  ),
+
   CACHE_DRIVER: z.enum(["lru", "redis"]).default("lru"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   CACHE_LRU_MAX_SIZE: z.coerce.number().int().positive().default(500),

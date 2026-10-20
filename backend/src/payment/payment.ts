@@ -5,6 +5,7 @@ import {
   Operation,
   Asset,
   Claimant,
+  Memo,
   BASE_FEE,
 } from "@stellar/stellar-sdk";
 import type { PaymentDb, PaymentRecord } from "../db/index";
@@ -15,7 +16,7 @@ import {
   stroopsToXlm,
 } from "./utils";
 import { tracingService } from "../services/tracing";
-import { currentTraceId } from "../services/traceContext";
+import { currentTraceId, toW3cTraceId } from "../services/traceContext";
 import { getConfig, stellarClientOptions } from "../config";
 import { getCircuitBreaker } from "../services/circuitBreaker.js";
 
@@ -105,7 +106,7 @@ export class PaymentService {
         withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()))
       );
 
-      const tx = new TransactionBuilder(account, {
+      const txBuilder = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: this.networkPassphrase,
       })
@@ -118,9 +119,14 @@ export class PaymentService {
               new Claimant(coordinatorKeypair.publicKey(), Claimant.predicateUnconditional()),
             ],
           })
-        )
-        .setTimeout(30)
-        .build();
+        );
+      // Carry the W3C trace id on-chain so an escrow can be tied back to the
+      // request that locked it (#856). Stellar memos cap at 28 bytes, so the
+      // 32-char hex trace id is truncated.
+      if (traceId) {
+        txBuilder.addMemo(Memo.text(toW3cTraceId(traceId).slice(0, 28)));
+      }
+      const tx = txBuilder.setTimeout(30).build();
 
       const balanceId = tx.getClaimableBalanceId(0);
       tx.sign(coordinatorKeypair);
@@ -174,15 +180,18 @@ export class PaymentService {
         withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()))
       );
 
-      const tx = new TransactionBuilder(account, {
+      const txBuilder = new TransactionBuilder(account, {
         fee: BASE_FEE,
         networkPassphrase: this.networkPassphrase,
       })
         .addOperation(
           Operation.claimClaimableBalance({ balanceId: record.balanceId })
-        )
-        .setTimeout(30)
-        .build();
+        );
+      // Mirror the lock memo so release and escrow stay joinable by trace id.
+      if (traceId) {
+        txBuilder.addMemo(Memo.text(toW3cTraceId(traceId).slice(0, 28)));
+      }
+      const tx = txBuilder.setTimeout(30).build();
 
       tx.sign(coordinatorKeypair);
 
