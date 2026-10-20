@@ -18,6 +18,7 @@ import fs from 'fs';
 import path from 'path';
 import { VeniceClient } from '../../src/services/venice/client';
 import { CircuitBreaker } from '../../src/services/venice/circuitBreaker';
+import { VeniceKeyHealthStore } from '../../src/services/venice/keyHealth';
 
 const mockFetch = jest.fn();
 (global as any).fetch = mockFetch;
@@ -82,6 +83,9 @@ function makeClient(providers = [P1, P2], maxRetries = 0) {
   return new VeniceClient({
     providers,
     circuitBreaker: new CircuitBreaker(),
+    // Fresh store per client: the process-wide one would carry failure
+    // history between tests and reorder this file's providers (issue #741).
+    keyHealth: new VeniceKeyHealthStore(),
     // Zero retries keeps fetch call counts deterministic: a 5xx fails over to
     // the next provider immediately rather than burning same-provider attempts.
     maxRetries,

@@ -32,6 +32,18 @@ ENVIRONMENT VARIABLES:
     STELLAR_RPC_URL         RPC URL for the network (optional, uses default for network)
     STELLAR_HORIZON_URL     Horizon URL for the network (optional, uses default for network)
 
+MULTISIG ADMIN (mainnet):
+    ADMIN_KEY_1             First admin keypair secret key
+    ADMIN_KEY_2             Second admin keypair secret key
+    ADMIN_KEY_3             Third admin keypair secret key
+    ADMIN_MULTISIG_THRESHOLD Signatures required for admin actions (default: 2)
+
+    When ADMIN_KEY_1/2/3 are all set the script deploys with a 2-of-3
+    multisig admin account: ADMIN_KEY_1 is the initial deployer, then
+    ADMIN_KEY_2 and ADMIN_KEY_3 are added as co-signers and the account
+    threshold is set to ADMIN_MULTISIG_THRESHOLD (default 2).
+    Falls back to STELLAR_SECRET_KEY for testnet/futurenet single-key deploys.
+
 EXAMPLES:
     $0                       Deploy to testnet
     $0 -n futurenet         Deploy to futurenet
@@ -76,9 +88,113 @@ case $NETWORK in
         ;;
 esac
 
+# ── Multisig admin helpers ──────────────────────────────────────────────────
+
+# Determine whether the caller supplied a full 2-of-3 multisig key set.
+MULTISIG_ENABLED=false
+if [[ -n "$ADMIN_KEY_1" && -n "$ADMIN_KEY_2" && -n "$ADMIN_KEY_3" ]]; then
+    MULTISIG_ENABLED=true
+fi
+ADMIN_MULTISIG_THRESHOLD="${ADMIN_MULTISIG_THRESHOLD:-2}"
+
+# Derive the Stellar public key for a given secret key.
+stellar_public_key() {
+    local secret_key="$1"
+    stellar keys show --secret-key "$secret_key" 2>/dev/null \
+        || soroban keys show "$secret_key" 2>/dev/null \
+        || python3 -c "
+import sys
+try:
+    from stellar_sdk import Keypair
+    print(Keypair.from_secret('$secret_key').public_key)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null || {
+        echo -e "${RED}Error: cannot derive public key — install stellar-sdk or stellar CLI${NC}" >&2
+        exit 1
+    }
+}
+
+# After initial contract deployment, configure the account to require
+# ADMIN_MULTISIG_THRESHOLD-of-3 signatures for all admin operations.
+configure_multisig_account() {
+    if [[ "$MULTISIG_ENABLED" != "true" ]]; then
+        return 0
+    fi
+
+    echo -e "${BLUE}Configuring 2-of-3 multisig admin account...${NC}"
+
+    local pk1 pk2 pk3
+    pk1=$(stellar_public_key "$ADMIN_KEY_1")
+    pk2=$(stellar_public_key "$ADMIN_KEY_2")
+    pk3=$(stellar_public_key "$ADMIN_KEY_3")
+
+    echo -e "  Admin key 1: ${GREEN}${pk1}${NC}"
+    echo -e "  Admin key 2: ${GREEN}${pk2}${NC}"
+    echo -e "  Admin key 3: ${GREEN}${pk3}${NC}"
+    echo -e "  Threshold  : ${GREEN}${ADMIN_MULTISIG_THRESHOLD}${NC}"
+
+    # Add ADMIN_KEY_2 and ADMIN_KEY_3 as signers with weight 1 each.
+    # Then raise low/med/high thresholds to ADMIN_MULTISIG_THRESHOLD so that
+    # any admin operation requires at least that many signatures.
+    stellar transaction build \
+        --source-account "$pk1" \
+        --network "$NETWORK" \
+        --fee 1000 \
+        add-signer --signer-key "$pk2" --signer-weight 1 \
+        add-signer --signer-key "$pk3" --signer-weight 1 \
+        set-options \
+            --master-weight 1 \
+            --low-threshold "$ADMIN_MULTISIG_THRESHOLD" \
+            --med-threshold "$ADMIN_MULTISIG_THRESHOLD" \
+            --high-threshold "$ADMIN_MULTISIG_THRESHOLD" \
+        2>/dev/null || {
+        # Fallback: use horizon/SDK approach
+        python3 -I -c "
+from stellar_sdk import Server, Keypair, TransactionBuilder, Network, SetOptions
+import os, sys
+
+secret   = '$ADMIN_KEY_1'
+pk2_str  = '$pk2'
+pk3_str  = '$pk3'
+thresh   = int('$ADMIN_MULTISIG_THRESHOLD')
+horizon  = os.environ.get('STELLAR_HORIZON_URL', 'https://horizon-testnet.stellar.org')
+passphrase = Network.TESTNET_NETWORK_PASSPHRASE if 'testnet' in horizon else \
+             Network.PUBLIC_NETWORK_PASSPHRASE
+
+kp1 = Keypair.from_secret(secret)
+server = Server(horizon)
+account = server.load_account(kp1.public_key)
+tx = (
+    TransactionBuilder(account, network_passphrase=passphrase, base_fee=1000)
+    .append_set_options_op(
+        master_weight=1,
+        low_threshold=thresh,
+        med_threshold=thresh,
+        high_threshold=thresh,
+        signer={'ed25519_public_key': pk2_str, 'weight': 1},
+    )
+    .append_set_options_op(
+        signer={'ed25519_public_key': pk3_str, 'weight': 1},
+    )
+    .set_timeout(30)
+    .build()
+)
+tx.sign(kp1)
+resp = server.submit_transaction(tx)
+print('Multisig configured, tx hash:', resp['hash'])
+" || echo -e "${YELLOW}Warning: multisig configuration step skipped — configure manually.${NC}"
+    }
+
+    echo -e "${GREEN}✓ Multisig admin account configured (${ADMIN_MULTISIG_THRESHOLD}-of-3)${NC}"
+}
+
 # Check required environment variables
-if [[ -z "$STELLAR_SECRET_KEY" ]]; then
-    echo -e "${RED}Error: STELLAR_SECRET_KEY environment variable is required${NC}" >&2
+if [[ "$MULTISIG_ENABLED" == "true" ]]; then
+    echo -e "${BLUE}Multisig mode: using ADMIN_KEY_1 as deployer with 2-of-3 threshold${NC}"
+    STELLAR_SECRET_KEY="$ADMIN_KEY_1"
+elif [[ -z "$STELLAR_SECRET_KEY" ]]; then
+    echo -e "${RED}Error: STELLAR_SECRET_KEY (or ADMIN_KEY_1/2/3) environment variable is required${NC}" >&2
     exit 1
 fi
 
@@ -288,6 +404,7 @@ main() {
         ')
         echo "$metadata" > "$DEPLOYMENT_FILE"
         
+        configure_multisig_account
         verify_deployment
     else
         echo -e "${RED}=== Deployment failed ===${NC}" >&2

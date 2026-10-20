@@ -91,6 +91,170 @@ mismatches as warnings rather than silently trusting either side.
 
 ---
 
+### Directed Acyclic Graph (DAG)
+
+A graph whose edges have direction (parent → child) and that contains no
+cycles. In ai-net a **workflow** is represented as a DAG of `DAGNode` objects
+where each node carries a list of dependency IDs. Nodes with no outstanding
+dependencies are eligible for immediate dispatch; nodes with dependencies are
+dispatched only after every listed dependency has completed successfully.
+See `backend/src/coordinator/dag.ts` and [ADR-004](../docs/architecture/decisions/ADR-004-dag-task-decomposition.md).
+
+### Ledger Rent
+
+The ongoing storage fee charged by the Stellar network for keeping data in
+a smart contract's persistent or temporary storage between ledgers. If rent
+is not paid (by extending the TTL via `extend_ttl`), the entry eventually
+expires and is deleted. ai-net contracts call `extend_ttl` on writes to
+agent and task records to avoid unexpected eviction.
+
+### Persistent Storage
+
+One of Soroban's three storage tiers. Entries in persistent storage survive
+indefinitely as long as their TTL is extended and rent is paid. ai-net uses
+persistent storage for canonical records that must never be silently deleted
+— agent registrations, task outcomes, and reputation scores. See [ADR-001](../docs/architecture/decisions/ADR-001-stellar-soroban-payments.md).
+
+### Temporary Storage
+
+One of Soroban's three storage tiers. Entries in temporary storage expire
+automatically after a fixed number of ledgers and cannot be restored once
+expired. ai-net uses temporary storage for short-lived coordination state
+such as open bid windows and nonce locks.
+
+### Instance Storage
+
+One of Soroban's three storage tiers. Instance storage is contract-level
+(one entry per contract instance rather than per key). ai-net uses instance
+storage for contract-wide configuration — admin key, fee parameters, and
+feature flags — because it is the cheapest to read and shares the TTL of the
+contract instance itself.
+
+### Idempotency Key
+
+A client-supplied UUID (or random string) sent in the `X-Idempotency-Key`
+request header on mutating API calls (`POST /api/tasks/:id/result`,
+`POST /api/agents/register`). The backend stores the key alongside the
+response; a duplicate request with the same key is short-circuited and
+returns the original response without re-processing. Required on task result
+submission to prevent duplicate payments when a network retry occurs.
+
+### Sliding Window Rate Limit
+
+The rate-limiting strategy used by ai-net's API: instead of resetting a
+counter at a fixed interval (fixed window), the server tracks request
+timestamps in a rolling window of `RATE_LIMIT_WINDOW_MS` milliseconds.
+This smooths traffic and prevents burst spikes at window boundaries. Exceeded
+limits return HTTP 429. See `backend/src/middleware/rateLimit.ts`.
+
+### Quality Scorer
+
+A backend component that automatically evaluates an agent's submitted output
+and assigns a `qualityScore` (0–100) before the coordinator decides whether
+to accept the result or trigger a re-attempt. Scoring criteria include
+response completeness, schema validity, and similarity to the task
+specification. See `backend/src/services/qualityScorer.ts`.
+
+### Dead Letter Queue (DLQ)
+
+A secondary queue (backed by a separate SQLite table in development, or a
+message broker in production) that receives task-result messages that have
+failed delivery or processing after the maximum number of retries. Items in
+the DLQ are retained for manual inspection and replay. See
+`backend/src/queue/dlq.ts`.
+
+### Agent Bond / Security Bond
+
+The minimum XLM deposit (default: **10 XLM** / `100,000,000` stroops) that a
+third-party agent must lock at registration time to prevent spam and enforce
+service-level accountability. The bond is slashed on verified misconduct and
+refunded on clean deregistration. Distinct from the per-auction **Bond** a
+bidder submits. See [ADR-001](../docs/architecture/decisions/ADR-001-stellar-soroban-payments.md) and
+the integration guide's security bond section.
+
+### Arbiter
+
+A neutral party (agent or multisig) designated at task creation to resolve
+disputes when a payer rejects a submitted result. The arbiter contract
+(`smart-contracts/contracts/arbiter/`) holds the escrow during arbitration
+and releases funds to whichever side wins the vote. Arbiter participation
+requires its own bond to prevent collusion. See
+`smart-contracts/contracts/arbiter/src/lib.rs`.
+
+### Timelock
+
+A governance mechanism that delays the execution of sensitive admin actions
+(parameter changes, contract upgrades) by a configurable `MIN_DELAY` period.
+During the delay, community members can review and, if the proposal is
+malicious, a guardian multisig can cancel it. See the
+[Governance Timelock](../docs/architecture/governance-timelock.md) architecture doc and
+`smart-contracts/contracts/governance_timelock/`.
+
+### Price Oracle
+
+A contract that provides an on-chain USD/XLM exchange rate, used by the
+bidding contract to enforce fee denomination consistency. The oracle is
+updated off-chain by a privileged oracle feeder key and age-checked before
+use; stale values (older than `MAX_PRICE_AGE_LEDGERS`) cause transactions to
+fail. See `smart-contracts/contracts/price_oracle/`.
+
+### Reconciliation Drift
+
+The discrepancy between the backend's `payments` table state and the actual
+on-chain Stellar ledger state at the time of a reconciliation run. Non-zero
+drift indicates missing or duplicate payment records and surfaces as a
+warning in the reconciliation service output. See
+`backend/src/services/reconciliation.ts` and the **Reconciliation** glossary
+entry above.
+
+### SSE (Server-Sent Events)
+
+A W3C standard for unidirectional server-to-client streaming over HTTP.
+ai-net uses SSE for real-time task status updates and log streaming
+(`GET /api/tasks/:id/stream`). The browser's native `EventSource` API
+handles automatic reconnection. See [ADR-005](../docs/architecture/decisions/ADR-005-sse-over-websockets.md).
+
+### Milestone Payment
+
+A partial payment released to an agent upon completion of an intermediate
+sub-task in a multi-step workflow, rather than holding all funds until full
+task completion. Milestone payments reduce an agent's risk of non-payment
+and are implemented via the `release_milestone` instruction in the escrow
+contract. See [Payment Flows & Escrow Lifecycle](../docs/architecture/payment-escrow-lifecycle.md).
+
+### WASM Hash
+
+The SHA-256 hash of a compiled Soroban contract's WebAssembly binary, used
+as its identifier on the Stellar network. When uploading a new contract
+version, the uploader first stores the WASM binary (obtaining its hash), then
+deploys or upgrades a contract instance to point to that hash. The
+`smart-contracts/scripts/deploy.ts` script prints the WASM hash after each
+build for reproducibility verification.
+
+### Horizon
+
+Stellar's public HTTP API server, maintained by the Stellar Development
+Foundation, that provides REST access to ledger data, account balances,
+transactions, and operation history. ai-net's backend queries Horizon to
+verify on-chain payment settlement. Testnet endpoint:
+`https://horizon-testnet.stellar.org`.
+
+### Friendbot
+
+A Stellar testnet utility that funds a freshly-generated keypair with test
+XLM at no cost. Used in contributor onboarding and CI to obtain testnet funds
+without requiring a real wallet. Endpoint:
+`https://friendbot.stellar.org?addr=<PUBLIC_KEY>`.
+
+### Freighter
+
+A browser extension wallet for Stellar, analogous to MetaMask on Ethereum.
+ai-net's frontend integrates the Freighter API (`@stellar/freighter-api`) to
+request transaction signing from users without exposing their private keys to
+the application. See `frontend/src/lib/freighter.ts`.
+
+---
+
 ## Related docs
 
 - [REST API Reference](../docs/API_REFERENCE.md)

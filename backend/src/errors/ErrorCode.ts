@@ -6,49 +6,51 @@
  */
 export const ErrorCode = {
   // ── Validation ─────────────────────────────────────────────────────────────
-  VALIDATION_ERROR: "VALIDATION_ERROR",
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
 
   // ── Resource lookup ────────────────────────────────────────────────────────
-  NOT_FOUND: "NOT_FOUND",
+  NOT_FOUND: 'NOT_FOUND',
 
   // ── State conflicts ────────────────────────────────────────────────────────
-  CONFLICT: "CONFLICT",
+  CONFLICT: 'CONFLICT',
 
   // ── Auth ───────────────────────────────────────────────────────────────────
-  UNAUTHORIZED: "UNAUTHORIZED",
-  FORBIDDEN: "FORBIDDEN",
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  FORBIDDEN: 'FORBIDDEN',
 
   // ── Agent ownership proof (#557, #558) ─────────────────────────────────────
   /**
    * The server-issued challenge is missing, unknown, expired, already used, or
    * was issued for a different request. Recoverable: request a new challenge.
    */
-  AGENT_CHALLENGE_INVALID: "AGENT_CHALLENGE_INVALID",
+  AGENT_CHALLENGE_INVALID: 'AGENT_CHALLENGE_INVALID',
   /**
    * The signature is absent, malformed, or does not verify against the claimed
    * Stellar public key. Not recoverable by retrying with the same key.
    */
-  AGENT_SIGNATURE_INVALID: "AGENT_SIGNATURE_INVALID",
+  AGENT_SIGNATURE_INVALID: 'AGENT_SIGNATURE_INVALID',
 
   // ── Rate limiting ──────────────────────────────────────────────────────────
-  RATE_LIMITED: "RATE_LIMITED",
+  RATE_LIMITED: 'RATE_LIMITED',
   /** A per-wallet daily quota (tasks or Venice tokens) is exhausted (#803). */
-  QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
+  QUOTA_EXCEEDED: 'QUOTA_EXCEEDED',
 
   // ── Payment / Stellar ─────────────────────────────────────────────────────
-  PAYMENT_ERROR: "PAYMENT_ERROR",
-  STELLAR_UNAVAILABLE: "STELLAR_UNAVAILABLE",
+  PAYMENT_ERROR: 'PAYMENT_ERROR',
+  STELLAR_UNAVAILABLE: 'STELLAR_UNAVAILABLE',
 
   // ── Upstream AI/provider ──────────────────────────────────────────────────
-  UPSTREAM_UNAVAILABLE: "UPSTREAM_UNAVAILABLE",
-  VENICE_UNAVAILABLE: "VENICE_UNAVAILABLE",
-  PROVIDER_ERROR: "PROVIDER_ERROR",
-  PROVIDER_TIMEOUT: "PROVIDER_TIMEOUT",
-  PROVIDER_RATE_LIMITED: "PROVIDER_RATE_LIMITED",
+  UPSTREAM_UNAVAILABLE: 'UPSTREAM_UNAVAILABLE',
+  VENICE_UNAVAILABLE: 'VENICE_UNAVAILABLE',
+  PROVIDER_ERROR: 'PROVIDER_ERROR',
+  PROVIDER_TIMEOUT: 'PROVIDER_TIMEOUT',
+  PROVIDER_RATE_LIMITED: 'PROVIDER_RATE_LIMITED',
 
   // ── Server internals ───────────────────────────────────────────────────────
-  INTERNAL_ERROR: "INTERNAL_ERROR",
-  UNSUPPORTED_API_VERSION: "UNSUPPORTED_API_VERSION",
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  /** The request exhausted its per-endpoint timeout budget and was cut off (#742). */
+  REQUEST_TIMEOUT: 'REQUEST_TIMEOUT',
+  UNSUPPORTED_API_VERSION: 'UNSUPPORTED_API_VERSION',
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -76,6 +78,7 @@ export const HTTP_STATUS_FOR_CODE: Record<ErrorCode, number> = {
   PROVIDER_TIMEOUT: 504,
   PROVIDER_RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
+  REQUEST_TIMEOUT: 504,
   UNSUPPORTED_API_VERSION: 400,
 };
 
@@ -84,22 +87,25 @@ export const HTTP_STATUS_FOR_CODE: Record<ErrorCode, number> = {
  * Override per-instance via the constructor `message` argument.
  */
 export const DEFAULT_MESSAGE_FOR_CODE: Record<ErrorCode, string> = {
-  VALIDATION_ERROR: "Request input is invalid.",
-  NOT_FOUND: "The requested resource was not found.",
-  CONFLICT: "The request conflicts with the current state of the resource.",
-  UNAUTHORIZED: "Authentication required.",
-  FORBIDDEN: "You do not have permission to perform this action.",
-  AGENT_CHALLENGE_INVALID: "The agent challenge is missing, expired, or was issued for another request.",
-  AGENT_SIGNATURE_INVALID: "The agent signature does not match the claimed Stellar public key.",
-  RATE_LIMITED: "Too many requests. Please slow down.",
-  QUOTA_EXCEEDED: "The daily quota for this wallet has been exhausted. Please try again after the quota resets.",
-  PAYMENT_ERROR: "Payment operation failed.",
-  STELLAR_UNAVAILABLE: "Stellar network unavailable.",
-  UPSTREAM_UNAVAILABLE: "An upstream service is unavailable.",
-  VENICE_UNAVAILABLE: "Venice API unavailable.",
-  PROVIDER_ERROR: "An upstream AI provider returned an error.",
-  PROVIDER_TIMEOUT: "The AI provider did not respond in time.",
-  PROVIDER_RATE_LIMITED: "The AI provider is currently rate-limiting requests.",
-  INTERNAL_ERROR: "An unexpected error occurred. Please try again later.",
-  UNSUPPORTED_API_VERSION: "The requested API version is not supported.",
+  VALIDATION_ERROR: 'Request input is invalid.',
+  NOT_FOUND: 'The requested resource was not found.',
+  CONFLICT: 'The request conflicts with the current state of the resource.',
+  UNAUTHORIZED: 'Authentication required.',
+  FORBIDDEN: 'You do not have permission to perform this action.',
+  AGENT_CHALLENGE_INVALID:
+    'The agent challenge is missing, expired, or was issued for another request.',
+  AGENT_SIGNATURE_INVALID: 'The agent signature does not match the claimed Stellar public key.',
+  RATE_LIMITED: 'Too many requests. Please slow down.',
+  QUOTA_EXCEEDED:
+    'The daily quota for this wallet has been exhausted. Please try again after the quota resets.',
+  PAYMENT_ERROR: 'Payment operation failed.',
+  STELLAR_UNAVAILABLE: 'Stellar network unavailable.',
+  UPSTREAM_UNAVAILABLE: 'An upstream service is unavailable.',
+  VENICE_UNAVAILABLE: 'Venice API unavailable.',
+  PROVIDER_ERROR: 'An upstream AI provider returned an error.',
+  PROVIDER_TIMEOUT: 'The AI provider did not respond in time.',
+  PROVIDER_RATE_LIMITED: 'The AI provider is currently rate-limiting requests.',
+  INTERNAL_ERROR: 'An unexpected error occurred. Please try again later.',
+  REQUEST_TIMEOUT: 'The operation exceeded its timeout budget. Please try again later.',
+  UNSUPPORTED_API_VERSION: 'The requested API version is not supported.',
 };

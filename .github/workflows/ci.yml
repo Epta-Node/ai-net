@@ -13,7 +13,8 @@ concurrency:
 permissions:
   contents: read
   # dorny/paths-filter queries the pull request files API on PR events.
-  pull-requests: read
+  # marocchino/sticky-pull-request-comment needs write to post/update comments.
+  pull-requests: write
 
 jobs:
   changes:
@@ -88,6 +89,15 @@ jobs:
       - name: Unit tests & coverage
         run: npm run test:coverage
 
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: backend/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: OpenAPI contract tests
         run: npm run test:contract
 
@@ -133,6 +143,15 @@ jobs:
 
       - name: Unit tests & coverage (vitest)
         run: npm run test:coverage
+
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 14
 
   frontend-visual:
     name: frontend-visual-regression
@@ -554,6 +573,80 @@ jobs:
             frontend/blob-report/
           if-no-files-found: warn
           retention-days: 14
+
+  # ── PR coverage comment reporter ────────────────────────────────────────────
+  # Posts (or updates) a sticky PR comment with a per-component coverage table.
+  # Runs only on pull_request events; skipped on push/dispatch so it does not
+  # fail main-branch runs where the comment action has nothing to post to.
+  coverage-report:
+    name: coverage-report
+    if: github.event_name == 'pull_request'
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: coverage/backend
+        continue-on-error: true
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: coverage/frontend
+        continue-on-error: true
+
+      - name: Build coverage summary
+        id: summary
+        run: |
+          extract() {
+            local file="$1"
+            if [ -f "$file" ]; then
+              python3 - "$file" <<'EOF'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          t = data.get("total", {})
+          lines   = t.get("lines",   {}).get("pct", "n/a")
+          stmts   = t.get("statements", {}).get("pct", "n/a")
+          funcs   = t.get("functions", {}).get("pct", "n/a")
+          branches = t.get("branches", {}).get("pct", "n/a")
+          print(f"{lines}%|{stmts}%|{funcs}%|{branches}%")
+          EOF
+            else
+              echo "n/a|n/a|n/a|n/a"
+            fi
+          }
+          BE=$(extract coverage/backend/coverage-summary.json)
+          FE=$(extract coverage/frontend/coverage-summary.json)
+          BE_LINES=$(echo "$BE" | cut -d'|' -f1)
+          BE_STMTS=$(echo "$BE" | cut -d'|' -f2)
+          BE_FUNCS=$(echo "$BE" | cut -d'|' -f3)
+          BE_BR=$(echo "$BE" | cut -d'|' -f4)
+          FE_LINES=$(echo "$FE" | cut -d'|' -f1)
+          FE_STMTS=$(echo "$FE" | cut -d'|' -f2)
+          FE_FUNCS=$(echo "$FE" | cut -d'|' -f3)
+          FE_BR=$(echo "$FE" | cut -d'|' -f4)
+          {
+            echo 'MESSAGE<<EOF'
+            echo '## CI Coverage Summary'
+            echo ''
+            echo '| Component | Lines | Statements | Functions | Branches | Status |'
+            echo '|-----------|-------|------------|-----------|----------|--------|'
+            echo "| **Backend**  | $BE_LINES | $BE_STMTS | $BE_FUNCS | $BE_BR | ${{ needs.backend.result == 'success' && '✅' || '❌' }} |"
+            echo "| **Frontend** | $FE_LINES | $FE_STMTS | $FE_FUNCS | $FE_BR | ${{ needs.frontend.result == 'success' && '✅' || '❌' }} |"
+            echo ''
+            echo "_Generated for commit \`${{ github.sha }}\` — [full run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post coverage comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: ci-coverage
+          message: ${{ steps.summary.outputs.MESSAGE }}
 
   # ── Required aggregator gate ────────────────────────────────────────────────
   # ── Docker Compose integration (issue #753) ─────────────────────────────────

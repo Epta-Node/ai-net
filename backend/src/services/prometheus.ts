@@ -15,6 +15,7 @@
  *  • Per-wallet daily quota gauges and rejection counter (Issue #738)
  *  • Task token budget / spend gauges
  *  • LLM cost by agent type and model, and daily cost budget gauges (Issue #750)
+ *  • Venice fallback key health: status, error rate, latency, quota events (Issue #741)
  *  • Process uptime and memory gauges
  *
  * The collector reads live data from the existing {@link MetricsService},

@@ -9,3 +9,4 @@ export { RateLimitError } from './RateLimitError';
 export { QuotaExceededError } from './QuotaExceededError';
 export { ConflictError } from './ConflictError';
 export { PaymentError } from './PaymentError';
+export { RequestTimeoutError } from './RequestTimeoutError';
