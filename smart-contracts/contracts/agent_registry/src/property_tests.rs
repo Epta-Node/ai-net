@@ -686,9 +686,21 @@ fn prop_reputation_score_bounded_and_monotonic() {
 
         let lo_score = reputation_score_fp(&lo);
         let hi_score = reputation_score_fp(&hi);
-        assert!(lo_score <= REPUTATION_SCALE, "iter {}: score above scale", i);
-        assert!(hi_score <= REPUTATION_SCALE, "iter {}: score above scale", i);
-        assert!(hi_score >= lo_score, "iter {}: raising inputs lowered score", i);
+        assert!(
+            lo_score <= REPUTATION_SCALE,
+            "iter {}: score above scale",
+            i
+        );
+        assert!(
+            hi_score <= REPUTATION_SCALE,
+            "iter {}: score above scale",
+            i
+        );
+        assert!(
+            hi_score >= lo_score,
+            "iter {}: raising inputs lowered score",
+            i
+        );
     }
 }
 
@@ -727,7 +739,11 @@ fn prop_reputation_decay_never_increases_and_no_overflow() {
         let (out, advanced, epochs) = apply_reputation_decay(score, last_updated, now, &config);
         assert!(out <= score, "iter {}: decay increased score", i);
         assert!(advanced >= last_updated, "iter {}: timestamp moved back", i);
-        assert!(advanced <= last_updated.max(now), "iter {}: timestamp past now", i);
+        assert!(
+            advanced <= last_updated.max(now),
+            "iter {}: timestamp past now",
+            i
+        );
         assert_eq!(
             (advanced - last_updated) % config.epoch_secs,
             0,
@@ -762,10 +778,298 @@ fn prop_reputation_decay_monotonic_in_elapsed_epochs() {
             let now = last_updated + n * config.epoch_secs;
             apply_reputation_decay(score, last_updated, now, &config).0
         };
-        assert!(at(k + 1) <= at(k), "iter {}: more idle epochs raised score", i);
+        assert!(
+            at(k + 1) <= at(k),
+            "iter {}: more idle epochs raised score",
+            i
+        );
         assert!(at(k) <= score, "iter {}: decay increased score", i);
         if config.decay_pct == 100 && k >= 1 {
             assert_eq!(at(k), 0, "iter {}: 100% decay should zero the score", i);
+        }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PROPERTY 8 — Bond arithmetic (proptest, issue #934)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Stake, slash and refund are exercised with `proptest`-generated amounts,
+// including values next to `i128::MAX`, to prove that bond bookkeeping is
+// conserved and never overflows or underflows. Overflow must surface as a
+// contract error (`InvalidConfig`), never as a host panic, and a rejected call
+// must leave the stored bond untouched.
+
+mod bond_proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use soroban_sdk::testutils::Ledger as _;
+
+    /// Upper bound for "ordinary" bond amounts: 10^12 XLM in stroops. Keeps the
+    /// arithmetic well inside i128 so these cases test logic, not overflow.
+    const MAX_ORDINARY_BOND: i128 = 10_000_000_000_000_000_000;
+
+    fn register(env: &Env, client: &AgentRegistryContractClient<'_>, bond: i128) -> Symbol {
+        let owner = Address::generate(env);
+        let mut record = make_record(env, "bond_prop", "research", &owner);
+        record.bond_amount = bond;
+        client.register_agent(&record);
+        record.id
+    }
+
+    fn bond_of(client: &AgentRegistryContractClient<'_>, id: &Symbol) -> bond::BondRecord {
+        client.get_bond(id).expect("bond record must exist")
+    }
+
+    /// `bond_amount` on the stored `AgentRecord` (no public single-agent
+    /// getter exists, so read storage directly).
+    fn agent_bond(env: &Env, client: &AgentRegistryContractClient<'_>, id: &Symbol) -> i128 {
+        env.as_contract(&client.address, || {
+            env.storage()
+                .persistent()
+                .get::<_, AgentRecord>(&DataKey::Agent(id.clone()))
+                .expect("agent record must exist")
+                .bond_amount
+        })
+    }
+
+    fn reason(env: &Env) -> String {
+        String::from_str(env, "property test")
+    }
+
+    fn ordinary_bond() -> impl Strategy<Value = i128> {
+        DEFAULT_MIN_BOND_STROOPS..=MAX_ORDINARY_BOND
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(64))]
+
+        // ── Staking ──────────────────────────────────────────────────────────
+
+        /// Registering with any bond ≥ min stakes exactly that amount, and
+        /// every subsequent deposit adds exactly its amount to both the bond
+        /// record and the agent record.
+        #[test]
+        fn prop_stake_and_deposit_accumulate_exactly(
+            initial in ordinary_bond(),
+            deposits in prop::collection::vec(ordinary_bond(), 0..4),
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.amount_stroops, initial);
+            prop_assert_eq!(b.status, bond::BondStatus::Active);
+
+            let mut expected = initial;
+            for d in deposits {
+                client.deposit_bond(&id, &d);
+                expected += d;
+                prop_assert_eq!(bond_of(&client, &id).amount_stroops, expected);
+                prop_assert_eq!(agent_bond(&env, &client, &id), expected);
+            }
+        }
+
+        /// Registration below the minimum is always rejected and stakes nothing.
+        #[test]
+        fn prop_stake_below_minimum_rejected(bond in i128::MIN..DEFAULT_MIN_BOND_STROOPS) {
+            let (env, client) = setup_with_admin();
+            let owner = Address::generate(&env);
+            let mut record = make_record(&env, "bond_prop", "research", &owner);
+            record.bond_amount = bond;
+            prop_assert_eq!(
+                client.try_register_agent(&record),
+                Err(Ok(Error::InsufficientBond))
+            );
+            prop_assert!(client.get_bond(&record.id).is_none());
+        }
+
+        /// A deposit that would overflow i128 is rejected with a contract error
+        /// and leaves the existing stake untouched.
+        #[test]
+        fn prop_deposit_overflow_is_rejected_not_panicking(
+            initial in (i128::MAX / 2)..=i128::MAX,
+            extra in (i128::MAX / 2)..=i128::MAX,
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            let result = client.try_deposit_bond(&id, &extra);
+            match initial.checked_add(extra) {
+                Some(total) => {
+                    prop_assert_eq!(result, Ok(Ok(())));
+                    prop_assert_eq!(bond_of(&client, &id).amount_stroops, total);
+                }
+                None => {
+                    prop_assert_eq!(result, Err(Ok(Error::InvalidConfig)));
+                    prop_assert_eq!(bond_of(&client, &id).amount_stroops, initial);
+                }
+            }
+        }
+
+        // ── Slashing ─────────────────────────────────────────────────────────
+
+        /// Percentage slashing (partial and full) removes exactly
+        /// `bond * pct / 100`, moves it to the reward pool, and conserves value:
+        /// `remaining + pool == original`.
+        #[test]
+        fn prop_percentage_slash_conserves_value(
+            initial in ordinary_bond(),
+            pct in 1u32..=100,
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            client.slash_bond(&id, &pct, &reason(&env));
+
+            let penalty = initial * pct as i128 / 100;
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.amount_stroops, initial - penalty);
+            prop_assert!(b.amount_stroops >= 0);
+            prop_assert_eq!(client.get_bond_reward_pool(), penalty);
+            prop_assert_eq!(b.amount_stroops + client.get_bond_reward_pool(), initial);
+            prop_assert_eq!(agent_bond(&env, &client, &id), b.amount_stroops);
+
+            if pct == 100 {
+                prop_assert_eq!(b.amount_stroops, 0);
+                prop_assert_eq!(b.status, bond::BondStatus::Slashed);
+            } else if b.amount_stroops > 0 {
+                prop_assert_eq!(b.status, bond::BondStatus::Active);
+            }
+        }
+
+        /// Absolute slashing clamps at zero: the bond never goes negative no
+        /// matter how large the penalty, and the pool only receives what was
+        /// actually taken.
+        #[test]
+        fn prop_absolute_slash_never_underflows(
+            initial in ordinary_bond(),
+            penalty in 0i128..=i128::MAX,
+        ) {
+            let (_env, client) = setup_with_admin();
+            let id = register(&_env, &client, initial);
+            client.slash_bond_amount(&id, &penalty);
+
+            let taken = penalty.min(initial);
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.amount_stroops, initial - taken);
+            prop_assert!(b.amount_stroops >= 0);
+            prop_assert_eq!(client.get_bond_reward_pool(), taken);
+        }
+
+        /// Repeated partial slashes keep the conservation invariant and the
+        /// bond monotonically non-increasing.
+        #[test]
+        fn prop_repeated_slashes_are_monotonic(
+            initial in ordinary_bond(),
+            pcts in prop::collection::vec(1u32..=99, 1..6),
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            let mut previous = initial;
+            for pct in pcts {
+                if bond_of(&client, &id).status != bond::BondStatus::Active {
+                    break;
+                }
+                client.slash_bond(&id, &pct, &reason(&env));
+                let now = bond_of(&client, &id).amount_stroops;
+                prop_assert!(now <= previous);
+                prop_assert!(now >= 0);
+                prop_assert_eq!(now + client.get_bond_reward_pool(), initial);
+                previous = now;
+            }
+        }
+
+        /// Percentage slashing on bonds large enough to overflow `bond * pct`
+        /// returns a contract error instead of panicking, and leaves both the
+        /// bond and the reward pool untouched.
+        #[test]
+        fn prop_slash_overflow_is_rejected_not_panicking(
+            initial in (i128::MAX / 100)..=i128::MAX,
+            pct in 1u32..=100,
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            let result = client.try_slash_bond(&id, &pct, &reason(&env));
+            match initial.checked_mul(pct as i128) {
+                Some(product) => {
+                    prop_assert_eq!(result, Ok(Ok(())));
+                    let penalty = product / 100;
+                    prop_assert_eq!(bond_of(&client, &id).amount_stroops, initial - penalty);
+                    prop_assert_eq!(client.get_bond_reward_pool(), penalty);
+                }
+                None => {
+                    prop_assert_eq!(result, Err(Ok(Error::InvalidConfig)));
+                    prop_assert_eq!(bond_of(&client, &id).amount_stroops, initial);
+                    prop_assert_eq!(client.get_bond_reward_pool(), 0);
+                }
+            }
+        }
+
+        // ── Refund ───────────────────────────────────────────────────────────
+
+        /// After deregistration and the cooldown, the refund equals whatever
+        /// survived slashing, the bond is zeroed, and nothing is created or
+        /// destroyed: `refund + pool == original`.
+        #[test]
+        fn prop_refund_after_deregistration_returns_remaining_bond(
+            initial in ordinary_bond(),
+            pct in 0u32..=100,
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            if pct > 0 {
+                client.slash_bond(&id, &pct, &reason(&env));
+            }
+            let remaining = bond_of(&client, &id).amount_stroops;
+
+            client.deregister_agent(&id);
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.status, bond::BondStatus::Cooldown);
+            prop_assert_eq!(b.amount_stroops, remaining);
+
+            // Too early: refund is refused and nothing moves.
+            prop_assert_eq!(
+                client.try_deregister_agent(&id),
+                Err(Ok(Error::CooldownNotElapsed))
+            );
+            prop_assert_eq!(bond_of(&client, &id).amount_stroops, remaining);
+
+            env.ledger()
+                .set_sequence_number(env.ledger().sequence() + BOND_COOLDOWN_LEDGERS);
+            client.deregister_agent(&id);
+
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.status, bond::BondStatus::Returned);
+            prop_assert_eq!(b.amount_stroops, 0);
+            prop_assert_eq!(remaining + client.get_bond_reward_pool(), initial);
+        }
+
+        /// The explicit return path (`initiate_bond_return` → `claim_bond`)
+        /// pays out exactly the staked amount (deposits included), once.
+        #[test]
+        fn prop_claim_bond_refunds_exact_stake_once(
+            initial in ordinary_bond(),
+            deposit in prop::option::of(ordinary_bond()),
+        ) {
+            let (env, client) = setup_with_admin();
+            let id = register(&env, &client, initial);
+            let mut staked = initial;
+            if let Some(d) = deposit {
+                client.deposit_bond(&id, &d);
+                staked += d;
+            }
+
+            client.initiate_bond_return(&id);
+            env.ledger()
+                .set_sequence_number(env.ledger().sequence() + BOND_COOLDOWN_LEDGERS);
+            prop_assert_eq!(client.claim_bond(&id), staked);
+
+            let b = bond_of(&client, &id);
+            prop_assert_eq!(b.amount_stroops, 0);
+            prop_assert_eq!(b.status, bond::BondStatus::Returned);
+            // A second claim cannot pay out again.
+            prop_assert_eq!(
+                client.try_claim_bond(&id),
+                Err(Ok(Error::CooldownNotElapsed))
+            );
         }
     }
 }

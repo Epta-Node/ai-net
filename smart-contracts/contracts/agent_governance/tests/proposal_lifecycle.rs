@@ -1,14 +1,18 @@
-//! Regression suite for the governance proposal lifecycle (#764):
-//! propose → vote (for/against/abstain) → tally → execute, every terminal
-//! state, quorum/majority boundaries, voting-window edges, double-vote
-//! prevention and unauthorized attempts.
+//! Integration suite for the governance proposal lifecycle (#764, #931):
+//! propose → vote (for/against/abstain) → queue (tally) → 48 h timelock →
+//! execute, every terminal state, quorum/majority boundaries, voting-window
+//! and timelock edges, proposal expiry, double-vote prevention and
+//! unauthorized attempts.
 //!
-//! The contract has no cancel entrypoint; a proposal that expires without
-//! reaching quorum terminates as `Failed`, which is asserted below.
+//! `queue_proposal` tallies the vote once the voting window closes: a proposal
+//! that misses quorum or majority (including one that simply expires with too
+//! few votes) terminates there as `Failed`; a passing one is `Queued` and can
+//! be executed only after `PROPOSAL_TIMELOCK_SECS`.
 
 use agent_governance::{
     AgentGovernanceContract, AgentGovernanceContractClient, Error, ExecutionPayload,
-    ProposalFailedEvent, ProposalStatus, ProposalType, VoteChoice, MIN_VOTING_PERIOD_SECS,
+    ProposalFailedEvent, ProposalStatus, ProposalType, VoteChoice, MAX_VOTING_PERIOD_SECS,
+    MIN_VOTING_PERIOD_SECS, PROPOSAL_TIMELOCK_SECS,
 };
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
@@ -90,8 +94,34 @@ impl Gov {
         self.env.ledger().set_timestamp(p.voting_ends_at);
     }
 
-    fn execute(&self, id: u64) -> ProposalStatus {
+    /// Close the voting window and tally the vote. Returns `true` when the
+    /// proposal passed and was queued behind the timelock.
+    ///
+    /// Inspects the `queue_proposal` events directly rather than reading the
+    /// proposal back, so a `failed` event stays observable to the caller.
+    fn queue(&self, id: u64) -> bool {
         self.close_voting(id);
+        self.client.queue_proposal(&id);
+        self.event_emitted(symbol_short!("queued"))
+    }
+
+    /// Advance the clock to the end of the execution timelock.
+    fn pass_timelock(&self) {
+        let now = self.env.ledger().timestamp();
+        self.env
+            .ledger()
+            .set_timestamp(now + PROPOSAL_TIMELOCK_SECS);
+    }
+
+    /// Drive a proposal through every remaining step: close voting, queue,
+    /// wait out the timelock and execute. Returns the terminal status; the
+    /// events of the final step (queue on a failed vote, execute otherwise)
+    /// remain readable.
+    fn execute(&self, id: u64) -> ProposalStatus {
+        if !self.queue(id) {
+            return ProposalStatus::Failed;
+        }
+        self.pass_timelock();
         self.client.execute_proposal(&id)
     }
 
@@ -109,7 +139,12 @@ impl Gov {
     }
 
     fn executed_event_emitted(&self) -> bool {
-        let topic = (symbol_short!("gov"), symbol_short!("executed")).into_val(&self.env);
+        self.event_emitted(symbol_short!("executed"))
+    }
+
+    /// Whether the most recent invocation emitted a `(gov, <name>)` event.
+    fn event_emitted(&self, name: Symbol) -> bool {
+        let topic = (symbol_short!("gov"), name).into_val(&self.env);
         self.env
             .events()
             .all()
@@ -261,8 +296,13 @@ fn terminal_states_are_final() {
 
     for id in [executed, failed] {
         assert_eq!(
-            contract_err(g.client.try_execute_proposal(&id)),
+            contract_err(g.client.try_queue_proposal(&id)),
             Error::ProposalFinalized
+        );
+        // Neither proposal is (still) in the timelock queue.
+        assert_eq!(
+            contract_err(g.client.try_execute_proposal(&id)),
+            Error::NotFound
         );
         assert_eq!(
             contract_err(g.client.try_vote_on_proposal(&id, &a, &VoteChoice::For)),
@@ -284,6 +324,10 @@ fn unknown_proposal_is_not_found() {
     let g = setup();
     let a = g.agent(100);
     assert_eq!(
+        contract_err(g.client.try_queue_proposal(&42)),
+        Error::NotFound
+    );
+    assert_eq!(
         contract_err(g.client.try_execute_proposal(&42)),
         Error::NotFound
     );
@@ -291,6 +335,170 @@ fn unknown_proposal_is_not_found() {
         contract_err(g.client.try_vote_on_proposal(&42, &a, &VoteChoice::For)),
         Error::NotFound
     );
+}
+
+// ── end-to-end lifecycle scenarios (#931) ───────────────────────────────────
+//
+// Each scenario walks one proposal through every step explicitly — create,
+// vote, close the window, queue (tally), timelock, execute — asserting the
+// stored status after each transition.
+
+fn status(g: &Gov, id: u64) -> ProposalStatus {
+    g.client.get_proposal(&id).unwrap().status
+}
+
+#[test]
+fn lifecycle_creation_voting_execution() {
+    let g = setup();
+    let target = g.env.register(MockTarget, ());
+    let a = g.agent(50);
+    let b = g.agent(30);
+    let c = g.agent(20);
+
+    // Create.
+    let id = g.propose_with(&a, &targeted(&g.env, &target, symbol_short!("apply")));
+    assert_eq!(status(&g, id), ProposalStatus::Active);
+    assert_eq!(g.client.get_proposal_count(), 1);
+
+    // Vote: 70 For vs 30 Against, everyone participates.
+    g.vote(id, &a, VoteChoice::For);
+    g.vote(id, &c, VoteChoice::For);
+    g.vote(id, &b, VoteChoice::Against);
+    let p = g.client.get_proposal(&id).unwrap();
+    assert_eq!((p.for_power, p.against_power, p.abstain_power), (70, 30, 0));
+    assert_eq!(p.status, ProposalStatus::Active);
+
+    // Tally → queued behind the timelock; the payload has not run yet.
+    assert!(g.queue(id));
+    assert_eq!(status(&g, id), ProposalStatus::Queued);
+    assert_eq!(MockTargetClient::new(&g.env, &target).last(), None);
+
+    // Execute once the timelock elapses.
+    g.pass_timelock();
+    assert_eq!(g.client.execute_proposal(&id), ProposalStatus::Executed);
+    assert!(g.executed_event_emitted());
+    assert_eq!(status(&g, id), ProposalStatus::Executed);
+    assert_eq!(
+        MockTargetClient::new(&g.env, &target).last(),
+        Some(Bytes::from_slice(&g.env, b"fee=200"))
+    );
+
+    // Executed exactly once.
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::NotFound
+    );
+}
+
+#[test]
+fn lifecycle_creation_voting_rejection() {
+    let g = setup();
+    let target = g.env.register(MockTarget, ());
+    let a = g.agent(35);
+    let b = g.agent(45);
+    let c = g.agent(20);
+
+    let id = g.propose_with(&a, &targeted(&g.env, &target, symbol_short!("apply")));
+    assert_eq!(status(&g, id), ProposalStatus::Active);
+
+    // Full turnout, but Against wins 65 to 35.
+    g.vote(id, &a, VoteChoice::For);
+    g.vote(id, &b, VoteChoice::Against);
+    g.vote(id, &c, VoteChoice::Against);
+
+    // Tally rejects the proposal; it never reaches the queue.
+    assert!(!g.queue(id));
+    let ev = g.failed_event(id).unwrap();
+    assert!(ev.quorum_met && !ev.majority_met && !ev.execution_failed);
+    assert_eq!((ev.for_power, ev.against_power), (35, 65));
+    assert_eq!(status(&g, id), ProposalStatus::Failed);
+
+    // Rejection is final and the payload never runs, even after the timelock.
+    g.pass_timelock();
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::NotFound
+    );
+    assert_eq!(
+        contract_err(g.client.try_queue_proposal(&id)),
+        Error::ProposalFinalized
+    );
+    assert_eq!(MockTargetClient::new(&g.env, &target).last(), None);
+}
+
+#[test]
+fn lifecycle_creation_voting_quorum_not_met() {
+    let g = setup();
+    let target = g.env.register(MockTarget, ());
+    let a = g.agent(15);
+    let b = g.agent(10);
+    let _silent = g.agent(75);
+
+    let id = g.propose_with(&a, &targeted(&g.env, &target, symbol_short!("apply")));
+
+    // Unanimous among voters, but only 25 % of the snapshot turned out.
+    g.vote(id, &a, VoteChoice::For);
+    g.vote(id, &b, VoteChoice::For);
+
+    assert!(!g.queue(id));
+    let ev = g.failed_event(id).unwrap();
+    assert!(!ev.quorum_met && ev.majority_met && !ev.execution_failed);
+    assert_eq!(status(&g, id), ProposalStatus::Failed);
+
+    g.pass_timelock();
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::NotFound
+    );
+    assert_eq!(MockTargetClient::new(&g.env, &target).last(), None);
+}
+
+#[test]
+fn lifecycle_proposal_expiry() {
+    let g = setup();
+    let a = g.agent(20);
+    let b = g.agent(80);
+    let id = g.propose(&a);
+    let ends = g.client.get_proposal(&id).unwrap().voting_ends_at;
+
+    // One vote inside the window, then the window lapses before the
+    // majority holder votes.
+    g.vote(id, &a, VoteChoice::For);
+    g.env.ledger().set_timestamp(ends + MAX_VOTING_PERIOD_SECS);
+
+    // Expired: no more votes, and it stays Active until someone tallies it.
+    assert_eq!(
+        contract_err(g.client.try_vote_on_proposal(&id, &b, &VoteChoice::For)),
+        Error::VotingPeriodEnded
+    );
+    let p = g.client.get_proposal(&id).unwrap();
+    assert_eq!(p.status, ProposalStatus::Active);
+    assert_eq!(p.for_power, 20);
+
+    // Tallying an expired proposal that missed quorum fails it.
+    g.client.queue_proposal(&id);
+    let ev = g.failed_event(id).unwrap();
+    assert!(!ev.quorum_met);
+    assert_eq!(status(&g, id), ProposalStatus::Failed);
+
+    // An expired, failed proposal is inert.
+    assert_eq!(
+        contract_err(g.client.try_vote_on_proposal(&id, &b, &VoteChoice::For)),
+        Error::ProposalNotActive
+    );
+    assert_eq!(
+        contract_err(g.client.try_queue_proposal(&id)),
+        Error::ProposalFinalized
+    );
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::NotFound
+    );
+
+    // Expiry of one proposal does not affect a fresh one.
+    let next = g.propose(&b);
+    g.vote(next, &b, VoteChoice::For);
+    assert_eq!(g.execute(next), ProposalStatus::Executed);
 }
 
 // ── quorum boundary (30 % of snapshot) ──────────────────────────────────────
@@ -400,7 +608,7 @@ fn vote_accepted_until_last_second_and_rejected_at_deadline() {
 }
 
 #[test]
-fn execute_rejected_one_second_before_deadline() {
+fn queue_rejected_one_second_before_deadline() {
     let g = setup();
     let a = g.agent(100);
     let id = g.propose(&a);
@@ -409,7 +617,7 @@ fn execute_rejected_one_second_before_deadline() {
 
     g.env.ledger().set_timestamp(ends - 1);
     assert_eq!(
-        contract_err(g.client.try_execute_proposal(&id)),
+        contract_err(g.client.try_queue_proposal(&id)),
         Error::VotingPeriodActive
     );
     assert_eq!(
@@ -418,6 +626,33 @@ fn execute_rejected_one_second_before_deadline() {
     );
 
     g.env.ledger().set_timestamp(ends);
+    g.client.queue_proposal(&id);
+    assert_eq!(
+        g.client.get_proposal(&id).unwrap().status,
+        ProposalStatus::Queued
+    );
+}
+
+#[test]
+fn execute_rejected_one_second_before_timelock_ends() {
+    let g = setup();
+    let a = g.agent(100);
+    let id = g.propose(&a);
+    g.vote(id, &a, VoteChoice::For);
+    assert!(g.queue(id));
+    let unlock = g.env.ledger().timestamp() + PROPOSAL_TIMELOCK_SECS;
+
+    g.env.ledger().set_timestamp(unlock - 1);
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::VotingPeriodActive
+    );
+    assert_eq!(
+        g.client.get_proposal(&id).unwrap().status,
+        ProposalStatus::Queued
+    );
+
+    g.env.ledger().set_timestamp(unlock);
     assert_eq!(g.client.execute_proposal(&id), ProposalStatus::Executed);
 }
 
@@ -596,12 +831,17 @@ fn premature_execution_by_anyone_reverts_with_voting_period_active() {
     let a = g.agent(100);
     let id = g.propose(&a);
     g.vote(id, &a, VoteChoice::For);
-    // execute_proposal is permissionless, so no signature is required; the
-    // only guard against hijacking execution is the voting window.
+    // queue_proposal and execute_proposal are permissionless, so no signature
+    // is required; the guards against hijacking execution are the voting
+    // window and the timelock queue.
     g.env.mock_auths(&[]);
     assert_eq!(
-        contract_err(g.client.try_execute_proposal(&id)),
+        contract_err(g.client.try_queue_proposal(&id)),
         Error::VotingPeriodActive
+    );
+    assert_eq!(
+        contract_err(g.client.try_execute_proposal(&id)),
+        Error::NotFound
     );
 }
 
