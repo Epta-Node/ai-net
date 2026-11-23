@@ -49,4 +49,32 @@ describe('buildLiveDag', () => {
     buildLiveDag(preferences as never, labelOf);
     expect(preferences).toEqual(['research', 'coding']);
   });
+
+  it('allows disconnected nodes without creating edges between them', () => {
+    const dag = buildLiveDag(
+      ['research', 'coding', 'report'],
+      labelOf,
+      [{ source: 'research', target: 'coding' }],
+    );
+    expect(dag.nodes.map((node) => node.id)).toEqual(['research', 'coding', 'report']);
+    expect(dag.edges).toEqual([{ source: 'research', target: 'coding' }]);
+  });
+
+  it('deduplicates preferences and ignores circular or invalid references gracefully', () => {
+    const dag = buildLiveDag(
+      ['research', 'coding', 'research'],
+      labelOf,
+      [
+        { source: 'research', target: 'coding' },
+        { source: 'coding', target: 'research' },
+        { source: 'research', target: 'research' },
+        { source: 'coding', target: 'unknown' as never },
+      ],
+    );
+    expect(dag.nodes).toEqual([
+      { id: 'research', label: 'Research Agent' },
+      { id: 'coding', label: 'Coding Agent' },
+    ]);
+    expect(dag.edges).toEqual([{ source: 'research', target: 'coding' }]);
+  });
 });
