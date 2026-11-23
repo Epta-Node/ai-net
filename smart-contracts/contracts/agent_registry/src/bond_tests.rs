@@ -1,4 +1,5 @@
 use super::*;
+use soroban_sdk::testutils::Events;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env, FromVal, Map,
@@ -54,7 +55,7 @@ fn partial_slash_funds_reward_pool() {
     assert_eq!(client.get_bond_reward_pool(), DEFAULT_MIN_BOND_STROOPS / 2);
     let events = env.events().all();
     let (_, _, data) = events.get(events.len() - 1).unwrap();
-    let slash_event = events::BondSlashed::from_val(&env, &data).unwrap();
+    let slash_event = events::BondSlashed::from_val(&env, &data);
     assert_eq!(slash_event.penalty_stroops, DEFAULT_MIN_BOND_STROOPS / 2);
     assert_eq!(
         slash_event.reason,

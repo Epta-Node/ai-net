@@ -1,3 +1,4 @@
+#![allow(ambiguous_associated_items)]
 //! # Data Types for Error Registry
 
 use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};

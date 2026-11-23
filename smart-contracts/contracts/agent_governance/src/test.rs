@@ -4,6 +4,7 @@
 extern crate std;
 
 use super::*;
+use soroban_sdk::TryFromVal;
 use soroban_sdk::{
     contract, contractimpl, symbol_short,
     testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
@@ -403,17 +404,54 @@ fn vote_on_finalized_proposal_fails() {
 fn lifecycle_emits_events() {
     let (env, client) = setup();
     let a = Address::generate(&env);
-    register(&client, &a, 50, 10_000_000);
+    register(&client, &a, 50, 10_000_000); // power = 10_000_000 + 50 * 1_000_000 = 60_000_000
     let id = new_proposal(&env, &client, &a);
+
+    // Verify ProposalCreated event
+    let events = env.events().all();
+    let created_topic = (symbol_short!("gov"), symbol_short!("created")).into_val(&env);
+    let created_ev = events
+        .iter()
+        .find(|(_, topics, _)| *topics == created_topic)
+        .expect("ProposalCreated event must be emitted");
+    let created: ProposalCreated = ProposalCreated::try_from_val(&env, &created_ev.2).unwrap();
+    assert_eq!(created.id, id);
+    assert_eq!(created.proposer, a);
+    assert_eq!(created.total_power_snapshot, 60_000_000);
+
+    // Vote on proposal and verify ProposalVoted (VoteCast) event
     let _ = env.events().all(); // drain
     client.vote_on_proposal(&id, &a, &VoteChoice::For);
-    assert!(!env.events().all().is_empty());
+    let events_after_vote = env.events().all();
+    let voted_topic = (symbol_short!("gov"), symbol_short!("vote_cast")).into_val(&env);
+    let voted_ev = events_after_vote
+        .iter()
+        .find(|(_, topics, _)| *topics == voted_topic)
+        .expect("ProposalVoted/VoteCast event must be emitted");
+    let voted: ProposalVoted = ProposalVoted::try_from_val(&env, &voted_ev.2).unwrap();
+    assert_eq!(voted.proposal_id, id);
+    assert_eq!(voted.voter, a);
+    assert_eq!(voted.choice, VoteChoice::For);
+    assert_eq!(voted.weight, 60_000_000);
 
+    // Execute proposal and verify ProposalExecuted event
     let p = client.get_proposal(&id).unwrap();
     env.ledger().set_timestamp(p.voting_ends_at + 1);
     let _ = env.events().all();
-    client.execute_proposal(&id);
-    assert!(!env.events().all().is_empty());
+    let status = client.execute_proposal(&id);
+    assert_eq!(status, ProposalStatus::Executed);
+
+    let events_after_exec = env.events().all();
+    let exec_topic = (symbol_short!("gov"), symbol_short!("executed")).into_val(&env);
+    let exec_ev = events_after_exec
+        .iter()
+        .find(|(_, topics, _)| *topics == exec_topic)
+        .expect("ProposalExecuted event must be emitted");
+    let executed: ProposalExecuted = ProposalExecuted::try_from_val(&env, &exec_ev.2).unwrap();
+    assert_eq!(executed.id, id);
+    assert_eq!(executed.for_power, 60_000_000);
+    assert_eq!(executed.against_power, 0);
+    assert_eq!(executed.abstain_power, 0);
 }
 
 #[test]

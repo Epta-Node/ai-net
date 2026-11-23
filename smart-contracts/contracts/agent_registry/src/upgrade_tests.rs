@@ -534,7 +534,7 @@ mod upgrade_integration_tests {
 
     #[test]
     fn test_full_upgrade_flow_integration() {
-        let (env, registry, upgrade_mgr, _admin) = setup_integration_test();
+        let (env, registry, upgrade_mgr, admin) = setup_integration_test();
 
         let new_version = String::from_str(&env, "1.1.0");
         let new_hash = BytesN::from_array(&env, &[2u8; 32]);
@@ -561,14 +561,14 @@ mod upgrade_integration_tests {
         };
 
         // Test the full upgrade flow through upgrade manager
-        upgrade_mgr.propose_upgrade(&new_version, &new_hash, &description, &migration_plan);
+        let proposal_id = upgrade_mgr.propose_upgrade(&admin, &new_version, &new_hash, &description, &migration_plan);
 
         // Validate proposal
-        let gas_estimate = upgrade_mgr.validate_proposal();
+        let gas_estimate = upgrade_mgr.validate_proposal(&admin, &proposal_id);
         assert!(gas_estimate > 0);
 
         // Execute upgrade
-        upgrade_mgr.execute_upgrade();
+        upgrade_mgr.execute_upgrade(&admin, &proposal_id);
 
         // Verify upgrade was applied
         let current_version = upgrade_mgr.get_current_version();
@@ -576,9 +576,9 @@ mod upgrade_integration_tests {
         assert_eq!(current_version.unwrap().version, new_version);
 
         // Test rollback capability
-        assert!(upgrade_mgr.can_rollback());
+        assert!(upgrade_mgr.can_rollback(&proposal_id));
 
-        upgrade_mgr.rollback_upgrade();
+        upgrade_mgr.rollback_upgrade(&admin, &proposal_id);
 
         // Verify rollback worked
         let restored_version = upgrade_mgr.get_current_version();

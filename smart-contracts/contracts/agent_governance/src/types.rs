@@ -300,6 +300,8 @@ pub struct ProposalCreatedEvent {
     pub total_power_snapshot: i128,
 }
 
+pub type ProposalCreated = ProposalCreatedEvent;
+
 /// Emitted when `vote_on_proposal` records a vote.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -310,6 +312,9 @@ pub struct VoteCastEvent {
     pub weight: i128,
 }
 
+pub type ProposalVoted = VoteCastEvent;
+pub type ProposalVotedEvent = VoteCastEvent;
+
 /// Emitted when `execute_proposal` finalises a proposal that passed.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -319,6 +324,8 @@ pub struct ProposalExecutedEvent {
     pub against_power: i128,
     pub abstain_power: i128,
 }
+
+pub type ProposalExecuted = ProposalExecutedEvent;
 
 /// Emitted when `execute_proposal` finalises a proposal that failed.
 #[contracttype]

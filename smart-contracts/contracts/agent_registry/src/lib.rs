@@ -1640,6 +1640,28 @@ impl AgentRegistryContract {
         }
     }
 
+    /// Paginated list function with cursor and limit (issue #943).
+    ///
+    /// ## Gas cost per page
+    /// Bounded cursor-based pagination costs ~45,000 CU (base per-transaction overhead)
+    /// plus ~12,000 CU per agent in the page (reading AgentByIndex + Agent persistent storage
+    /// and batch extending TTLs). Max gas per call is capped by [`MAX_PAGE_SIZE`] (50 items)
+    /// to remain well within a single ledger footprint budget (~645,000 CU max).
+    ///
+    /// - `cursor`: Starting registration sequence index (defaults to 0 if `None`).
+    /// - `limit`: Number of items requested (defaults to [`DEFAULT_PAGE_SIZE`], capped at [`MAX_PAGE_SIZE`]).
+    ///
+    /// Returns [`AgentPage`] containing matching agents, `next_cursor` for subsequent page,
+    /// and `total_count` of active registered agents.
+    pub fn list_agents(env: Env, cursor: Option<u32>, limit: Option<u32>) -> AgentPage {
+        Self::get_agents(env, cursor, limit)
+    }
+
+    /// Return total active registered agents count (issue #943).
+    pub fn get_total_agents(env: Env) -> u32 {
+        get_total_agents(&env)
+    }
+
     /// Discover and rank agents matching multi-criteria criteria:
     /// required capability, max price, min reputation, and max latency.
     ///

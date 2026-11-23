@@ -440,3 +440,177 @@ fn double_initialize_returns_already_initialized() {
     let res = client.try_initialize(&admin);
     assert_eq!(res, Err(Ok(Error::AlreadyInitialized)));
 }
+
+// ---------------------------------------------------------------------------
+// Error logging and retrieval unit tests (Issue #941)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_log_new_error() {
+    let (env, client) = setup(1_000);
+    let error_id = id(&env, 1);
+    let error_code = 404;
+    let message = sym(&env, "NotFound");
+    let agent_id = sym(&env, "agent_alpha");
+    let ttl = 3_600;
+
+    // Log a new error
+    client.submit_error(&error_id, &error_code, &message, &agent_id, &ttl);
+
+    // Verify error retrieval by ID
+    let record = client.get_error(&error_id).expect("error record should exist");
+    assert_eq!(record.error_code, 404);
+    assert_eq!(record.message, message);
+    assert_eq!(record.agent_id, agent_id);
+    assert_eq!(record.created_at, 1_000);
+    assert_eq!(record.expires_at, 1_000 + 3_600);
+
+    // Verify count is 1
+    assert_eq!(client.count_active_by_code(&404), 1);
+    let stats = client.get_error_stats();
+    assert_eq!(stats.get(404).unwrap(), 1);
+}
+
+#[test]
+fn test_log_duplicate_error_increment_count() {
+    let (env, client) = setup(1_000);
+    let code = 500;
+    let agent = sym(&env, "worker_1");
+
+    // Initial count is 0
+    assert_eq!(client.count_active_by_code(&code), 0);
+
+    // Log first error under code 500
+    let id1 = id(&env, 10);
+    client.submit_error(&id1, &code, &sym(&env, "ServerErr1"), &agent, &3_600);
+    assert_eq!(client.count_active_by_code(&code), 1);
+    assert_eq!(client.get_error_stats().get(code).unwrap(), 1);
+
+    // Log second duplicate error under same code 500 (increments count)
+    let id2 = id(&env, 11);
+    client.submit_error(&id2, &code, &sym(&env, "ServerErr2"), &agent, &3_600);
+    assert_eq!(client.count_active_by_code(&code), 2);
+    assert_eq!(client.get_error_stats().get(code).unwrap(), 2);
+
+    // Submitting with duplicate error ID fails with AlreadyExists
+    let res = client.try_submit_error(&id1, &code, &sym(&env, "ServerErrDup"), &agent, &3_600);
+    assert_eq!(res, Err(Ok(Error::AlreadyExists)));
+    // Count remains unchanged after rejected duplicate ID
+    assert_eq!(client.count_active_by_code(&code), 2);
+}
+
+#[test]
+fn test_error_retrieval_by_code() {
+    let (env, client) = setup(1_000);
+    let code_a = 100;
+    let code_b = 200;
+
+    submit(&client, &env, 21, code_a, 5_000);
+    submit(&client, &env, 22, code_a, 5_000);
+    submit(&client, &env, 23, code_b, 5_000);
+
+    let errors_a = client.get_errors_by_code(&code_a);
+    assert_eq!(errors_a.len(), 2);
+    for err in errors_a.iter() {
+        assert_eq!(err.error_code, code_a);
+    }
+
+    let errors_b = client.get_errors_by_code(&code_b);
+    assert_eq!(errors_b.len(), 1);
+    assert_eq!(errors_b.get(0).unwrap().error_code, code_b);
+
+    let errors_c = client.get_errors_by_code(&999);
+    assert_eq!(errors_c.len(), 0);
+}
+
+#[test]
+fn test_error_retrieval_by_agent() {
+    let (env, client) = setup(1_000);
+    let agent1 = sym(&env, "agent_1");
+    let agent2 = sym(&env, "agent_2");
+
+    let id1 = id(&env, 31);
+    let id2 = id(&env, 32);
+    let id3 = id(&env, 33);
+
+    client.submit_error(&id1, &10, &sym(&env, "err1"), &agent1, &5_000);
+    client.submit_error(&id2, &20, &sym(&env, "err2"), &agent1, &5_000);
+    client.submit_error(&id3, &30, &sym(&env, "err3"), &agent2, &5_000);
+
+    let list1 = client.get_errors_by_agent(&agent1);
+    assert_eq!(list1.len(), 2);
+    for e in list1.iter() {
+        assert_eq!(e.agent_id, agent1);
+    }
+
+    let list2 = client.get_errors_by_agent(&agent2);
+    assert_eq!(list2.len(), 1);
+    assert_eq!(list2.get(0).unwrap().agent_id, agent2);
+
+    let list_none = client.get_errors_by_agent(&sym(&env, "unknown_agent"));
+    assert_eq!(list_none.len(), 0);
+}
+
+#[test]
+fn get_errors_by_agent_filters_correctly() {
+    let (env, client) = setup(1_000);
+
+    let id1 = id(&env, 1);
+    client.submit_error(&id1, &42, &sym(&env, "msg1"), &sym(&env, "agent_A"), &10_000);
+
+    let id2 = id(&env, 2);
+    client.submit_error(&id2, &42, &sym(&env, "msg2"), &sym(&env, "agent_B"), &10_000);
+
+    let id3 = id(&env, 3);
+    client.submit_error(&id3, &43, &sym(&env, "msg3"), &sym(&env, "agent_A"), &10_000);
+
+    let agent_a_errors = client.get_errors_by_agent(&sym(&env, "agent_A"));
+    assert_eq!(agent_a_errors.len(), 2);
+    assert_eq!(agent_a_errors.get(0).unwrap().agent_id, sym(&env, "agent_A"));
+
+    let agent_b_errors = client.get_errors_by_agent(&sym(&env, "agent_B"));
+    assert_eq!(agent_b_errors.len(), 1);
+    assert_eq!(agent_b_errors.get(0).unwrap().agent_id, sym(&env, "agent_B"));
+
+    let empty_errors = client.get_errors_by_agent(&sym(&env, "agent_C"));
+    assert_eq!(empty_errors.len(), 0);
+}
+
+#[test]
+fn get_errors_by_agent_skips_expired() {
+    let (env, client) = setup(1_000);
+
+    let id1 = id(&env, 1);
+    client.submit_error(&id1, &42, &sym(&env, "msg1"), &sym(&env, "agent_A"), &100);
+
+    let id2 = id(&env, 2);
+    client.submit_error(&id2, &42, &sym(&env, "msg2"), &sym(&env, "agent_A"), &10_000);
+
+    env.ledger().set_timestamp(2_000);
+
+    let errors = client.get_errors_by_agent(&sym(&env, "agent_A"));
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors.get(0).unwrap().expires_at, 11_000);
+}
+
+#[test]
+fn get_error_stats_counts_active_correctly() {
+    let (env, client) = setup(1_000);
+
+    submit(&client, &env, 1, 100, 10_000);
+    submit(&client, &env, 2, 100, 100);
+    submit(&client, &env, 3, 200, 10_000);
+    submit(&client, &env, 4, 300, 10_000);
+
+    let stats = client.get_error_stats();
+    assert_eq!(stats.get(100).unwrap(), 2);
+    assert_eq!(stats.get(200).unwrap(), 1);
+    assert_eq!(stats.get(300).unwrap(), 1);
+
+    env.ledger().set_timestamp(2_000);
+
+    let stats_after = client.get_error_stats();
+    assert_eq!(stats_after.get(100).unwrap(), 1);
+    assert_eq!(stats_after.get(200).unwrap(), 1);
+    assert_eq!(stats_after.get(300).unwrap(), 1);
+}

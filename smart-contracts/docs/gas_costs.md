@@ -21,6 +21,7 @@ item; a scalar estimate call is available where a contract exposes
 | `cleanup_expired_errors` | 16,000 CU | `16,000 + 8,000 × (n − 1)` CU | Error reads and removals for the supplied IDs. |
 | `slash_bond` | 52,000 CU | Flat per call | Agent read/write, TTL, bond event. |
 | `deregister_with_bond` | 68,000 CU | Flat per call | Agent and capability-index update, cooldown/bond state, TTL and events. |
+| `list_agents` / `get_agents` | 57,000 CU (n=1) | `45,000 + 12,000 × n` CU | Bounded cursor-based pagination (default 20, max 50). Reads AgentByIndex and Agent records, batch extends TTL. |
 
 Registration was measured at 169,441 CU for one item and 356,916 CU for two
 items; the estimates above fall within the integration-test tolerance for both.
