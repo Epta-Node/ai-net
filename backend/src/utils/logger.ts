@@ -16,6 +16,9 @@ const DEFAULT_LOG_CONTEXT = {
   userId: "system",
   taskId: "none",
   route: "system",
+  paymentId: "none",
+  amount: "0",
+  recipient: "none",
 };
 const logContextStore = new AsyncLocalStorage<Record<string, unknown>>();
 
