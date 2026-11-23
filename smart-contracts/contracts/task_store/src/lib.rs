@@ -67,8 +67,8 @@ pub use types::{
 };
 
 use soroban_sdk::{
-    contract, contractimpl, symbol_short, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
-    Val, Vec,
+    contract, contractimpl, panic_with_error, symbol_short, Address, Bytes, BytesN, Env, IntoVal,
+    String, Symbol, Val, Vec,
 };
 
 const SECONDS_PER_DAY: u64 = 86_400;
@@ -85,6 +85,38 @@ fn require_not_paused(env: &Env) -> Result<(), Error> {
         return Err(Error::ContractPaused);
     }
     Ok(())
+}
+
+// ─── Reentrancy guard ────────────────────────────────────────────────────────
+
+/// Acquire the payment reentrancy lock held in instance storage.
+///
+/// `store_task_metadata` calls out to the configured OracleManager to price a
+/// task, and both it and `create_task` commit value (a quoted price or a
+/// budget) to storage. If an external contract invoked during that window tried
+/// to call back into either entrypoint, the nested call would observe and
+/// mutate half-written state. The lock makes any such nested call panic with
+/// [`Error::ReentrancyDetected`], which aborts the whole invocation.
+fn enter_payment_guard(env: &Env) {
+    let storage = env.storage().instance();
+    if storage.has(&DataKey::PaymentLock) {
+        panic_with_error!(env, Error::ReentrancyDetected);
+    }
+    storage.set(&DataKey::PaymentLock, &true);
+}
+
+/// Release the payment reentrancy lock.
+fn exit_payment_guard(env: &Env) {
+    env.storage().instance().remove(&DataKey::PaymentLock);
+}
+
+/// Run `body` with the payment reentrancy lock held, releasing it on both the
+/// success and the error path.
+fn with_payment_guard<T>(env: &Env, body: impl FnOnce() -> Result<T, Error>) -> Result<T, Error> {
+    enter_payment_guard(env);
+    let result = body();
+    exit_payment_guard(env);
+    result
 }
 
 fn ttl_ledgers(ttl_days: u32) -> u32 {
@@ -356,6 +388,166 @@ fn try_resolve_price(env: &Env, oracle_manager: &Address, pair: &Symbol) -> Opti
     }
 }
 
+/// Body of [`TaskStoreContract::store_task_metadata`], run under the payment
+/// reentrancy guard.
+fn store_task_metadata_guarded(
+    env: Env,
+    submitter: Address,
+    task_id: BytesN<32>,
+    prompt_hash: BytesN<32>,
+    assigned_agents: Vec<Address>,
+    compressed_dag: Bytes,
+    ttl_days: u32,
+    price_pair: Option<Symbol>,
+) -> Result<(), Error> {
+    require_not_paused(&env)?;
+    submitter.require_auth();
+
+    let key = DataKey::Task(task_id.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(Error::AlreadyExists);
+    }
+    if assigned_agents.is_empty() {
+        return Err(Error::NoAssignedAgents);
+    }
+    if has_duplicate_agents(&assigned_agents) {
+        return Err(Error::DuplicateAgent);
+    }
+    if compressed_dag.is_empty() || compressed_dag.len() > MAX_COMPRESSED_DAG_BYTES {
+        return Err(Error::InvalidDag);
+    }
+
+    let retention_days = if ttl_days == 0 {
+        DEFAULT_TTL_DAYS
+    } else {
+        ttl_days
+    };
+    if retention_days > MAX_TTL_DAYS {
+        return Err(Error::InvalidTtl);
+    }
+
+    // ── Oracle price resolution ────────────────────────────────────────────
+    let (quoted_price_stroops, resolved_pair) = if let Some(oracle_manager) = env
+        .storage()
+        .instance()
+        .get::<DataKey, Address>(&DataKey::OracleManager)
+    {
+        // OracleManager is configured: a price_pair is mandatory.
+        let pair = price_pair.clone().ok_or(Error::MissingPricePair)?;
+        let price =
+            try_resolve_price(&env, &oracle_manager, &pair).ok_or(Error::OraclePriceUnavailable)?;
+        (Some(price), Some(pair))
+    } else {
+        // No OracleManager: pricing is optional (legacy path).
+        (None, None)
+    };
+
+    let created_at = env.ledger().timestamp();
+    let expires_at =
+        created_at.saturating_add(u64::from(retention_days).saturating_mul(SECONDS_PER_DAY));
+
+    let metadata = TaskMetadata {
+        task_id: task_id.clone(),
+        prompt_hash: prompt_hash.clone(),
+        assigned_agents,
+        compressed_dag,
+        // The caller supplies a non-empty agent list, so the task is born
+        // `Assigned` rather than `Created`/`Queued`.
+        status: TaskStatus::Assigned,
+        created_at,
+        expires_at,
+        quoted_price_stroops,
+        price_pair: resolved_pair,
+    };
+
+    env.storage().persistent().set(&key, &metadata);
+    let ledgers = ttl_ledgers(retention_days);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
+
+    // Seed the append-only version history and the creator's task index.
+    // A task always begins with exactly one record, at `Assigned`.
+    index_creator_task(&env, &submitter, &task_id, expires_at);
+    append_version(&env, &task_id, TaskStatus::Assigned, &submitter, expires_at);
+
+    env.events().publish(
+        (symbol_short!("task_meta"), symbol_short!("created")),
+        TaskCreatedEvent {
+            version: TASK_LIFECYCLE_EVENT_VERSION,
+            task_id,
+            prompt_hash,
+            assigned_agents: metadata.assigned_agents,
+            created_at,
+            expires_at,
+            quoted_price_stroops,
+        },
+    );
+
+    Ok(())
+}
+
+/// Body of [`TaskStoreContract::create_task`], run under the payment
+/// reentrancy guard.
+fn create_task_guarded(
+    env: Env,
+    task_id: BytesN<32>,
+    creator: Address,
+    prompt_hash: BytesN<32>,
+    budget_xlm: i128,
+) -> Result<(), Error> {
+    require_not_paused(&env)?;
+    creator.require_auth();
+
+    if budget_xlm < 0 {
+        return Err(Error::InvalidBudget);
+    }
+
+    let key = DataKey::LifecycleTask(task_id.clone());
+    if env.storage().persistent().has(&key) {
+        return Err(Error::AlreadyExists);
+    }
+
+    let created_at = env.ledger().timestamp();
+    let expires_at = lifecycle_expires_at(created_at);
+
+    // Seed the audit trail and the creator's index first, so the record can
+    // be written once with a `version` that already matches the history.
+    index_creator_task(&env, &creator, &task_id, expires_at);
+    let version = append_version(&env, &task_id, TaskStatus::Created, &creator, expires_at);
+
+    let record = TaskRecord {
+        task_id: task_id.clone(),
+        creator: creator.clone(),
+        prompt_hash: prompt_hash.clone(),
+        budget_xlm,
+        status: TaskStatus::Created,
+        created_at,
+        updated_at: created_at,
+        version,
+    };
+    env.storage().persistent().set(&key, &record);
+
+    let ledgers = remaining_ledgers(&env, expires_at);
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
+
+    env.events().publish(
+        (symbol_short!("task_life"), symbol_short!("created")),
+        LifecycleTaskCreatedEvent {
+            version: TASK_LIFECYCLE_EVENT_VERSION,
+            task_id,
+            creator,
+            prompt_hash,
+            budget_xlm,
+            created_at,
+        },
+    );
+
+    Ok(())
+}
+
 #[contract]
 pub struct TaskStoreContract;
 
@@ -490,91 +682,18 @@ impl TaskStoreContract {
         ttl_days: u32,
         price_pair: Option<Symbol>,
     ) -> Result<(), Error> {
-        require_not_paused(&env)?;
-        submitter.require_auth();
-
-        let key = DataKey::Task(task_id.clone());
-        if env.storage().persistent().has(&key) {
-            return Err(Error::AlreadyExists);
-        }
-        if assigned_agents.is_empty() {
-            return Err(Error::NoAssignedAgents);
-        }
-        if has_duplicate_agents(&assigned_agents) {
-            return Err(Error::DuplicateAgent);
-        }
-        if compressed_dag.is_empty() || compressed_dag.len() > MAX_COMPRESSED_DAG_BYTES {
-            return Err(Error::InvalidDag);
-        }
-
-        let retention_days = if ttl_days == 0 {
-            DEFAULT_TTL_DAYS
-        } else {
-            ttl_days
-        };
-        if retention_days > MAX_TTL_DAYS {
-            return Err(Error::InvalidTtl);
-        }
-
-        // ── Oracle price resolution ────────────────────────────────────────────
-        let (quoted_price_stroops, resolved_pair) = if let Some(oracle_manager) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::OracleManager)
-        {
-            // OracleManager is configured: a price_pair is mandatory.
-            let pair = price_pair.clone().ok_or(Error::MissingPricePair)?;
-            let price = try_resolve_price(&env, &oracle_manager, &pair)
-                .ok_or(Error::OraclePriceUnavailable)?;
-            (Some(price), Some(pair))
-        } else {
-            // No OracleManager: pricing is optional (legacy path).
-            (None, None)
-        };
-
-        let created_at = env.ledger().timestamp();
-        let expires_at =
-            created_at.saturating_add(u64::from(retention_days).saturating_mul(SECONDS_PER_DAY));
-
-        let metadata = TaskMetadata {
-            task_id: task_id.clone(),
-            prompt_hash: prompt_hash.clone(),
-            assigned_agents,
-            compressed_dag,
-            // The caller supplies a non-empty agent list, so the task is born
-            // `Assigned` rather than `Created`/`Queued`.
-            status: TaskStatus::Assigned,
-            created_at,
-            expires_at,
-            quoted_price_stroops,
-            price_pair: resolved_pair,
-        };
-
-        env.storage().persistent().set(&key, &metadata);
-        let ledgers = ttl_ledgers(retention_days);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
-
-        // Seed the append-only version history and the creator's task index.
-        // A task always begins with exactly one record, at `Assigned`.
-        index_creator_task(&env, &submitter, &task_id, expires_at);
-        append_version(&env, &task_id, TaskStatus::Assigned, &submitter, expires_at);
-
-        env.events().publish(
-            (symbol_short!("task_meta"), symbol_short!("created")),
-            TaskCreatedEvent {
-                version: TASK_LIFECYCLE_EVENT_VERSION,
+        with_payment_guard(&env, || {
+            store_task_metadata_guarded(
+                env.clone(),
+                submitter,
                 task_id,
                 prompt_hash,
-                assigned_agents: metadata.assigned_agents,
-                created_at,
-                expires_at,
-                quoted_price_stroops,
-            },
-        );
-
-        Ok(())
+                assigned_agents,
+                compressed_dag,
+                ttl_days,
+                price_pair,
+            )
+        })
     }
 
     pub fn get_task_metadata(env: Env, task_id: BytesN<32>) -> Result<TaskMetadata, Error> {
@@ -693,56 +812,9 @@ impl TaskStoreContract {
         prompt_hash: BytesN<32>,
         budget_xlm: i128,
     ) -> Result<(), Error> {
-        require_not_paused(&env)?;
-        creator.require_auth();
-
-        if budget_xlm < 0 {
-            return Err(Error::InvalidBudget);
-        }
-
-        let key = DataKey::LifecycleTask(task_id.clone());
-        if env.storage().persistent().has(&key) {
-            return Err(Error::AlreadyExists);
-        }
-
-        let created_at = env.ledger().timestamp();
-        let expires_at = lifecycle_expires_at(created_at);
-
-        // Seed the audit trail and the creator's index first, so the record can
-        // be written once with a `version` that already matches the history.
-        index_creator_task(&env, &creator, &task_id, expires_at);
-        let version = append_version(&env, &task_id, TaskStatus::Created, &creator, expires_at);
-
-        let record = TaskRecord {
-            task_id: task_id.clone(),
-            creator: creator.clone(),
-            prompt_hash: prompt_hash.clone(),
-            budget_xlm,
-            status: TaskStatus::Created,
-            created_at,
-            updated_at: created_at,
-            version,
-        };
-        env.storage().persistent().set(&key, &record);
-
-        let ledgers = remaining_ledgers(&env, expires_at);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
-
-        env.events().publish(
-            (symbol_short!("task_life"), symbol_short!("created")),
-            LifecycleTaskCreatedEvent {
-                version: TASK_LIFECYCLE_EVENT_VERSION,
-                task_id,
-                creator,
-                prompt_hash,
-                budget_xlm,
-                created_at,
-            },
-        );
-
-        Ok(())
+        with_payment_guard(&env, || {
+            create_task_guarded(env.clone(), task_id, creator, prompt_hash, budget_xlm)
+        })
     }
 
     /// Move a task to `new_status`, appending one version record.
@@ -890,6 +962,195 @@ impl TaskStoreContract {
 impl gas_interface::GasEstimator for TaskStoreContract {
     fn estimate(operation: Symbol, params: soroban_sdk::Map<Symbol, Val>) -> u64 {
         gas::estimate(operation, params.len())
+    }
+}
+
+// ─── Reentrancy tests (issue #933) ───────────────────────────────────────────
+
+#[cfg(test)]
+mod reentrancy_tests {
+    use super::*;
+    use soroban_sdk::{contracttype, testutils::Address as _, Address, Bytes, Env};
+
+    /// Task id the malicious oracle tries to create from inside the callback.
+    const REENTRANT_TASK: [u8; 32] = [0xAB; 32];
+
+    #[contracttype]
+    enum MockKey {
+        Target,
+    }
+
+    /// An OracleManager stand-in that, when asked for a price, calls back into
+    /// the task store's payment entrypoint before answering.
+    #[contract]
+    pub struct ReentrantOracle;
+
+    #[contractimpl]
+    impl ReentrantOracle {
+        pub fn set_target(env: Env, target: Address) {
+            env.storage().instance().set(&MockKey::Target, &target);
+        }
+
+        pub fn resolve_price(env: Env, _pair: Symbol) -> i128 {
+            let target: Address = env.storage().instance().get(&MockKey::Target).unwrap();
+            TaskStoreContractClient::new(&env, &target).create_task(
+                &BytesN::from_array(&env, &REENTRANT_TASK),
+                &env.current_contract_address(),
+                &BytesN::from_array(&env, &[0; 32]),
+                &1,
+            );
+            1_000
+        }
+    }
+
+    type CallResult =
+        Result<Result<(), soroban_sdk::ConversionError>, Result<Error, soroban_sdk::InvokeError>>;
+
+    struct Fixture {
+        env: Env,
+        id: Address,
+        client: TaskStoreContractClient<'static>,
+        submitter: Address,
+    }
+
+    fn fixture() -> Fixture {
+        let env = Env::default();
+        env.mock_all_auths();
+        let id = env.register(TaskStoreContract, ());
+        let client = TaskStoreContractClient::new(&env, &id);
+        client.initialize(&Address::generate(&env));
+        Fixture {
+            submitter: Address::generate(&env),
+            env,
+            id,
+            client,
+        }
+    }
+
+    impl Fixture {
+        fn lock_held(&self) -> bool {
+            self.env.as_contract(&self.id, || {
+                self.env.storage().instance().has(&DataKey::PaymentLock)
+            })
+        }
+
+        /// Simulate a payment call already in flight on this contract.
+        fn hold_lock(&self) {
+            self.env.as_contract(&self.id, || {
+                self.env
+                    .storage()
+                    .instance()
+                    .set(&DataKey::PaymentLock, &true)
+            });
+        }
+
+        fn try_store(&self, seed: u8, pair: Option<Symbol>) -> CallResult {
+            self.client.try_store_task_metadata(
+                &self.submitter,
+                &BytesN::from_array(&self.env, &[seed; 32]),
+                &BytesN::from_array(&self.env, &[2; 32]),
+                &Vec::from_array(&self.env, [Address::generate(&self.env)]),
+                &Bytes::from_slice(&self.env, &[1, 2, 3]),
+                &1,
+                &pair,
+            )
+        }
+
+        fn try_create(&self, seed: u8, budget: i128) -> CallResult {
+            self.client.try_create_task(
+                &BytesN::from_array(&self.env, &[seed; 32]),
+                &self.submitter,
+                &BytesN::from_array(&self.env, &[3; 32]),
+                &budget,
+            )
+        }
+    }
+
+    #[test]
+    fn lock_is_released_after_successful_payment_calls() {
+        let f = fixture();
+        assert_eq!(f.try_store(1, None), Ok(Ok(())));
+        assert!(!f.lock_held());
+        assert_eq!(f.try_create(2, 1_000_000), Ok(Ok(())));
+        assert!(!f.lock_held());
+        // Sequential (non-nested) calls are never mistaken for reentrancy.
+        assert_eq!(f.try_create(3, 1_000_000), Ok(Ok(())));
+        assert_eq!(f.try_store(4, None), Ok(Ok(())));
+    }
+
+    #[test]
+    fn lock_is_released_after_failed_payment_calls() {
+        let f = fixture();
+        assert_eq!(f.try_create(1, -1), Err(Ok(Error::InvalidBudget)));
+        assert!(!f.lock_held());
+        f.client.pause();
+        assert_eq!(f.try_store(2, None), Err(Ok(Error::ContractPaused)));
+        assert!(!f.lock_held());
+    }
+
+    #[test]
+    fn store_task_metadata_rejects_reentry() {
+        let f = fixture();
+        f.hold_lock();
+        assert_eq!(f.try_store(1, None), Err(Ok(Error::ReentrancyDetected)));
+        assert!(f
+            .client
+            .try_get_task_metadata(&BytesN::from_array(&f.env, &[1; 32]))
+            .is_err());
+    }
+
+    #[test]
+    fn create_task_rejects_reentry() {
+        let f = fixture();
+        f.hold_lock();
+        assert_eq!(
+            f.try_create(1, 1_000_000),
+            Err(Ok(Error::ReentrancyDetected))
+        );
+        assert!(f
+            .client
+            .try_get_task(&BytesN::from_array(&f.env, &[1; 32]))
+            .is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #20)")]
+    fn guard_panics_when_entered_twice() {
+        let f = fixture();
+        f.env.as_contract(&f.id, || {
+            enter_payment_guard(&f.env);
+            enter_payment_guard(&f.env);
+        });
+    }
+
+    /// A malicious oracle that calls back into `create_task` while
+    /// `store_task_metadata` is pricing a task must not succeed: the nested
+    /// call is aborted, no price is accepted, neither task is written, and the
+    /// lock does not leak.
+    #[test]
+    fn malicious_oracle_callback_cannot_reenter_payment_path() {
+        let f = fixture();
+        let oracle = f.env.register(ReentrantOracle, ());
+        ReentrantOracleClient::new(&f.env, &oracle).set_target(&f.id);
+        f.client.set_oracle_manager(&Some(oracle));
+
+        assert_eq!(
+            f.try_store(1, Some(symbol_short!("XLMUSD"))),
+            Err(Ok(Error::OraclePriceUnavailable))
+        );
+        assert!(f
+            .client
+            .try_get_task(&BytesN::from_array(&f.env, &REENTRANT_TASK))
+            .is_err());
+        assert!(f
+            .client
+            .try_get_task_metadata(&BytesN::from_array(&f.env, &[1; 32]))
+            .is_err());
+        assert!(!f.lock_held());
+
+        // The store keeps working once the hostile oracle is removed.
+        f.client.set_oracle_manager(&None);
+        assert_eq!(f.try_store(1, None), Ok(Ok(())));
     }
 }
 

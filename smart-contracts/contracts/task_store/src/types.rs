@@ -162,6 +162,12 @@ pub enum DataKey {
     /// Task ids created by an address, oldest first, bounded by
     /// [`MAX_TRACKED_TASKS_PER_CREATOR`].
     CreatorTasks(Address),
+    /// Reentrancy guard for payment-related entrypoints (instance storage).
+    ///
+    /// Set for the duration of `store_task_metadata` / `create_task` and
+    /// cleared before they return. Present only while such a call is in
+    /// flight, so it never occupies storage between transactions.
+    PaymentLock,
 }
 
 /// Emitted exactly once per successful `store_task_metadata` call, under
@@ -350,4 +356,6 @@ pub enum Error {
     InvalidBudget = 18,
     /// The caller is not an authorized updater for this task.
     NotAuthorizedUpdater = 19,
+    /// A payment-related entrypoint was re-entered while already executing.
+    ReentrancyDetected = 20,
 }
