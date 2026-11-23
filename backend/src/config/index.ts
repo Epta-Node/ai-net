@@ -237,6 +237,14 @@ const envSchema = z.object({
     (v) => (v === '' ? undefined : v),
     z.string().min(1).optional()
   ),
+  /**
+   * Retired backup keys, comma-separated. They still decrypt existing backups
+   * during a rotation window; new backups always use DB_BACKUP_ENCRYPTION_KEY.
+   */
+  DB_BACKUP_PREVIOUS_KEYS: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().optional()
+  ),
   DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().int().nonnegative().default(100),
   ERROR_REGISTRY_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),

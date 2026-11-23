@@ -19,6 +19,7 @@
 import type Database from 'better-sqlite3';
 import { summarizeCircuitBreakers, type CircuitBreakerSummary } from './circuitBreaker.js';
 import { getDatabaseMetrics, type DatabaseMetricsSnapshot } from '../db/metrics.js';
+import { deepHealthMetricsRegistry, millisToSeconds } from './deepHealthMetrics.js';
 
 export type DependencyStatus = 'ok' | 'degraded' | 'fail';
 
@@ -346,6 +347,10 @@ export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHea
     checkQueue(deps),
   ]);
   const dependencies: Record<string, DependencyResult> = { venice, horizon, database, queue };
+  const metrics = deepHealthMetricsRegistry();
+  for (const [name, result] of Object.entries(dependencies)) {
+    metrics.observeCheck(name, millisToSeconds(result.latencyMs));
+  }
 
   const failing: string[] = [];
   const degraded: string[] = [];
@@ -355,6 +360,8 @@ export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHea
     if (result.status === 'fail' && result.critical) failing.push(name);
     else degraded.push(name);
   }
+
+  metrics.observeTotal(millisToSeconds(Math.max(0, deps.now() - start)));
 
   return {
     status: failing.length > 0 ? 'fail' : degraded.length > 0 ? 'degraded' : 'ok',

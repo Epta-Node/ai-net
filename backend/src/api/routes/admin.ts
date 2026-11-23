@@ -34,6 +34,8 @@ import {
   auditChainRowToCsv,
 } from "../../services/auditLog";
 import { createLogger } from "../../utils/logger";
+import { config } from "../../config";
+import { getBackupEncryptionKey, rotateBackupKeys } from "../../services/backup/encryption";
 import { ValidationError, NotFoundError, AppError } from "../../errors";
 
 const logger = createLogger({ module: "admin" });
@@ -485,6 +487,36 @@ export function createAdminRouter(options: AdminRouterOptions = {}): Router {
    */
   router.post("/maintenance/vacuum", (_req: Request, res: Response) => {
     res.json({ results: vacuumDatabases() });
+  });
+
+  /**
+   * @openapi
+   * /api/admin/backups/rotate-keys:
+   *   post:
+   *     summary: Re-encrypt backups under the active backup key
+   *     operationId: rotateBackupKeys
+   *     description: Re-encrypts every encrypted backup in the admin backup directory with DB_BACKUP_ENCRYPTION_KEY. Backups made under keys listed in DB_BACKUP_PREVIOUS_KEYS are decrypted with them first. Returns counts and per-file failures, never key material.
+   *     tags: [Admin, Maintenance]
+   *     security:
+   *       - adminApiKey: []
+   *     responses:
+   *       200:
+   *         description: Rotation summary (scanned, rotated, current, failed)
+   *       401:
+   *         description: Missing or invalid admin API key
+   *       409:
+   *         description: DB_BACKUP_ENCRYPTION_KEY is not configured, so there is no active key to rotate to
+   */
+  router.post("/backups/rotate-keys", (_req: Request, res: Response, next: NextFunction) => {
+    if (!getBackupEncryptionKey()) {
+      res.status(409).json({ error: "DB_BACKUP_ENCRYPTION_KEY is not configured" });
+      return;
+    }
+    try {
+      res.json(rotateBackupKeys(config.ADMIN_BACKUP_DIR));
+    } catch (err) {
+      next(err);
+    }
   });
 
   /**
