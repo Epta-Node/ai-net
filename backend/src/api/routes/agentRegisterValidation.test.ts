@@ -121,3 +121,28 @@ describe("POST /api/agents/register — payload validation (#754)", () => {
     expect(JSON.stringify(res.body.error.details)).toContain("capabilities");
   });
 });
+
+describe("POST /api/agents/register — endpoint sanitization (#915)", () => {
+  beforeAll(() => {
+    process.env.SKIP_STELLAR_ACCOUNT_VERIFY = "true";
+  });
+
+  it.each([
+    ["an HTML script tag", "https://agent.example/<script>alert(1)</script>"],
+    ["an angle bracket", "https://agent.example/run<"],
+    ["a double quote", 'https://agent.example/run"x'],
+    ["an embedded space", "https://agent.example/run me"],
+    ["a control character", "https://agent.example/run"],
+  ])("rejects an endpoint containing %s", async (_label, endpoint) => {
+    await expectRejected(validBody({ endpoint }));
+  });
+
+  it("still accepts a plain https endpoint with a path and query", async () => {
+    const { app, upsert } = buildApp();
+    const res = await request(app)
+      .post("/api/agents/register")
+      .send(validBody({ endpoint: "https://agent.example/run/v1?region=eu" }));
+    expect(res.status).toBe(401);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
