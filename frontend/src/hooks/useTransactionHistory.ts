@@ -9,6 +9,7 @@ export interface TransactionEvent {
   memo?: string
   timestamp: string
   txHash: string
+  status?: 'pending' | 'success' | 'failed' | 'completed'
 }
 
 const REFRESH_INTERVAL = 30_000

@@ -471,3 +471,33 @@
 @media (max-width: 400px) {
   .hint { display: none; }
 }
+
+/* Drag handle for repositioning */
+.dragHandle {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  color: var(--text-secondary, #94a3b8);
+  padding: 2px;
+  border-radius: 4px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.dragHandle:hover {
+  opacity: 1;
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.dragHandle:active {
+  cursor: grabbing;
+}
+
+.dragIcon {
+  pointer-events: none;
+}
