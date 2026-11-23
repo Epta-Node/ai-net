@@ -11,3 +11,5 @@ Use these docs as the navigation entry point for implementation and operations w
 | [New agent types](contributing-agent-types.md)                                       | Contract, implementation, testing, and review checklist for new workers                                         |
 | [Node Operators Guide](NODE_OPERATORS_GUIDE.md)                                      | Production/testnet node setup, secrets, deployment, monitoring, backup, and troubleshooting                     |
 | [End-to-End Testing](e2e-testing.md)                                                 | E2E setup and validation                                                                                        |
+
+| [Stellar Testnet Troubleshooting](stellar-testnet-troubleshooting.md) | Diagnose testnet connectivity, funding, transaction, and Soroban RPC failures |
