@@ -1000,3 +1000,24 @@ fn the_creator_index_paginates_a_large_lifecycle_backlog() {
     assert!(contains(&seen, &task_id(&f, 1)));
     assert_eq!(f.client.get_task(&task_id(&f, 1)).task.budget_xlm, 1_000);
 }
+
+#[test]
+fn ttl_management_preserves_expiry_boundary_for_all_retention_days() {
+    // Exercise every day in the retention window. A task remains readable
+    // before the boundary and is reported expired at the boundary.
+    for days in 0..=DEFAULT_TTL_DAYS {
+        let f = fixture();
+        let id = task_id(&f, (days + 1) as u8);
+        create_task(&f, &id);
+
+        f.env.ledger().with_mut(|ledger| {
+            ledger.timestamp += u64::from(days) * SECONDS_PER_DAY;
+        });
+
+        if days < DEFAULT_TTL_DAYS {
+            assert!(f.client.try_get_task(&id).is_ok());
+        } else {
+            assert_eq!(f.client.try_get_task(&id), Err(Ok(Error::Expired)));
+        }
+    }
+}
