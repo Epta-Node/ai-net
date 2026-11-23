@@ -1,7 +1,20 @@
-import { render, screen, fireEvent } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TransactionTable } from './TransactionTable'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
+
+// Mock toast hook
+const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }))
+vi.mock('../../context/ToastContext', () => ({
+  useToast: () => ({ showToast }),
+}))
+
+// Mock navigator.clipboard
+Object.assign(navigator, {
+  clipboard: {
+    writeText: vi.fn().mockImplementation(() => Promise.resolve()),
+  },
+})
 
 function makeTx(overrides: Partial<TransactionEvent> = {}): TransactionEvent {
   return {
@@ -16,6 +29,10 @@ function makeTx(overrides: Partial<TransactionEvent> = {}): TransactionEvent {
 }
 
 describe('TransactionTable', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('prompts to connect when no wallet is connected', () => {
     render(<TransactionTable transactions={[]} loading={false} publicKey={null} />)
     expect(screen.getByText('Connect your wallet to view transaction history.')).toBeInTheDocument()
@@ -71,5 +88,21 @@ describe('TransactionTable', () => {
     ]
     render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
     expect(screen.getByText('+6.0000000 XLM')).toBeInTheDocument()
+  })
+
+  it('copies the counterparty address to clipboard and shows a toast', async () => {
+    const counterparty = 'GCOUNTERPARTY1234567890ABCDEFGHIJ'
+    const transactions = [makeTx({ txHash: 'tx1', counterparty })]
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+
+    const copyButtons = screen.getAllByTestId('copy-button')
+    expect(copyButtons).toHaveLength(1)
+
+    fireEvent.click(copyButtons[0])
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(counterparty)
+      expect(showToast).toHaveBeenCalledWith('Address copied to clipboard', 'success')
+    })
   })
 })

@@ -282,6 +282,12 @@
   color: var(--border-color);
 }
 
+.counterpartyCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .txLink {
   color: var(--accent-secondary);
   transition: color 0.15s, opacity 0.15s;

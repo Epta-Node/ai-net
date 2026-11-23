@@ -8,6 +8,10 @@ export interface CopyButtonProps {
   className?: string;
   style?: React.CSSProperties;
   iconSize?: number;
+  /** Accessible label for icon-only usage (sets aria-label on the button). */
+  'aria-label'?: string;
+  /** Called after the text is successfully written to the clipboard. */
+  onCopy?: () => void;
 }
 
 export const CopyButton: React.FC<CopyButtonProps> = ({
@@ -17,6 +21,8 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
   className = '',
   style = {},
   iconSize = 14,
+  'aria-label': ariaLabel,
+  onCopy,
 }) => {
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -25,6 +31,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
+      onCopy?.();
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy to clipboard', err);
@@ -56,10 +63,13 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       className={`copy-btn ${className}`}
       data-testid="copy-button"
       style={buttonStyle}
-      title="Copy to clipboard"
+      aria-label={ariaLabel}
+      title={ariaLabel ?? 'Copy to clipboard'}
     >
       {copied ? <Check size={iconSize} color="#ffffff" /> : <Copy size={iconSize} color="#e2e8f0" />}
-      <span>{copied ? copiedLabel : label}</span>
+      {(copied ? copiedLabel : label) && (
+        <span>{copied ? copiedLabel : label}</span>
+      )}
     </button>
   );
 };
