@@ -1755,7 +1755,7 @@ fn authorized_task_outcome_updates_reputation_once_and_emits_event() {
     assert!(client
         .try_record_task_outcome(&reporter, &agent_id, &false, &-10_000i32, &task_id)
         .is_err());
-    assert_eq!(client.get_reputation(&agent_id).score, rep.score - 10_000);
+    assert_eq!(client.get_reputation(&agent_id).score, rep.score);
     assert_eq!(client.is_authorized_caller(&reporter), true);
     client.remove_authorized_caller(&reporter);
     assert_eq!(client.is_authorized_caller(&reporter), false);
@@ -2460,11 +2460,7 @@ fn slash_bond_event_fires_after_bond_is_reduced() {
     client.register_agent(&make_record(&env, "bonded", "coding", owner));
     let _ = env.events().all(); // drain
 
-    client.slash_bond(
-        &agent_id,
-        &1u32,
-        &String::from_str(&env, "slash"),
-    );
+    client.slash_bond_amount(&agent_id, &1_000_000i128);
 
     // The reduced bond must already be observable when the event is read.
     let payload: events::BondSlashed = assert_last_event(

@@ -534,7 +534,7 @@ mod upgrade_integration_tests {
 
     #[test]
     fn test_full_upgrade_flow_integration() {
-        let (env, registry, upgrade_mgr, admin) = setup_integration_test();
+        let (env, _registry, upgrade_mgr, admin) = setup_integration_test();
 
         let new_version = String::from_str(&env, "1.1.0");
         let new_hash = BytesN::from_array(&env, &[2u8; 32]);
@@ -560,14 +560,24 @@ mod upgrade_integration_tests {
             estimated_items: 50,
         };
 
-        // Test the full upgrade flow through upgrade manager
-        let proposal_id = upgrade_mgr.propose_upgrade(&admin, &new_version, &new_hash, &description, &migration_plan);
+        // Test the full upgrade flow through upgrade manager. The manager is
+        // single-admin, so the proposal meets its threshold at creation and
+        // only the default timelock has to elapse.
+        let proposal_id = upgrade_mgr.propose_upgrade(
+            &admin,
+            &new_version,
+            &new_hash,
+            &description,
+            &migration_plan,
+        );
 
         // Validate proposal
         let gas_estimate = upgrade_mgr.validate_proposal(&admin, &proposal_id);
         assert!(gas_estimate > 0);
 
-        // Execute upgrade
+        // Execute upgrade once the timelock has elapsed
+        let eta = upgrade_mgr.get_proposal(&proposal_id).unwrap().eta;
+        env.ledger().set_timestamp(eta);
         upgrade_mgr.execute_upgrade(&admin, &proposal_id);
 
         // Verify upgrade was applied

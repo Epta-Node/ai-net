@@ -278,6 +278,8 @@ pub enum DataKey {
     AssetDecimals,
     /// Agent Registry contract used for eligibility checks (optional).
     AgentRegistry,
+    /// Security bond staked by an agent (see `set_agent_bond` / `slash_agent_bond`).
+    AgentBond(Address),
 }
 
 // ─── Event Payloads ──────────────────────────────────────────────────────────

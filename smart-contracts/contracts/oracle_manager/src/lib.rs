@@ -12,6 +12,11 @@
 //! * **Admin** – set at `initialize`.  Only the admin may:
 //!   - change the on-chain oracle address (`set_oracle`)
 //!   - set / clear fallback prices per asset pair (`set_fallback_price`)
+//!   - register / remove authorized oracles (`register_oracle`, `remove_oracle`)
+//! * **Authorized oracle** – an address in the `AuthorizedOracles` set.  Only
+//!   an authorized oracle may push prices with `update_price`, and it must
+//!   authorize the call itself (`require_auth`).  Pushed prices are recorded
+//!   per pair and exposed through `get_reported_price`.
 //!
 //! ## Price resolution order
 //!
@@ -49,20 +54,28 @@
 //! | `DataKey::Admin`             | Instance   | Admin address                 |
 //! | `DataKey::OracleAddress`     | Instance   | Optional oracle contract addr |
 //! | `DataKey::FallbackPrice(sym)`| Persistent | Fallback price per pair       |
+//! | `DataKey::AuthorizedOracles` | Instance   | Oracles allowed to push prices|
+//! | `DataKey::OraclePrice(sym)`  | Persistent | Latest pushed price per pair  |
 
 mod errors;
 mod types;
 
 pub use errors::Error;
 pub use types::{
-    AdminChangedEvent, DataKey, FallbackPriceSetEvent, OracleFailureEvent, OracleSetEvent,
-    PriceResolvedEvent, PriceSource, ResolvedPrice,
+    AdminChangedEvent, DataKey, FallbackPriceSetEvent, OracleAuthChangedEvent, OracleFailureEvent,
+    OracleSetEvent, PriceResolvedEvent, PriceSource, PriceUpdatedEvent, ReportedPrice,
+    ResolvedPrice,
 };
 
-use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, IntoVal, Symbol, Val};
+use soroban_sdk::{
+    contract, contractimpl, symbol_short, Address, Env, IntoVal, Map, Symbol, Val, Vec,
+};
 
 /// Persistent TTL for fallback prices: ~30 days at 5 s/ledger.
 const FALLBACK_TTL_LEDGERS: u32 = 17_280 * 30;
+
+/// Upper bound on the authorized oracle set, keeping instance storage small.
+pub const MAX_AUTHORIZED_ORACLES: u32 = 32;
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -167,6 +180,19 @@ fn try_oracle_get_price(
             Err(Error::OracleCallFailed)
         }
     }
+}
+
+fn read_authorized_oracles(env: &Env) -> Map<Address, ()> {
+    env.storage()
+        .instance()
+        .get(&DataKey::AuthorizedOracles)
+        .unwrap_or_else(|| Map::new(env))
+}
+
+fn write_authorized_oracles(env: &Env, oracles: &Map<Address, ()>) {
+    env.storage()
+        .instance()
+        .set(&DataKey::AuthorizedOracles, oracles);
 }
 
 /// Read the admin-set fallback price for `pair`, if any.
@@ -306,6 +332,109 @@ impl OracleManagerContract {
         );
 
         Ok(())
+    }
+
+    // ── Oracle access control ─────────────────────────────────────────────────
+
+    /// Admin: authorize `oracle` to push prices with `update_price`.
+    pub fn register_oracle(env: Env, oracle: Address) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        require_admin(&env)?;
+        let mut oracles = read_authorized_oracles(&env);
+        if oracles.contains_key(oracle.clone()) {
+            return Err(Error::OracleAlreadyRegistered);
+        }
+        if oracles.len() >= MAX_AUTHORIZED_ORACLES {
+            return Err(Error::TooManyOracles);
+        }
+        oracles.set(oracle.clone(), ());
+        write_authorized_oracles(&env, &oracles);
+
+        env.events().publish(
+            (symbol_short!("mgr"), symbol_short!("ora_reg")),
+            OracleAuthChangedEvent {
+                oracle,
+                authorized: true,
+            },
+        );
+        Ok(())
+    }
+
+    /// Admin: revoke `oracle`'s permission to push prices. Prices it already
+    /// reported are kept.
+    pub fn remove_oracle(env: Env, oracle: Address) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        require_admin(&env)?;
+        let mut oracles = read_authorized_oracles(&env);
+        if !oracles.contains_key(oracle.clone()) {
+            return Err(Error::OracleNotRegistered);
+        }
+        oracles.remove(oracle.clone());
+        write_authorized_oracles(&env, &oracles);
+
+        env.events().publish(
+            (symbol_short!("mgr"), symbol_short!("ora_rm")),
+            OracleAuthChangedEvent {
+                oracle,
+                authorized: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// Push a price for `pair`. `oracle` must authorize the call and be in
+    /// the authorized oracle set; anyone else is rejected with
+    /// [`Error::OracleNotAuthorized`].
+    pub fn update_price(env: Env, oracle: Address, pair: Symbol, price: i128) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        read_admin(&env)?;
+        oracle.require_auth();
+        if !read_authorized_oracles(&env).contains_key(oracle.clone()) {
+            return Err(Error::OracleNotAuthorized);
+        }
+        if price <= 0 {
+            return Err(Error::InvalidPrice);
+        }
+
+        let key = DataKey::OraclePrice(pair.clone());
+        env.storage().persistent().set(
+            &key,
+            &ReportedPrice {
+                price,
+                timestamp: env.ledger().timestamp(),
+                oracle: oracle.clone(),
+            },
+        );
+        env.storage().persistent().extend_ttl(
+            &key,
+            FALLBACK_TTL_LEDGERS.saturating_sub(1),
+            FALLBACK_TTL_LEDGERS,
+        );
+
+        env.events().publish(
+            (symbol_short!("mgr"), symbol_short!("px_upd")),
+            PriceUpdatedEvent {
+                pair,
+                price,
+                oracle,
+            },
+        );
+        Ok(())
+    }
+
+    /// Whether `oracle` may call `update_price`.
+    pub fn is_authorized_oracle(env: Env, oracle: Address) -> bool {
+        read_authorized_oracles(&env).contains_key(oracle)
+    }
+
+    /// All addresses currently allowed to call `update_price`.
+    pub fn get_authorized_oracles(env: Env) -> Vec<Address> {
+        read_authorized_oracles(&env).keys()
+    }
+
+    /// Latest price pushed for `pair` by an authorized oracle, if any.
+    pub fn get_reported_price(env: Env, pair: Symbol) -> Option<ReportedPrice> {
+        env.storage().persistent().get(&DataKey::OraclePrice(pair))
     }
 
     // ── Core interface ────────────────────────────────────────────────────────
@@ -713,6 +842,9 @@ mod test {
             f.client.try_resolve_price(&f.pair).err(),
             Some(Ok(Error::ContractPaused))
         );
+        assert_eq!(f.client.try_register_oracle(&a), paused);
+        assert_eq!(f.client.try_remove_oracle(&a), paused);
+        assert_eq!(f.client.try_update_price(&a, &f.pair, &1i128), paused);
 
         f.client.unpause();
         f.client.set_oracle(&None);
@@ -911,6 +1043,298 @@ mod test {
         assert_eq!(
             f.client.try_set_fallback_price(&f.pair, &1_000_000i128),
             Err(Err(soroban_sdk::InvokeError::Abort))
+        );
+    }
+
+    // ── Oracle access control (Issue #930) ────────────────────────────────────
+
+    extern crate std;
+    use soroban_sdk::testutils::{
+        AuthorizedFunction, AuthorizedInvocation, MockAuth, MockAuthInvoke,
+    };
+
+    const PRICE: i128 = 1_250_000;
+
+    fn init_with_oracle(f: &Fixture) -> Address {
+        init(f);
+        let oracle = Address::generate(&f.env);
+        f.client.register_oracle(&oracle);
+        oracle
+    }
+
+    #[test]
+    fn register_oracle_adds_to_authorized_set() {
+        let f = fixture();
+        init(&f);
+        let oracle = Address::generate(&f.env);
+        assert!(!f.client.is_authorized_oracle(&oracle));
+
+        f.client.register_oracle(&oracle);
+
+        assert!(f.client.is_authorized_oracle(&oracle));
+        assert_eq!(
+            f.client.get_authorized_oracles(),
+            soroban_sdk::vec![&f.env, oracle.clone()]
+        );
+        // The set lives in instance storage.
+        let stored: Map<Address, ()> = f.env.as_contract(&f.client.address, || {
+            f.env
+                .storage()
+                .instance()
+                .get(&DataKey::AuthorizedOracles)
+                .unwrap()
+        });
+        assert!(stored.contains_key(oracle));
+    }
+
+    #[test]
+    fn register_oracle_requires_admin_auth() {
+        let f = fixture();
+        init(&f);
+        let oracle = Address::generate(&f.env);
+        f.client.register_oracle(&oracle);
+        assert_eq!(
+            f.env.auths(),
+            std::vec![(
+                f.admin.clone(),
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        f.client.address.clone(),
+                        Symbol::new(&f.env, "register_oracle"),
+                        (oracle.clone(),).into_val(&f.env),
+                    )),
+                    sub_invocations: std::vec![],
+                }
+            )]
+        );
+    }
+
+    #[test]
+    fn duplicate_register_oracle_is_rejected() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        assert_eq!(
+            f.client.try_register_oracle(&oracle),
+            Err(Ok(Error::OracleAlreadyRegistered))
+        );
+        assert_eq!(f.client.get_authorized_oracles().len(), 1);
+    }
+
+    #[test]
+    fn authorized_oracle_set_is_bounded() {
+        let f = fixture();
+        init(&f);
+        for _ in 0..MAX_AUTHORIZED_ORACLES {
+            f.client.register_oracle(&Address::generate(&f.env));
+        }
+        assert_eq!(
+            f.client.try_register_oracle(&Address::generate(&f.env)),
+            Err(Ok(Error::TooManyOracles))
+        );
+    }
+
+    #[test]
+    fn remove_oracle_revokes_authorization() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        f.client.update_price(&oracle, &f.pair, &PRICE);
+
+        f.client.remove_oracle(&oracle);
+
+        assert!(!f.client.is_authorized_oracle(&oracle));
+        assert_eq!(f.client.get_authorized_oracles().len(), 0);
+        assert_eq!(
+            f.client.try_update_price(&oracle, &f.pair, &(PRICE + 1)),
+            Err(Ok(Error::OracleNotAuthorized))
+        );
+        // The price reported while authorized is kept.
+        assert_eq!(f.client.get_reported_price(&f.pair).unwrap().price, PRICE);
+    }
+
+    #[test]
+    fn remove_unknown_oracle_is_rejected() {
+        let f = fixture();
+        init(&f);
+        assert_eq!(
+            f.client.try_remove_oracle(&Address::generate(&f.env)),
+            Err(Ok(Error::OracleNotRegistered))
+        );
+    }
+
+    #[test]
+    fn authorized_oracle_can_update_price() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+
+        f.client.update_price(&oracle, &f.pair, &PRICE);
+
+        // The oracle itself, not the admin, authorized the update.
+        assert_eq!(
+            f.env.auths(),
+            std::vec![(
+                oracle.clone(),
+                AuthorizedInvocation {
+                    function: AuthorizedFunction::Contract((
+                        f.client.address.clone(),
+                        Symbol::new(&f.env, "update_price"),
+                        (oracle.clone(), f.pair.clone(), PRICE).into_val(&f.env),
+                    )),
+                    sub_invocations: std::vec![],
+                }
+            )]
+        );
+        assert_eq!(
+            f.client.get_reported_price(&f.pair),
+            Some(ReportedPrice {
+                price: PRICE,
+                timestamp: 1_700_000_000,
+                oracle,
+            })
+        );
+    }
+
+    #[test]
+    fn update_price_emits_event() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        f.client.update_price(&oracle, &f.pair, &PRICE);
+
+        let events = f.env.events().all();
+        let (_, topics, data) = events.last().unwrap();
+        let t1: Symbol = topics.get(1).unwrap().into_val(&f.env);
+        assert_eq!(t1, symbol_short!("px_upd"));
+        let ev: PriceUpdatedEvent = data.into_val(&f.env);
+        assert_eq!(
+            ev,
+            PriceUpdatedEvent {
+                pair: f.pair.clone(),
+                price: PRICE,
+                oracle,
+            }
+        );
+    }
+
+    #[test]
+    fn unregistered_address_cannot_update_price() {
+        let f = fixture();
+        init_with_oracle(&f);
+        let intruder = Address::generate(&f.env);
+        assert_eq!(
+            f.client.try_update_price(&intruder, &f.pair, &PRICE),
+            Err(Ok(Error::OracleNotAuthorized))
+        );
+        assert!(f.client.get_reported_price(&f.pair).is_none());
+    }
+
+    #[test]
+    fn admin_is_not_implicitly_an_oracle() {
+        let f = fixture();
+        init(&f);
+        assert_eq!(
+            f.client.try_update_price(&f.admin, &f.pair, &PRICE),
+            Err(Ok(Error::OracleNotAuthorized))
+        );
+    }
+
+    #[test]
+    fn update_price_without_oracle_signature_is_rejected() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        f.env.mock_auths(&[]);
+        assert_eq!(
+            f.client.try_update_price(&oracle, &f.pair, &PRICE),
+            Err(Err(soroban_sdk::InvokeError::Abort))
+        );
+        assert!(f.client.get_reported_price(&f.pair).is_none());
+    }
+
+    #[test]
+    fn intruder_cannot_update_price_on_behalf_of_authorized_oracle() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        let intruder = Address::generate(&f.env);
+        // Only the intruder signs, but the call names the authorized oracle.
+        f.env.mock_auths(&[MockAuth {
+            address: &intruder,
+            invoke: &MockAuthInvoke {
+                contract: &f.client.address,
+                fn_name: "update_price",
+                args: (oracle.clone(), f.pair.clone(), PRICE).into_val(&f.env),
+                sub_invokes: &[],
+            },
+        }]);
+        assert_eq!(
+            f.client.try_update_price(&oracle, &f.pair, &PRICE),
+            Err(Err(soroban_sdk::InvokeError::Abort))
+        );
+        assert!(f.client.get_reported_price(&f.pair).is_none());
+    }
+
+    #[test]
+    fn non_admin_cannot_register_or_remove_oracle() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        let intruder = Address::generate(&f.env);
+        f.env.mock_auths(&[
+            MockAuth {
+                address: &intruder,
+                invoke: &MockAuthInvoke {
+                    contract: &f.client.address,
+                    fn_name: "register_oracle",
+                    args: (intruder.clone(),).into_val(&f.env),
+                    sub_invokes: &[],
+                },
+            },
+            MockAuth {
+                address: &intruder,
+                invoke: &MockAuthInvoke {
+                    contract: &f.client.address,
+                    fn_name: "remove_oracle",
+                    args: (oracle.clone(),).into_val(&f.env),
+                    sub_invokes: &[],
+                },
+            },
+        ]);
+        assert_eq!(
+            f.client.try_register_oracle(&intruder),
+            Err(Err(soroban_sdk::InvokeError::Abort))
+        );
+        assert_eq!(
+            f.client.try_remove_oracle(&oracle),
+            Err(Err(soroban_sdk::InvokeError::Abort))
+        );
+        assert!(!f.client.is_authorized_oracle(&intruder));
+        assert!(f.client.is_authorized_oracle(&oracle));
+    }
+
+    #[test]
+    fn non_positive_pushed_price_is_rejected() {
+        let f = fixture();
+        let oracle = init_with_oracle(&f);
+        for bad in [0i128, -1] {
+            assert_eq!(
+                f.client.try_update_price(&oracle, &f.pair, &bad),
+                Err(Ok(Error::InvalidPrice))
+            );
+        }
+        assert!(f.client.get_reported_price(&f.pair).is_none());
+    }
+
+    #[test]
+    fn oracle_management_requires_initialization() {
+        let f = fixture();
+        let a = Address::generate(&f.env);
+        assert_eq!(
+            f.client.try_register_oracle(&a),
+            Err(Ok(Error::NotInitialized))
+        );
+        assert_eq!(
+            f.client.try_remove_oracle(&a),
+            Err(Ok(Error::NotInitialized))
+        );
+        assert_eq!(
+            f.client.try_update_price(&a, &f.pair, &PRICE),
+            Err(Ok(Error::NotInitialized))
         );
     }
 }

@@ -26,6 +26,7 @@ import os from 'os';
 import { createLogger } from '../utils/logger';
 import { metricsService } from './metrics';
 import { quotaMetricsRegistry } from './quota/metrics';
+import { deepHealthMetricsRegistry } from './deepHealthMetrics';
 import { getQueueRetryMetrics } from '../queue/backoff';
 import { getCostBudgetStatus } from './budget';
 import { getSseMetricsSnapshot } from './sseMetrics';
@@ -359,6 +360,16 @@ function collectQuotaMetrics(): string {
   }
 }
 
+/** Deep health sub-check latency and probe duration (issue #919). */
+function collectDeepHealthMetrics(): string {
+  try {
+    return deepHealthMetricsRegistry().render();
+  } catch (err) {
+    logger.debug({ err }, 'deep health metrics unavailable');
+    return '';
+  }
+}
+
 /** Task event SSE stream counters (issue #813). */
 function collectSseMetrics(): string {
   const sse = getSseMetricsSnapshot();
@@ -507,6 +518,8 @@ export function generatePrometheusMetrics(): string {
   body += collectLlmMetrics(samples);
   body += '\n';
   body += collectQuotaMetrics();
+  body += '\n';
+  body += collectDeepHealthMetrics();
   body += '\n';
   body += collectSseMetrics();
   body += '\n';
