@@ -57,4 +57,68 @@ describe('live DAG node state (#818)', () => {
     expect(edgeExecState('completed', 'failed')).toBe('failed');
     expect(edgeExecState('pending', 'pending')).toBe('idle');
   });
+
+  it('handles payload variants and events without node ids', () => {
+    expect(
+      deriveNodeStates([
+        ev('node_completed', 'string', 1, 'plain text'),
+        ev('node_completed', 'summary', 2, { summary: 'summary text' }),
+        ev('node_completed', 'markdown', 3, { markdown: 'markdown text' }),
+        ev('node_completed', 'message', 4, { message: 'message text' }),
+        ev('node_failed', 'error', 5, { error: 'specific error' }),
+        ev('node_failed', 'fallback', 6),
+        ev('node_started', undefined, 7),
+      ]).string.output,
+    ).toBe('plain text');
+    expect(deriveNodeStates([ev('node_completed', 'summary', 1, { summary: 'summary text' })]).summary.output).toBe(
+      'summary text',
+    );
+    expect(deriveNodeStates([ev('node_completed', 'markdown', 1, { markdown: 'markdown text' })]).markdown.output).toBe(
+      'markdown text',
+    );
+    expect(deriveNodeStates([ev('node_completed', 'message', 1, { message: 'message text' })]).message.output).toBe(
+      'message text',
+    );
+    expect(deriveNodeStates([ev('node_failed', 'error', 1, { error: 'specific error' })]).error.error).toBe(
+      'specific error',
+    );
+    expect(deriveNodeStates([ev('node_failed', 'fallback', 1)]).fallback.error).toBe('Agent failed');
+  });
+
+  it('falls back to arrival order and detects finished tasks', () => {
+    const states = deriveNodeStates([
+      ev('node_started', 'a'),
+      ev('node_completed', 'a'),
+    ]);
+    expect(states.a.state).toBe('completed');
+    expect(isTaskFinished([ev('node_started', 'a', 1), ev('task_completed', undefined, 2)])).toBe(true);
+    expect(isTaskFinished([ev('node_started', 'a', 1)])).toBe(false);
+  });
+
+  it('skips pending nodes after a finished task and preserves running nodes', () => {
+    const states = deriveNodeStates([
+      ev('node_started', 'a', 1),
+      ev('node_completed', 'b', 2),
+    ]);
+    const live = applyNodeStates(
+      [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+      states,
+      { taskFinished: true },
+    );
+    expect(live.map((node) => node.exec.state)).toEqual(['running', 'completed', 'skipped']);
+  });
+
+  it('returns no duration for missing or invalid timestamps', () => {
+    expect(nodeDurationMs({ state: 'running' })).toBeUndefined();
+    expect(nodeDurationMs({
+      state: 'completed',
+      startedAt: 'invalid',
+      endedAt: '2026-10-19T00:00:02.000Z',
+    })).toBeUndefined();
+    expect(nodeDurationMs({
+      state: 'completed',
+      startedAt: '2026-10-19T00:00:02.000Z',
+      endedAt: '2026-10-19T00:00:01.000Z',
+    })).toBeUndefined();
+  });
 });
