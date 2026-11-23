@@ -41,6 +41,46 @@ import type { TaskStatus } from "../types/task";
 
 const logger = createLogger({ component: "event-retention" });
 
+/**
+ * Process-local totals across retention passes (issue #913). Counters reset on
+ * restart by design: they describe rates, while the durable record of what was
+ * purged lives in `task_event_archive` and `task_event_summary`.
+ */
+export interface EventRetentionMetricsSnapshot {
+  /** Retention passes that ran to completion. */
+  passes: number;
+  /** Tasks archived, summarized and purged. */
+  compactedTasks: number;
+  /** Events copied into the archive. */
+  eventsArchived: number;
+  /** Live events removed from `task_events`. */
+  eventsPurged: number;
+  /** Tasks whose compaction rolled back. */
+  failedTasks: number;
+}
+
+const retentionTotals: EventRetentionMetricsSnapshot = {
+  passes: 0,
+  compactedTasks: 0,
+  eventsArchived: 0,
+  eventsPurged: 0,
+  failedTasks: 0,
+};
+
+/** Current retention totals. Returns a copy, so callers cannot mutate them. */
+export function getEventRetentionMetrics(): EventRetentionMetricsSnapshot {
+  return { ...retentionTotals };
+}
+
+/** Clears retention totals. Intended for tests. */
+export function resetEventRetentionMetrics(): void {
+  retentionTotals.passes = 0;
+  retentionTotals.compactedTasks = 0;
+  retentionTotals.eventsArchived = 0;
+  retentionTotals.eventsPurged = 0;
+  retentionTotals.failedTasks = 0;
+}
+
 const DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
 const DEFAULT_RETENTION_DAYS = 30;
 const DEFAULT_BATCH_TASKS = 50;
@@ -233,6 +273,12 @@ export class EventRetentionService {
           );
         }
       }
+
+      retentionTotals.passes += 1;
+      retentionTotals.compactedTasks += stats.compactedTasks;
+      retentionTotals.eventsArchived += stats.eventsArchived;
+      retentionTotals.eventsPurged += stats.eventsPurged;
+      retentionTotals.failedTasks += stats.failedTasks;
 
       logger.info({ ...stats, elapsedMs: Date.now() - startedAt }, "event retention pass completed");
       return stats;
