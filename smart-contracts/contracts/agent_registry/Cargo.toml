@@ -32,6 +32,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # its entry points; the wasm build above does not.
 upgrade-manager = { path = "../upgrade-manager", features = ["contract", "testutils"] }
 contract-test-utils = { path = "../../test-utils" }
+# Property-based tests for bond arithmetic (stake / slash / refund).
+proptest = "1"
 
 [profile.release]
 opt-level = "z"
