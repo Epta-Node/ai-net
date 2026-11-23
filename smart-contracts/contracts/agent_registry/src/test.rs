@@ -2219,6 +2219,58 @@ fn test_get_agents_batch_registered_pagination() {
     assert_eq!(page2.total_count, 4);
 }
 
+#[test]
+fn test_list_agents_pagination_and_total_count() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+
+    // Empty registry check
+    assert_eq!(client.get_total_agents(), 0);
+    let empty_page = client.list_agents(&None, &None);
+    assert_eq!(empty_page.agents.len(), 0);
+    assert_eq!(empty_page.next_cursor, None);
+    assert_eq!(empty_page.total_count, 0);
+
+    // Register 5 agents
+    for i in 1..=5 {
+        let name = match i {
+            1 => "pag_agent_1",
+            2 => "pag_agent_2",
+            3 => "pag_agent_3",
+            4 => "pag_agent_4",
+            _ => "pag_agent_5",
+        };
+        client.register_agent(&make_record(&env, name, "coding", owner.clone()));
+    }
+
+    // Verify total count function
+    assert_eq!(client.get_total_agents(), 5);
+
+    // Page 1: limit 2
+    let page1 = client.list_agents(&Some(0), &Some(2));
+    assert_eq!(page1.agents.len(), 2);
+    assert_eq!(page1.next_cursor, Some(2));
+    assert_eq!(page1.total_count, 5);
+
+    // Page 2: limit 2
+    let page2 = client.list_agents(&page1.next_cursor, &Some(2));
+    assert_eq!(page2.agents.len(), 2);
+    assert_eq!(page2.next_cursor, Some(4));
+    assert_eq!(page2.total_count, 5);
+
+    // Page 3: limit 2 (last item)
+    let page3 = client.list_agents(&page2.next_cursor, &Some(2));
+    assert_eq!(page3.agents.len(), 1);
+    assert_eq!(page3.next_cursor, None);
+    assert_eq!(page3.total_count, 5);
+
+    // Out of bounds cursor
+    let page_oob = client.list_agents(&Some(100), &Some(10));
+    assert_eq!(page_oob.agents.len(), 0);
+    assert_eq!(page_oob.next_cursor, None);
+    assert_eq!(page_oob.total_count, 5);
+}
+
 // ─── error_mapper tests ─────────────────────────────────────────────────────
 
 #[test]

@@ -1,4 +1,5 @@
 use super::*;
+use soroban_sdk::testutils::Events;
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, FromVal, Map,

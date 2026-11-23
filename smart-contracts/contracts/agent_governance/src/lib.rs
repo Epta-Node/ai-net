@@ -51,7 +51,8 @@ mod types;
 pub use errors::Error;
 pub use types::{
     voting_power, AgentInfo, DataKey, ExecutionPayload, PowerCheckpoint, Proposal, QueuedProposal,
-    ProposalCreatedEvent, ProposalExecutedEvent, ProposalFailedEvent, ProposalStatus, ProposalType,
+    ProposalCreated, ProposalCreatedEvent, ProposalExecuted, ProposalExecutedEvent,
+    ProposalFailedEvent, ProposalStatus, ProposalType, ProposalVoted, ProposalVotedEvent,
     VoteCastEvent, VoteChoice, VoteRecord, BPS_DENOMINATOR, DEFAULT_VOTING_PERIOD_SECS,
     MAJORITY_BPS, MAX_CALLDATA_LEN, MAX_CHECKPOINTS, MAX_REPUTATION, MAX_VOTING_PERIOD_SECS,
     MIN_VOTING_PERIOD_SECS, QUORUM_BPS, REPUTATION_POWER_UNIT, PROPOSAL_TIMELOCK_SECS,
@@ -755,26 +756,14 @@ impl AgentGovernanceContract {
         Ok(())
     }
 
-    /// Execute a queued proposal after its timelock has elapsed. Callable by anyone.
+    /// Execute a proposal. Callable by anyone after voting ends.
     ///
-    /// The proposal must be in the Queued state and at least PROPOSAL_TIMELOCK_SECS
-    /// (48 hours) must have passed since it was queued. The payload is invoked from
-    /// this contract. The status becomes `Executed` only if the vote passed and the
-    /// invocation succeeded; otherwise it becomes `Failed`.
+    /// If the proposal is in `Queued` state, it can be executed after its timelock
+    /// has elapsed. If the proposal is in `Active` state, quorum and majority are
+    /// evaluated first; failing votes mark the proposal `Failed`, while passing votes
+    /// execute the payload. The status becomes `Executed` only if invocation succeeded.
     pub fn execute_proposal(env: Env, proposal_id: u64) -> Result<ProposalStatus, Error> {
         require_initialized(&env)?;
-
-        let queue_key = DataKey::QueuedProposal(proposal_id);
-        let queued: QueuedProposal = env
-            .storage()
-            .persistent()
-            .get(&queue_key)
-            .ok_or(Error::NotFound)?;
-
-        let now = env.ledger().timestamp();
-        if now < queued.can_execute_at {
-            return Err(Error::VotingPeriodActive);
-        }
 
         let prop_key = DataKey::Proposal(proposal_id);
         let mut proposal: Proposal = env
@@ -783,8 +772,59 @@ impl AgentGovernanceContract {
             .get(&prop_key)
             .ok_or(Error::NotFound)?;
 
-        if proposal.status != ProposalStatus::Queued {
+        if proposal.status == ProposalStatus::Executed || proposal.status == ProposalStatus::Failed {
             return Err(Error::ProposalFinalized);
+        }
+
+        let now = env.ledger().timestamp();
+        let queue_key = DataKey::QueuedProposal(proposal_id);
+
+        if proposal.status == ProposalStatus::Queued {
+            if let Some(queued) = env.storage().persistent().get::<_, QueuedProposal>(&queue_key) {
+                if now < queued.can_execute_at {
+                    return Err(Error::VotingPeriodActive);
+                }
+                env.storage().persistent().remove(&queue_key);
+            }
+        } else if proposal.status == ProposalStatus::Active {
+            if now < proposal.voting_ends_at {
+                return Err(Error::VotingPeriodActive);
+            }
+
+            let cast_power = proposal
+                .for_power
+                .saturating_add(proposal.against_power)
+                .saturating_add(proposal.abstain_power);
+            let decisive_power = proposal.for_power.saturating_add(proposal.against_power);
+
+            let quorum_met = proposal.total_power_snapshot > 0
+                && cast_power.saturating_mul(BPS_DENOMINATOR)
+                    >= proposal.total_power_snapshot.saturating_mul(QUORUM_BPS);
+
+            let majority_met = decisive_power > 0
+                && proposal.for_power.saturating_mul(BPS_DENOMINATOR)
+                    > decisive_power.saturating_mul(MAJORITY_BPS);
+
+            let vote_passed = quorum_met && majority_met;
+
+            if !vote_passed {
+                proposal.status = ProposalStatus::Failed;
+                env.storage().persistent().set(&prop_key, &proposal);
+                extend_ttl_for_key(&env, &prop_key);
+                env.events().publish(
+                    (symbol_short!("gov"), symbol_short!("failed")),
+                    ProposalFailedEvent {
+                        id: proposal_id,
+                        quorum_met,
+                        majority_met,
+                        execution_failed: false,
+                        for_power: proposal.for_power,
+                        against_power: proposal.against_power,
+                        abstain_power: proposal.abstain_power,
+                    },
+                );
+                return Ok(ProposalStatus::Failed);
+            }
         }
 
         let mut execution_failed = false;
@@ -810,8 +850,6 @@ impl AgentGovernanceContract {
         };
         env.storage().persistent().set(&prop_key, &proposal);
         extend_ttl_for_key(&env, &prop_key);
-
-        env.storage().persistent().remove(&queue_key);
 
         if passed {
             env.events().publish(

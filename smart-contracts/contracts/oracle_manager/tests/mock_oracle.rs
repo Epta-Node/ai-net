@@ -432,3 +432,139 @@ fn paused_manager_rejects_resolution_even_with_live_feed() {
     fx.mgr.unpause();
     assert_eq!(fx.mgr.resolve_price(&fx.pair).price, 10);
 }
+
+// ── integration tests (Issue #949) ──────────────────────────────────────────
+
+#[test]
+fn test_full_flow_register_oracle_update_price_read_price() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_700_000_000);
+
+    // 1. Deploy contracts
+    let mgr_id = env.register(OracleManagerContract, ());
+    let mgr = OracleManagerContractClient::new(&env, &mgr_id);
+    let admin = Address::generate(&env);
+    mgr.initialize(&admin, &None);
+
+    let pair = Symbol::new(&env, "XLM_USD");
+
+    // Initially without oracle, resolve_price fails
+    assert_eq!(contract_err(mgr.try_resolve_price(&pair)), Error::NoPriceAvailable);
+
+    // 2. Register oracle
+    let feed_id = env.register(MockOracle, ());
+    let feed = MockOracleClient::new(&env, &feed_id);
+    mgr.set_oracle(&Some(feed_id.clone()));
+    assert_eq!(mgr.get_oracle(), Some(feed_id));
+
+    // 3. Update price in oracle
+    feed.set_feed(&pair, &Feed::Price(50_000_000));
+
+    // 4. Read price from oracle manager
+    let resolved = mgr.resolve_price(&pair);
+    assert_eq!(resolved.price, 50_000_000);
+    assert_eq!(resolved.source, PriceSource::Oracle);
+    assert_eq!(resolved.pair, pair);
+
+    // Update price again
+    feed.set_feed(&pair, &Feed::Price(55_000_000));
+    let resolved2 = mgr.resolve_price(&pair);
+    assert_eq!(resolved2.price, 55_000_000);
+    assert_eq!(resolved2.source, PriceSource::Oracle);
+}
+
+#[test]
+fn test_stale_price_detection() {
+    let fx = setup();
+    fx.feed(Feed::Price(100));
+    assert_eq!(fx.mgr.resolve_price(&fx.pair).price, 100);
+
+    // Mock returns PriceStale error (code 5)
+    fx.feed(Feed::Fail(5));
+
+    // Without fallback, detects stale price and returns PriceStale error
+    assert_eq!(
+        contract_err(fx.mgr.try_resolve_price(&fx.pair)),
+        Error::PriceStale
+    );
+
+    // Emits OracleFailureEvent with error code 5
+    let failures = fx.failure_events();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].error_code, 5);
+    assert_eq!(failures[0].pair, fx.pair);
+
+    // With fallback, stale price is detected and fallback price is safely used
+    fx.mgr.set_fallback_price(&fx.pair, &75);
+    let resolved = fx.mgr.resolve_price(&fx.pair);
+    assert_eq!(resolved.price, 75);
+    assert_eq!(resolved.source, PriceSource::Fallback);
+}
+
+#[test]
+fn test_oracle_removal() {
+    let fx = setup();
+    fx.feed(Feed::Price(100));
+    assert_eq!(fx.mgr.get_oracle(), Some(fx.feed.address.clone()));
+    assert_eq!(fx.mgr.resolve_price(&fx.pair).price, 100);
+
+    // Remove oracle
+    fx.mgr.set_oracle(&None);
+    assert_eq!(fx.mgr.get_oracle(), None);
+
+    // Resolution fails when no oracle and no fallback
+    assert_eq!(
+        contract_err(fx.mgr.try_resolve_price(&fx.pair)),
+        Error::NoPriceAvailable
+    );
+
+    // Add fallback and resolve succeeds with fallback
+    fx.mgr.set_fallback_price(&fx.pair, &42);
+    let resolved = fx.mgr.resolve_price(&fx.pair);
+    assert_eq!(resolved.price, 42);
+    assert_eq!(resolved.source, PriceSource::Fallback);
+
+    // Re-register oracle and live feed takes precedence again
+    fx.mgr.set_oracle(&Some(fx.feed.address.clone()));
+    assert_eq!(fx.mgr.resolve_price(&fx.pair).price, 100);
+    assert_eq!(fx.mgr.resolve_price(&fx.pair).source, PriceSource::Oracle);
+}
+
+#[test]
+fn test_multiple_oracles_providing_same_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1_700_000_000);
+
+    let mgr_id = env.register(OracleManagerContract, ());
+    let mgr = OracleManagerContractClient::new(&env, &mgr_id);
+    let admin = Address::generate(&env);
+    mgr.initialize(&admin, &None);
+
+    let pair = Symbol::new(&env, "XLM_USD");
+
+    // Deploy Oracle A providing XLM_USD = 100
+    let oracle_a_id = env.register(MockOracle, ());
+    let oracle_a = MockOracleClient::new(&env, &oracle_a_id);
+    oracle_a.set_feed(&pair, &Feed::Price(100));
+
+    // Deploy Oracle B providing XLM_USD = 105
+    let oracle_b_id = env.register(MockOracle, ());
+    let oracle_b = MockOracleClient::new(&env, &oracle_b_id);
+    oracle_b.set_feed(&pair, &Feed::Price(105));
+
+    // Switch to Oracle A
+    mgr.set_oracle(&Some(oracle_a_id.clone()));
+    assert_eq!(mgr.get_oracle(), Some(oracle_a_id));
+    let res_a = mgr.resolve_price(&pair);
+    assert_eq!(res_a.price, 100);
+    assert_eq!(res_a.source, PriceSource::Oracle);
+
+    // Switch to Oracle B
+    mgr.set_oracle(&Some(oracle_b_id.clone()));
+    assert_eq!(mgr.get_oracle(), Some(oracle_b_id));
+    let res_b = mgr.resolve_price(&pair);
+    assert_eq!(res_b.price, 105);
+    assert_eq!(res_b.source, PriceSource::Oracle);
+}

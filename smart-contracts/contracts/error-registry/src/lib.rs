@@ -54,9 +54,8 @@ pub enum Error {
 #[contract]
 pub struct ErrorRegistryContract;
 
-fn require_admin(env: &Env) -> Result<Address, Error> {
-    let admin: Address = env
-        .storage()
+fn read_admin(env: &Env) -> Result<Address, Error> {
+    env.storage()
         .instance()
         .get(&DataKey::Admin)
         .ok_or(Error::NotInitialized)
@@ -374,6 +373,48 @@ impl ErrorRegistryContract {
 
     pub fn count_active_by_code(env: Env, error_code: u32) -> u32 {
         Self::get_errors_by_code(env, error_code).len()
+    }
+
+    /// Return all active error records submitted by `agent_id`.
+    pub fn get_errors_by_agent(env: Env, agent_id: Symbol) -> Vec<ErrorRecord> {
+        let now = env.ledger().timestamp();
+        let all_ids: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AllErrorIds)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut records = Vec::new(&env);
+        for id in all_ids.iter() {
+            if let Some(record) = env.storage().persistent().get(&DataKey::Record(id)) {
+                if is_active(now, &record) && record.agent_id == agent_id {
+                    records.push_back(record);
+                }
+            }
+        }
+        records
+    }
+
+    /// Return a map from error code to count of active errors under that code.
+    pub fn get_error_stats(env: Env) -> Map<u32, u32> {
+        let now = env.ledger().timestamp();
+        let all_ids: Vec<BytesN<32>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AllErrorIds)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut stats: Map<u32, u32> = Map::new(&env);
+        for id in all_ids.iter() {
+            if let Some(record) = env.storage().persistent().get(&DataKey::Record(id)) {
+                if is_active(now, &record) {
+                    let code = record.error_code;
+                    let count = stats.get(code).unwrap_or(0);
+                    stats.set(code, count + 1);
+                }
+            }
+        }
+        stats
     }
 
     pub fn cleanup_expired_errors(env: Env, max_batch: u32) -> CleanupStats {
