@@ -1008,7 +1008,7 @@ fn ttl_management_preserves_expiry_boundary_for_all_retention_days() {
     for days in 0..=DEFAULT_TTL_DAYS {
         let f = fixture();
         let id = task_id(&f, (days + 1) as u8);
-        create_task(&f, &id);
+        create(&f, &id, &f.submitter, 1_000);
 
         f.env.ledger().with_mut(|ledger| {
             ledger.timestamp += u64::from(days) * SECONDS_PER_DAY;
