@@ -37,6 +37,40 @@ pub enum DataKey {
     OracleAddress,
     /// Admin-set fallback price per asset pair (Persistent storage).
     FallbackPrice(Symbol),
+    /// Set of oracle addresses allowed to call `update_price`
+    /// (Instance storage, `Map<Address, ()>`).
+    AuthorizedOracles,
+    /// Latest price pushed by an authorized oracle per pair (Persistent storage).
+    OraclePrice(Symbol),
+}
+
+/// A price pushed by an authorized oracle through `update_price`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReportedPrice {
+    /// Price in stroops (always > 0).
+    pub price: i128,
+    /// Ledger timestamp at which the price was recorded.
+    pub timestamp: u64,
+    /// The authorized oracle that reported it.
+    pub oracle: Address,
+}
+
+/// Event emitted when an oracle is added to or removed from the authorized set.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OracleAuthChangedEvent {
+    pub oracle: Address,
+    pub authorized: bool,
+}
+
+/// Event emitted when an authorized oracle pushes a price.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PriceUpdatedEvent {
+    pub pair: Symbol,
+    pub price: i128,
+    pub oracle: Address,
 }
 
 /// Event emitted when admin is transferred.

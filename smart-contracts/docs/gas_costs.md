@@ -41,9 +41,15 @@ finalizing two revealed bids 282,930 CU.
 
 | Operation | Single estimate | Batched estimate | Cost drivers |
 |---|---:|---:|---|
-| `dispute` (`file_dispute`) | 85,000 CU for five jurors | `45,000 + 8,000 Ã— juror_count` CU, capped at five jurors | Active juror instance read, bounded juror selection, dispute record write, and event. |
+| `dispute` (`file_dispute`) | 338,250 CU for five jurors | `335,000 + 650 × juror_count` CU, capped at `MAX_VOTERS` (50) | Cross-contract bond lock in `agent_registry`, active juror instance read, dispute record write (juror list copied in), evidence counter write, and two events. |
 
-Measured native test cost with five jurors: 86,316 CU.
+Measured native costs (`tests/gas.rs`, five jurors, three arbiters):
+
+| Baseline key | Entrypoint measured | Instructions | Memory bytes |
+|---|---|---:|---:|
+| `dispute_resolution::create_dispute` | `file_dispute` | 364,733 | 82,859 |
+| `dispute_resolution::resolve_dispute` | `resolve` (3-2 vote for the filer, provisional ruling) | 237,244 | 38,441 |
+| `dispute_resolution::slash_agent` | binding `vote_as_arbiter` (2-of-3 for the filer; slashes 50% of the bond via `agent_registry::slash_bond_from_dispute`) | 647,082 | 142,225 |
 
 ## Agent Marketplace
 
@@ -112,6 +118,7 @@ Covered entrypoints:
 - **agent_bidding** — `create_auction`, `submit_bid`, `reveal_bid`
 - **agent_marketplace** — `list_service`, `book_agent`, `complete_booking`
 - **task_store** — `store_task_metadata`, `get_task_metadata`, `update_task_status`, `create_task`
+- **dispute_resolution** — `create_dispute` (`file_dispute`), `resolve_dispute` (`resolve`), `slash_agent` (binding `vote_as_arbiter`)
 
 Each test calls `gas::reset(&env)` immediately before the entrypoint and
 `gas::assert_snapshot(&env, contract, entrypoint)` immediately after. Setup

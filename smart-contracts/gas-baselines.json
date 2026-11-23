@@ -38,6 +38,18 @@
       "instructions": 489669,
       "memory_bytes": 88179
     },
+    "dispute_resolution::create_dispute": {
+      "instructions": 364733,
+      "memory_bytes": 82859
+    },
+    "dispute_resolution::resolve_dispute": {
+      "instructions": 237244,
+      "memory_bytes": 38441
+    },
+    "dispute_resolution::slash_agent": {
+      "instructions": 647082,
+      "memory_bytes": 142225
+    },
     "task_store::create_task": {
       "instructions": 234429,
       "memory_bytes": 38508
