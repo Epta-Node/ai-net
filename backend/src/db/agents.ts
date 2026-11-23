@@ -19,7 +19,8 @@ function toAgentRecord(row: any): AgentRecord {
     pricingXLM: row.pricingXLM,
     endpoint: row.endpoint,
     stellarPublicKey: row.stellarPublicKey,
-    reputationScore: row.reputationScore,
+    reputationScore: Number(row.reputation_score ?? row.reputationScore ?? 0),
+    reputationUpdatedAt: row.reputation_updated_at ?? undefined,
     lastSeenAt: row.lastSeenAt,
     status: row.status,
     bondAmountXLM: row.bondAmountXLM,
@@ -36,6 +37,7 @@ export interface AgentRecord {
   endpoint: string;
   stellarPublicKey: string;
   reputationScore: number;
+  reputationUpdatedAt?: string;
   lastSeenAt: string;
   status: 'online' | 'offline';
   bondAmountXLM?: number;
@@ -92,6 +94,8 @@ export function ensureAgentTable(db: Database.Database): void {
       endpoint         TEXT NOT NULL,
       stellarPublicKey TEXT NOT NULL,
       reputationScore  REAL NOT NULL DEFAULT 2.5,
+      reputation_score REAL NOT NULL DEFAULT 2.5,
+      reputation_updated_at TIMESTAMP,
       lastSeenAt       TEXT NOT NULL,
       status           TEXT NOT NULL DEFAULT 'online',
       bondAmountXLM    REAL NOT NULL DEFAULT 0,
@@ -108,6 +112,8 @@ export function ensureAgentTable(db: Database.Database): void {
     "ALTER TABLE agents ADD COLUMN lastActiveAt TEXT",
     // Watchdog grace-period clock (Issue #379).
     "ALTER TABLE agents ADD COLUMN staleSince TEXT",
+    "ALTER TABLE agents ADD COLUMN reputation_score REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE agents ADD COLUMN reputation_updated_at TIMESTAMP",
   ];
   for (const sql of migrations) {
     try {
@@ -270,12 +276,21 @@ export function createAgentDb(db: Database.Database): AgentDb {
   const cached = _agentDbCache.get(db);
   if (cached) return cached;
 
+  const nextReputation = (id: string, delta: number): number => {
+    const row = db
+      .prepare("SELECT reputation_score, reputationScore FROM agents WHERE id = ?")
+      .get(id) as { reputation_score?: number; reputationScore?: number } | undefined;
+    const current = Number(row?.reputation_score ?? row?.reputationScore ?? 2.5);
+    return Math.max(0.0, Math.min(5.0, current + delta));
+  };
+
   const agentDb: AgentDb = {
     upsert(agent: AgentRecord): void {
       const rep = agent.reputationScore !== undefined ? Math.max(0.0, Math.min(5.0, agent.reputationScore)) : 2.5;
+      const reputationUpdatedAt = agent.reputationUpdatedAt ?? new Date().toISOString();
       db.prepare(`
-        INSERT INTO agents (id, capabilities, pricingXLM, endpoint, stellarPublicKey, reputationScore, lastSeenAt, status, bondAmountXLM, tasksCompleted, tasksFailed, lastActiveAt)
-        VALUES (@id, @capabilities, @pricingXLM, @endpoint, @stellarPublicKey, @reputationScore, @lastSeenAt, @status, @bondAmountXLM, @tasksCompleted, @tasksFailed, @lastActiveAt)
+        INSERT INTO agents (id, capabilities, pricingXLM, endpoint, stellarPublicKey, reputationScore, reputation_score, reputation_updated_at, lastSeenAt, status, bondAmountXLM, tasksCompleted, tasksFailed, lastActiveAt)
+        VALUES (@id, @capabilities, @pricingXLM, @endpoint, @stellarPublicKey, @reputationScore, @reputationScore, @reputationUpdatedAt, @lastSeenAt, @status, @bondAmountXLM, @tasksCompleted, @tasksFailed, @lastActiveAt)
         ON CONFLICT(id) DO UPDATE SET
           capabilities = excluded.capabilities,
           pricingXLM = excluded.pricingXLM,
@@ -292,6 +307,7 @@ export function createAgentDb(db: Database.Database): AgentDb {
         capabilities: JSON.stringify(agent.capabilities),
         status: agent.status ?? 'offline',
         reputationScore: rep,
+        reputationUpdatedAt,
         bondAmountXLM: agent.bondAmountXLM ?? 0,
         tasksCompleted: agent.tasksCompleted ?? 0,
         tasksFailed: agent.tasksFailed ?? 0,
@@ -306,7 +322,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
         ...row,
         capabilities: safeJsonArray(row.capabilities, "agents.findById", row.id),
         status: row.status ?? 'offline',
-        reputationScore: Number(row.reputationScore ?? 2.5),
+        reputationScore: Number(row.reputation_score ?? row.reputationScore ?? 2.5),
+        reputationUpdatedAt: row.reputation_updated_at ?? undefined,
         bondAmountXLM: Number(row.bondAmountXLM ?? 0),
         tasksCompleted: Number(row.tasksCompleted ?? 0),
         tasksFailed: Number(row.tasksFailed ?? 0),
@@ -328,7 +345,7 @@ export function createAgentDb(db: Database.Database): AgentDb {
       const params: unknown[] = [];
 
       if (options.minReputation !== undefined) {
-        conditions.push("reputationScore >= ?");
+        conditions.push("reputation_score >= ?");
         params.push(options.minReputation);
       }
       if (options.maxPriceXLM !== undefined) {
@@ -369,7 +386,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
       const rows = db
         .prepare(
           `SELECT id, capabilities, pricingXLM, endpoint, stellarPublicKey,
-                  reputationScore, lastSeenAt, status, bondAmountXLM,
+                  reputationScore, reputation_score, reputation_updated_at,
+                  lastSeenAt, status, bondAmountXLM,
                   tasksCompleted, tasksFailed, lastActiveAt FROM agents
            WHERE ${whereClause} ${cursorCondition}
            ORDER BY lastSeenAt DESC, id DESC
@@ -384,7 +402,8 @@ export function createAgentDb(db: Database.Database): AgentDb {
         ...row,
         capabilities: safeJsonArray(row.capabilities, "agents.listCursor", row.id),
         status: row.status ?? 'offline',
-        reputationScore: Number(row.reputationScore ?? 2.5),
+        reputationScore: Number(row.reputation_score ?? row.reputationScore ?? 2.5),
+        reputationUpdatedAt: row.reputation_updated_at ?? undefined,
         bondAmountXLM: Number(row.bondAmountXLM ?? 0),
         tasksCompleted: Number(row.tasksCompleted ?? 0),
         tasksFailed: Number(row.tasksFailed ?? 0),
@@ -404,41 +423,51 @@ export function createAgentDb(db: Database.Database): AgentDb {
     },
 
     updateReputation(id: string, delta: number): void {
+      const rep = nextReputation(id, delta);
       db.prepare(`
         UPDATE agents
-        SET reputationScore = MAX(0.0, MIN(5.0, reputationScore + ?))
+        SET reputationScore = ?,
+            reputation_score = ?,
+            reputation_updated_at = ?
         WHERE id = ?
-      `).run(delta, id);
+      `).run(rep, rep, new Date().toISOString(), id);
     },
 
     updateReputationWithStats(id: string, delta: number, outcome?: 'success' | 'failure'): void {
       const now = new Date().toISOString();
+      const rep = nextReputation(id, delta);
       if (outcome === 'success') {
         db.prepare(`
           UPDATE agents
-          SET reputationScore = MAX(0.0, MIN(5.0, reputationScore + ?)),
+          SET reputationScore = ?,
+              reputation_score = ?,
+              reputation_updated_at = ?,
               tasksCompleted = tasksCompleted + 1,
               lastActiveAt = ?,
               lastSeenAt = ?
           WHERE id = ?
-        `).run(delta, now, now, id);
+        `).run(rep, rep, now, now, now, id);
       } else if (outcome === 'failure') {
         db.prepare(`
           UPDATE agents
-          SET reputationScore = MAX(0.0, MIN(5.0, reputationScore + ?)),
+          SET reputationScore = ?,
+              reputation_score = ?,
+              reputation_updated_at = ?,
               tasksFailed = tasksFailed + 1,
               lastActiveAt = ?,
               lastSeenAt = ?
           WHERE id = ?
-        `).run(delta, now, now, id);
+        `).run(rep, rep, now, now, now, id);
       } else {
         db.prepare(`
           UPDATE agents
-          SET reputationScore = MAX(0.0, MIN(5.0, reputationScore + ?)),
+          SET reputationScore = ?,
+              reputation_score = ?,
+              reputation_updated_at = ?,
               lastActiveAt = ?,
               lastSeenAt = ?
           WHERE id = ?
-        `).run(delta, now, now, id);
+        `).run(rep, rep, now, now, now, id);
       }
     },
 

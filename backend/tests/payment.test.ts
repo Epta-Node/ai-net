@@ -1,9 +1,29 @@
 
 import { xlmToStroops, stroopsToXlm, PaymentAlreadyReleasedError, HorizonUnavailableError } from "../src/payment/utils";
-import { PaymentService } from "../src/payment/payment";
+import {
+  PaymentService,
+  isTransientStellarError,
+  retryDelayMs,
+} from "../src/payment/payment";
 import type { PaymentDb, PaymentRecord, PaymentStatus } from "../src/db/index";
+import { getConfig } from "../src/config";
+import { createLogger } from "../src/utils/logger";
 
 jest.mock("@stellar/stellar-sdk");
+jest.mock("../src/utils/logger", () => ({
+  createLogger: jest.fn((bindings?: { component?: string }) => ({
+    warn: jest.fn(),
+    info: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+    trace: jest.fn(),
+    bindings,
+  })),
+}));
+
+const paymentLogger = (createLogger as jest.Mock).mock.results
+  .map((result) => result.value as { bindings?: { component?: string }; warn: jest.Mock })
+  .find((value) => value?.bindings?.component === "payment") ?? { warn: jest.fn() };
 
 // ─── Stroop / XLM conversion tests ───────────────────────────────────────────
 
@@ -233,4 +253,100 @@ describe("PaymentService retry logic", () => {
     expect(balanceId).toBe("balance-id-abc");
     expect(calls).toBe(3);
   }, 15_000);
+});
+
+const RETRY_ENV_KEYS = [
+  "STELLAR_PAYMENT_MAX_RETRIES",
+  "STELLAR_PAYMENT_RETRY_BASE_MS",
+  "STELLAR_PAYMENT_RETRY_MAX_MS",
+];
+const originalRetryEnv = Object.fromEntries(RETRY_ENV_KEYS.map((key) => [key, process.env[key]]));
+
+function setRetryEnv(maxRetries: string, baseMs: string, maxMs: string): void {
+  process.env.STELLAR_PAYMENT_MAX_RETRIES = maxRetries;
+  process.env.STELLAR_PAYMENT_RETRY_BASE_MS = baseMs;
+  process.env.STELLAR_PAYMENT_RETRY_MAX_MS = maxMs;
+}
+
+describe("Stellar payment retry policy (#898)", () => {
+  beforeEach(() => { jest.clearAllMocks(); });
+
+  afterEach(() => {
+    for (const key of RETRY_ENV_KEYS) {
+      const value = originalRetryEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("defaults to three retries", () => {
+    expect(getConfig().STELLAR_PAYMENT_MAX_RETRIES).toBe(3);
+  });
+
+  it("honours the configured retry count and logs every retry", async () => {
+    setRetryEnv("1", "1", "2");
+    const server = {
+      loadAccount: jest.fn().mockRejectedValue({ name: "NetworkError", code: "ECONNRESET" }),
+      submitTransaction: jest.fn(),
+    };
+    (StellarSdk.Server as jest.Mock).mockImplementationOnce(() => server);
+
+    const svc = new PaymentService(makeDb());
+    const kp = StellarSdk.Keypair.fromSecret("SABC");
+
+    await expect(svc.lock("t1", "n1", kp, "GAGENT", 1)).rejects.toThrow(
+      HorizonUnavailableError
+    );
+    expect(server.loadAccount).toHaveBeenCalledTimes(2);
+    expect(paymentLogger.warn).toHaveBeenCalledTimes(1);
+    expect(paymentLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "loadAccount",
+        attempt: 1,
+        maxRetries: 1,
+        delayMs: 1,
+      }),
+      "transient Stellar Horizon failure; retrying"
+    );
+  });
+
+  it("does not retry validation failures", async () => {
+    setRetryEnv("3", "1", "2");
+    const failure = { name: "BadRequestError", message: "timeout" };
+    const server = {
+      loadAccount: jest.fn().mockRejectedValue(failure),
+      submitTransaction: jest.fn(),
+    };
+    (StellarSdk.Server as jest.Mock).mockImplementationOnce(() => server);
+
+    const svc = new PaymentService(makeDb());
+    const kp = StellarSdk.Keypair.fromSecret("SABC");
+
+    await expect(svc.lock("t1", "n1", kp, "GAGENT", 1)).rejects.toBe(failure);
+    expect(server.loadAccount).toHaveBeenCalledTimes(1);
+    expect(paymentLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ code: "ECONNRESET" }, true],
+    [{ response: { status: 429 } }, true],
+    [{ response: { data: { status: 503 } } }, true],
+    [{ message: "Network Error" }, true],
+    [{ message: "TOO_MANY_REQUESTS" }, true],
+    [{ response: { data: { extras: { result_codes: { transaction: "tx_too_late" } } } } }, true],
+    [{ name: "BadRequestError", message: "timeout" }, false],
+    [{ name: "NotFoundError", response: { status: 404 } }, false],
+    [{ response: { status: 400 } }, false],
+    [{ response: { data: { extras: { result_codes: { transaction: "tx_failed" } } } } }, false],
+    [{ message: "invalid amount" }, false],
+  ])("classifies %j as transient=%s", (error, expected) => {
+    expect(isTransientStellarError(error)).toBe(expected);
+  });
+
+  it("uses capped exponential backoff", () => {
+    expect(retryDelayMs(1, 100, 1000)).toBe(100);
+    expect(retryDelayMs(2, 100, 1000)).toBe(200);
+    expect(retryDelayMs(3, 100, 1000)).toBe(400);
+    expect(retryDelayMs(10, 100, 1000)).toBe(1000);
+  });
 });
