@@ -10,12 +10,12 @@ The suite lives at `frontend/tests/visual/` and is driven by its own config, `fr
 
 Covered surfaces, each captured in `light` and `dark`:
 
-| Surface | Route | Auth state |
-|---|---|---|
-| Landing page | `/` | Unauthenticated |
-| Dashboard | `/dashboard` | Wallet connected (mocked) |
-| Task detail | `/tasks/:id` | Wallet connected (mocked), mock WebSocket stream |
-| Wallet | `/wallet` | Unauthenticated (connect form) |
+| Surface      | Route        | Auth state                                       |
+| ------------ | ------------ | ------------------------------------------------ |
+| Landing page | `/`          | Unauthenticated                                  |
+| Dashboard    | `/dashboard` | Wallet connected (mocked)                        |
+| Task detail  | `/tasks/:id` | Wallet connected (mocked), mock WebSocket stream |
+| Wallet       | `/wallet`    | Unauthenticated (connect form)                   |
 
 The dashboard and task-detail tests seed `localStorage` (`wallet_pubkey`, `walletAddress`, `wallet_connection_method`) before the app boots so `ProtectedRoute` renders the real page instead of redirecting. The task-detail test also starts a local WebSocket listener on port 3001 (mirroring `tests/e2e/task-monitoring.spec.ts`) so the connection-status chip settles on "connected" instead of cycling through reconnect/backoff states.
 
@@ -31,6 +31,22 @@ Two sources of nondeterminism are handled explicitly:
 ---
 
 ## Running locally
+
+### First-time setup
+
+Install the frontend dependencies and the browser binary used by the visual
+configuration before running the suite:
+
+```bash
+cd frontend
+npm ci
+npx playwright install chromium
+```
+
+The visual suite is intentionally isolated from functional browser tests. It
+uses the same Chromium version and Linux rendering image as CI, deterministic
+MSW fixtures, and reduced motion. Keep those three inputs unchanged when
+reviewing a screenshot diff.
 
 ```bash
 cd frontend
@@ -66,6 +82,17 @@ The allowed difference is `expect.toHaveScreenshot.maxDiffPixelRatio` in `fronte
 ---
 
 ## CI reporting
+
+The CI job is a documentation-backed review gate: a failing diff should be
+investigated, even though the job currently uses `continue-on-error` so a
+visual baseline can be reviewed before it blocks unrelated contributors. To
+reproduce CI exactly from the repository root:
+
+```bash
+docker run --rm -v "$PWD:/work" -w /work/frontend \
+  -e TZ=UTC mcr.microsoft.com/playwright:v1.61.0-jammy \
+  bash -c "npm ci && npm run test:visual"
+```
 
 The `frontend-visual-regression` job in `.github/workflows/ci.yml`:
 
