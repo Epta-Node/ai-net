@@ -694,3 +694,58 @@ fn test_proposals_are_stored_per_id() {
         assert!(!f.env.storage().persistent().has(&DataKey::Proposal(id + 1)));
     });
 }
+
+// ─── 10. Gas snapshots (issue #932) ──────────────────────────────────────────
+//
+// Each governance hot path is measured in isolation (`reset` immediately before
+// the call) and compared against `smart-contracts/gas-baselines.json` within the
+// file's tolerance. `propose_upgrade` is the entry point that schedules an
+// upgrade. Record intentional cost changes with:
+//
+//     UPDATE_GAS_BASELINES=1 cargo test -p upgrade-manager --lib gas_snapshot
+
+mod gas_snapshot {
+    use super::*;
+    use contract_test_utils::gas::{assert_snapshot, reset};
+
+    const CONTRACT: &str = "upgrade_manager";
+
+    fn schedule(f: &Fixture) -> u64 {
+        f.client.propose_upgrade(
+            &f.admin1,
+            &String::from_str(&f.env, "2.0.0"),
+            &test_wasm_hash(&f.env, 2),
+            &String::from_str(&f.env, "Major upgrade"),
+            &plan(&f.env, 10),
+        )
+    }
+
+    #[test]
+    fn schedule_upgrade_gas_snapshot() {
+        let f = fixture();
+        reset(&f.env);
+        schedule(&f);
+        assert_snapshot(&f.env, CONTRACT, "propose_upgrade");
+    }
+
+    #[test]
+    fn execute_upgrade_gas_snapshot() {
+        let f = fixture();
+        let (id, _) = propose_and_approve(&f);
+        pass_timelock(&f, id);
+        reset(&f.env);
+        f.client.execute_upgrade(&f.admin1, &id);
+        assert_snapshot(&f.env, CONTRACT, "execute_upgrade");
+    }
+
+    #[test]
+    fn rollback_upgrade_gas_snapshot() {
+        let f = fixture();
+        let (id, _) = propose_and_approve(&f);
+        pass_timelock(&f, id);
+        f.client.execute_upgrade(&f.admin1, &id);
+        reset(&f.env);
+        f.client.rollback_upgrade(&f.admin1, &id);
+        assert_snapshot(&f.env, CONTRACT, "rollback_upgrade");
+    }
+}

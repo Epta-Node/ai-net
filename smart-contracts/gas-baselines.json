@@ -39,20 +39,32 @@
       "memory_bytes": 88179
     },
     "task_store::create_task": {
-      "instructions": 207739,
-      "memory_bytes": 34748
+      "instructions": 234429,
+      "memory_bytes": 38508
     },
     "task_store::get_task_metadata": {
       "instructions": 54438,
       "memory_bytes": 6276
     },
     "task_store::store_task_metadata": {
-      "instructions": 188050,
-      "memory_bytes": 27130
+      "instructions": 214383,
+      "memory_bytes": 30414
     },
     "task_store::update_task_status": {
       "instructions": 187971,
       "memory_bytes": 26283
+    },
+    "upgrade_manager::execute_upgrade": {
+      "instructions": 398518,
+      "memory_bytes": 62285
+    },
+    "upgrade_manager::propose_upgrade": {
+      "instructions": 172629,
+      "memory_bytes": 25386
+    },
+    "upgrade_manager::rollback_upgrade": {
+      "instructions": 299912,
+      "memory_bytes": 46339
     }
   }
 }
