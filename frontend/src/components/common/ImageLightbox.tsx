@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   X,
@@ -8,7 +8,8 @@ import {
   Download,
   ZoomIn,
   ZoomOut,
-  RotateCcw
+  RotateCcw,
+  ImageOff,
 } from 'lucide-react';
 import { LightboxImage } from '../../hooks/useLightbox';
 import styles from './ImageLightbox.module.css';
@@ -50,8 +51,17 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
 }) => {
   const { t } = useTranslation();
   const touchDistanceRef = useRef<number | null>(null);
+  const [mainLoaded, setMainLoaded] = useState(false);
+  const [mainError, setMainError] = useState(false);
+  const [thumbErrors, setThumbErrors] = useState<Record<string, boolean>>({});
 
   const currentImage = images[currentIndex] || null;
+
+  // Reset main-image load/error state whenever the active asset changes.
+  useEffect(() => {
+    setMainLoaded(false);
+    setMainError(false);
+  }, [currentImage?.url, currentIndex]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -245,30 +255,65 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
 
           {/* Draggable & Zoomable Image Wrapper */}
           <div className={styles.imageWrapper}>
-            <motion.img
-              key={currentImage.url}
-              src={currentImage.url}
-              alt={currentImage.alt || currentImage.title || t('a11y.designAsset')}
-              className={styles.lightboxImage}
-              data-testid="lightbox-image"
-              drag={scale > 1}
-              dragConstraints={{ left: -1000, right: 1000, top: -1000, bottom: 1000 }}
-              dragElastic={0.1}
-              animate={{
-                scale: scale,
-                x: scale > 1 ? position.x : 0,
-                y: scale > 1 ? position.y : 0
-              }}
-              onDragEnd={(_, info) => {
-                if (scale > 1 && onPositionChange) {
-                  onPositionChange({
-                    x: position.x + info.offset.x,
-                    y: position.y + info.offset.y
-                  });
-                }
-              }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            />
+            {mainError ? (
+              <div
+                className={styles.imageError}
+                role="img"
+                aria-label={t('a11y.imageLoadFailed', {
+                  defaultValue: 'Image failed to load',
+                })}
+                data-testid="lightbox-image-error"
+              >
+                <ImageOff size={32} aria-hidden="true" />
+                <span>{t('a11y.imageLoadFailed', { defaultValue: 'Image failed to load' })}</span>
+              </div>
+            ) : (
+              <>
+                {!mainLoaded && (
+                  <div
+                    className={styles.imagePlaceholder}
+                    data-testid="lightbox-image-placeholder"
+                    aria-hidden="true"
+                  />
+                )}
+                <motion.img
+                  key={currentImage.url}
+                  src={currentImage.url}
+                  alt={currentImage.alt || currentImage.title || t('a11y.designAsset')}
+                  className={`${styles.lightboxImage} ${
+                    mainLoaded ? styles.lightboxImageLoaded : styles.lightboxImageLoading
+                  }`}
+                  data-testid="lightbox-image"
+                  loading="lazy"
+                  decoding="async"
+                  drag={scale > 1}
+                  dragConstraints={{ left: -1000, right: 1000, top: -1000, bottom: 1000 }}
+                  dragElastic={0.1}
+                  animate={{
+                    scale: scale,
+                    x: scale > 1 ? position.x : 0,
+                    y: scale > 1 ? position.y : 0,
+                  }}
+                  onLoad={() => {
+                    setMainLoaded(true);
+                    setMainError(false);
+                  }}
+                  onError={() => {
+                    setMainError(true);
+                    setMainLoaded(false);
+                  }}
+                  onDragEnd={(_, info) => {
+                    if (scale > 1 && onPositionChange) {
+                      onPositionChange({
+                        x: position.x + info.offset.x,
+                        y: position.y + info.offset.y,
+                      });
+                    }
+                  }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                />
+              </>
+            )}
           </div>
 
           {/* Navigation Chevron Right */}
@@ -290,16 +335,43 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
         {/* Thumbnails Bar (for multi-image outputs) */}
         {images.length > 1 && (
           <div className={styles.thumbnailsBar} data-testid="thumbnails-bar">
-            {images.map((img, idx) => (
-              <div
-                key={`${img.url}-${idx}`}
-                className={`${styles.thumbItem} ${idx === currentIndex ? styles.thumbActive : ''}`}
-                onClick={() => onSelectIndex(idx)}
-                data-testid={`thumb-${idx}`}
-              >
-                <img src={img.url} alt={img.title || t('a11y.thumbnail', { index: idx + 1 })} className={styles.thumbImg} />
-              </div>
-            ))}
+            {images.map((img, idx) => {
+              const thumbKey = `${img.url}-${idx}`;
+              const thumbFailed = Boolean(thumbErrors[thumbKey]);
+              return (
+                <div
+                  key={thumbKey}
+                  className={`${styles.thumbItem} ${idx === currentIndex ? styles.thumbActive : ''}`}
+                  onClick={() => onSelectIndex(idx)}
+                  data-testid={`thumb-${idx}`}
+                >
+                  {thumbFailed ? (
+                    <div
+                      className={styles.thumbError}
+                      data-testid={`thumb-error-${idx}`}
+                      aria-label={t('a11y.imageLoadFailed', {
+                        defaultValue: 'Image failed to load',
+                      })}
+                      role="img"
+                    >
+                      <ImageOff size={16} aria-hidden="true" />
+                    </div>
+                  ) : (
+                    <img
+                      src={img.url}
+                      alt={img.title || t('a11y.thumbnail', { index: idx + 1 })}
+                      className={styles.thumbImg}
+                      loading="lazy"
+                      decoding="async"
+                      data-testid={`thumb-img-${idx}`}
+                      onError={() =>
+                        setThumbErrors((prev) => ({ ...prev, [thumbKey]: true }))
+                      }
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </motion.div>
