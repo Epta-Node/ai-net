@@ -560,4 +560,19 @@ mod test {
         assert!(f.client.try_pause().is_err());
         assert!(f.client.try_unpause().is_err());
     }
+    #[test]
+    fn stale_price_is_rejected_after_configured_max_age() {
+        let f = fixture();
+        init(&f);
+        submit(&f, 1_000_000, 1_700_000_000);
+
+        f.env.ledger().with_mut(|ledger| ledger.timestamp += 3_601);
+        assert_eq!(f.client.try_get_price(&f.pair), Err(Ok(Error::PriceStale)));
+
+        f.env.ledger().with_mut(|ledger| ledger.timestamp -= 2);
+        let result = f.client.get_price(&f.pair);
+        assert_eq!(result.price, 1_000_000);
+        assert_eq!(result.timestamp, 1_700_000_000);
+    }
+
 }
