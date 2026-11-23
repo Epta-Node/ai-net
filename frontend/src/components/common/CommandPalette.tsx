@@ -162,12 +162,37 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         e.preventDefault();
         setSelectedIndex((i) => (i - 1 + filtered.length) % filtered.length);
         break;
+      case 'Home':
+        e.preventDefault();
+        setSelectedIndex(0);
+        break;
+      case 'End':
+        e.preventDefault();
+        setSelectedIndex(filtered.length - 1);
+        break;
+      case 'PageDown':
+        e.preventDefault();
+        setSelectedIndex((i) => Math.min(filtered.length - 1, i + 5));
+        break;
+      case 'PageUp':
+        e.preventDefault();
+        setSelectedIndex((i) => Math.max(0, i - 5));
+        break;
       case 'Enter':
         e.preventDefault();
         executeCommand(filtered[safeIndex]);
         break;
     }
   };
+
+  // Keep the highlighted option visible while navigating long lists.
+  useEffect(() => {
+    if (!isOpen || filtered.length === 0) return;
+    const activeEl = document.getElementById(`command-palette-option-${safeIndex}`);
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }, [safeIndex, isOpen, filtered.length]);
 
   useEffect(() => {
     if (!isOpen) return;
