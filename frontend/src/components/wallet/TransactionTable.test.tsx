@@ -2,12 +2,17 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { TransactionTable } from './TransactionTable'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
+import { transactionsToCSV } from '../../utils/transactionCsv'
 
 // Mock toast hook
 const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }))
 vi.mock('../../context/ToastContext', () => ({
   useToast: () => ({ showToast }),
 }))
+
+// Mock downloadTextFile so tests don't trigger real file downloads
+const { downloadTextFile } = vi.hoisted(() => ({ downloadTextFile: vi.fn() }))
+vi.mock('../../utils/download', () => ({ downloadTextFile }))
 
 // Mock navigator.clipboard
 Object.assign(navigator, {
@@ -104,5 +109,62 @@ describe('TransactionTable', () => {
       expect(navigator.clipboard.writeText).toHaveBeenCalledWith(counterparty)
       expect(showToast).toHaveBeenCalledWith('Address copied to clipboard', 'success')
     })
+  })
+
+  it('exports transactions as CSV with correct content when Export CSV → All time is clicked', async () => {
+    const transactions = [
+      makeTx({
+        txHash: 'txhash-aaa',
+        direction: 'in',
+        amount: '25.5',
+        counterparty: 'GSENDER1234567890ABCDEFGHIJKLMN',
+        memo: 'payment for research',
+        timestamp: '2026-06-01T12:00:00.000Z',
+      }),
+      makeTx({
+        txHash: 'txhash-bbb',
+        direction: 'out',
+        amount: '10',
+        counterparty: 'GRECEIVER9876543210ABCDEFGHIJK',
+        memo: 'coding task',
+        timestamp: '2026-06-02T08:00:00.000Z',
+      }),
+    ]
+
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+
+    // Click the main Export CSV button to open the preset menu
+    fireEvent.click(screen.getByTestId('export-csv-btn'))
+
+    // Click "All time" to export all transactions
+    fireEvent.click(screen.getByRole('menuitem', { name: 'All time' }))
+
+    // The download utility should be called with valid CSV content
+    await waitFor(() => {
+      expect(downloadTextFile).toHaveBeenCalledOnce()
+    })
+
+    const [csvContent, filename, mimeType] = downloadTextFile.mock.calls[0] as [string, string, string]
+
+    // Verify file metadata
+    expect(filename).toMatch(/^transactions-\d{4}-\d{2}-\d{2}\.csv$/)
+    expect(mimeType).toBe('text/csv;charset=utf-8')
+
+    // Verify the CSV structure matches transactionsToCSV output
+    const expected = transactionsToCSV(transactions)
+    expect(csvContent).toBe(expected)
+
+    // Verify the header row is present
+    const lines = csvContent.split('\r\n')
+    expect(lines[0]).toBe('date,type,from_wallet,to_wallet,amount_xlm,task_id,status,stellar_tx_hash')
+
+    // Verify both transaction rows exist in the CSV
+    expect(lines).toHaveLength(3) // header + 2 rows
+    expect(lines[1]).toContain('2026-06-01')
+    expect(lines[1]).toContain('"25.5"')
+    expect(lines[1]).toContain('"payment for research"')
+    expect(lines[2]).toContain('2026-06-02')
+    expect(lines[2]).toContain('"10"')
+    expect(lines[2]).toContain('"coding task"')
   })
 })
