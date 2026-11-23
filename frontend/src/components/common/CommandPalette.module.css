@@ -222,6 +222,13 @@
 
 .resultItem.selected {
   background: var(--accent-surface-muted);
+  box-shadow: inset 3px 0 0 var(--accent-primary, #6366f1);
+  color: var(--text-primary);
+}
+
+.resultItem.selected .resultIcon {
+  color: var(--accent-primary, #6366f1);
+  background: var(--white-alpha-08);
 }
 
 .resultItem:hover {
