@@ -61,7 +61,11 @@ const RegisterAgentSchema = z
       .string()
       .max(MAX_ENDPOINT_LENGTH)
       .url()
-      .refine((value) => /^https?:\/\//i.test(value), "Endpoint must use http or https"),
+      .refine((value) => /^https?:\/\//i.test(value), "Endpoint must use http or https")
+      .refine(
+        (value) => !/[<>"'\x60\s\x00-\x1F\x7F]/.test(value),
+        "Endpoint must not contain HTML, quotes or whitespace",
+      ),
     stellarPublicKey: z.string().regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key format"),
     bondAmountXLM: z.number().nonnegative().optional(),
   })
