@@ -2103,6 +2103,287 @@ mod test {
         assert_eq!(err.err(), Some(Ok(Error::AuctionFull)));
     }
 
+    // ── Bid validation (#928) ────────────────────────────────────────────────
+
+    /// Minimal stand-in for `agent_registry::verify_agent_eligible`. Every id
+    /// is unknown (error 1) unless it was given a status with `set_status`.
+    mod mock_registry {
+        use soroban_sdk::{contract, contracterror, contractimpl, Env, Symbol};
+
+        #[contracterror]
+        #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+        #[repr(u32)]
+        pub enum RegistryError {
+            NotFound = 1,
+            Frozen = 5,
+            InsufficientBond = 10,
+            Unknown = 77,
+            Deregistered = 39,
+        }
+
+        #[contract]
+        pub struct MockRegistry;
+
+        #[contractimpl]
+        impl MockRegistry {
+            /// `0` marks the agent eligible; any other value is returned as
+            /// that registry error code.
+            pub fn set_status(env: Env, agent_id: Symbol, code: u32) {
+                env.storage().instance().set(&agent_id, &code);
+            }
+
+            pub fn verify_agent_eligible(env: Env, agent_id: Symbol) -> Result<(), RegistryError> {
+                match env.storage().instance().get::<_, u32>(&agent_id) {
+                    None => Err(RegistryError::NotFound),
+                    Some(0) => Ok(()),
+                    Some(5) => Err(RegistryError::Frozen),
+                    Some(10) => Err(RegistryError::InsufficientBond),
+                    Some(39) => Err(RegistryError::Deregistered),
+                    Some(_) => Err(RegistryError::Unknown),
+                }
+            }
+        }
+    }
+
+    /// A fresh auction with a funded bidder and that bidder's commitment.
+    fn bid_fixture(
+        task: &str,
+    ) -> (
+        Env,
+        AgentBiddingContractClient<'static>,
+        Symbol,
+        Address,
+        BytesN<32>,
+    ) {
+        let (env, client, _) = setup();
+        let creator = Address::generate(&env);
+        let bidder = Address::generate(&env);
+        let task_id = Symbol::new(&env, task);
+        create_test_auction(&env, &client, &creator, &task_id, BID_SECS);
+        let commitment = client.commitment_of(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &terms(&env, "t"),
+            &salt(&env, 9),
+        );
+        fund(&env, &client, &bidder);
+        (env, client, task_id, bidder, commitment)
+    }
+
+    /// Wire a mock registry in and give `task_id` the registry status `code`.
+    fn with_registry(
+        env: &Env,
+        client: &AgentBiddingContractClient<'_>,
+        task_id: &Symbol,
+        code: Option<u32>,
+    ) {
+        let registry_id = env.register(mock_registry::MockRegistry, ());
+        if let Some(code) = code {
+            mock_registry::MockRegistryClient::new(env, &registry_id).set_status(task_id, &code);
+        }
+        client.set_agent_registry(&registry_id);
+    }
+
+    /// Asserts a rejected bid left no trace: no record, no bidder, no funds moved.
+    fn assert_no_bid_recorded(
+        env: &Env,
+        client: &AgentBiddingContractClient<'_>,
+        task_id: &Symbol,
+        bidder: &Address,
+    ) {
+        assert!(client.get_bid(task_id, bidder).is_none());
+        assert_eq!(client.get_bidder_count(task_id), 0);
+        assert_eq!(client.get_auction(task_id).unwrap().bid_count, 0);
+        assert_eq!(balance(env, client, bidder), FUND);
+    }
+
+    #[test]
+    fn bid_with_valid_parameters_locks_bond_and_records_bid() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("valid_bid");
+        let contract_before = balance(&env, &client, &client.address);
+
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &MAX_REPUTATION);
+
+        let bid = client.get_bid(&task_id, &bidder).unwrap();
+        assert_eq!(bid.commitment, commitment);
+        assert_eq!(bid.bond, BOND);
+        assert_eq!(bid.reputation, MAX_REPUTATION);
+        assert!(!bid.revealed && !bid.refunded && !bid.forfeited);
+        assert_eq!(bid.price_stroops, 0);
+        assert_eq!(client.get_bidder_count(&task_id), 1);
+        assert_eq!(balance(&env, &client, &bidder), FUND - BOND);
+        assert_eq!(
+            balance(&env, &client, &client.address),
+            contract_before + BOND
+        );
+    }
+
+    #[test]
+    fn bid_with_zero_reputation_is_accepted() {
+        let (_env, client, task_id, bidder, commitment) = bid_fixture("zero_rep");
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &0);
+        assert_eq!(client.get_bid(&task_id, &bidder).unwrap().reputation, 0);
+    }
+
+    #[test]
+    fn bid_with_zero_amount_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("zero_amt");
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &0, &50);
+        assert_eq!(err.err(), Some(Ok(Error::InvalidBond)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn bid_with_negative_amount_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("neg_amt");
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &-BOND, &50);
+        assert_eq!(err.err(), Some(Ok(Error::InvalidBond)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn bid_above_required_bond_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("over_bond");
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &(BOND + 1), &50);
+        assert_eq!(err.err(), Some(Ok(Error::InvalidBond)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn bid_on_unknown_auction_is_rejected() {
+        let (env, client, _task_id, bidder, commitment) = bid_fixture("known");
+        let err = client.try_submit_bid(
+            &Symbol::new(&env, "missing"),
+            &bidder,
+            &commitment,
+            &BOND,
+            &50,
+        );
+        assert_eq!(err.err(), Some(Ok(Error::NotFound)));
+    }
+
+    #[test]
+    fn bid_with_unregistered_agent_id_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("unreg");
+        with_registry(&env, &client, &task_id, None);
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        assert_eq!(err.err(), Some(Ok(Error::AgentNotFound)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn bid_with_ineligible_agent_maps_registry_errors() {
+        for (code, expected) in [
+            (5, Error::AgentFrozen),
+            (10, Error::InsufficientBond),
+            (39, Error::AgentDeregistered),
+            (77, Error::AgentNotEligible),
+        ] {
+            let (env, client, task_id, bidder, commitment) = bid_fixture("inelig");
+            with_registry(&env, &client, &task_id, Some(code));
+            let err = client.try_submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+            assert_eq!(err.err(), Some(Ok(expected)), "registry code {code}");
+            assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+        }
+    }
+
+    #[test]
+    fn bid_with_eligible_registered_agent_is_accepted() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("eligible");
+        with_registry(&env, &client, &task_id, Some(0));
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        assert!(client.get_bid(&task_id, &bidder).is_some());
+    }
+
+    #[test]
+    fn bid_exactly_at_deadline_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("at_dl");
+        let deadline = client.get_auction(&task_id).unwrap().deadline;
+        env.ledger().set_timestamp(deadline);
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        assert_eq!(err.err(), Some(Ok(Error::BiddingPeriodEnded)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn bid_one_second_before_deadline_is_accepted() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("pre_dl");
+        let deadline = client.get_auction(&task_id).unwrap().deadline;
+        env.ledger().set_timestamp(deadline - 1);
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        assert!(client.get_bid(&task_id, &bidder).is_some());
+    }
+
+    #[test]
+    fn bid_after_reveal_deadline_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("post_rv");
+        close_reveal_window(&env, &client, &task_id);
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        assert_eq!(err.err(), Some(Ok(Error::BiddingPeriodEnded)));
+        assert_no_bid_recorded(&env, &client, &task_id, &bidder);
+    }
+
+    #[test]
+    fn duplicate_bid_does_not_lock_a_second_bond() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("dup_bond");
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+
+        let err = client.try_submit_bid(&task_id, &bidder, &commitment, &BOND, &60);
+        assert_eq!(err.err(), Some(Ok(Error::BidAlreadyExists)));
+        assert_eq!(client.get_bidder_count(&task_id), 1);
+        assert_eq!(client.get_auction(&task_id).unwrap().bid_count, 1);
+        assert_eq!(client.get_bid(&task_id, &bidder).unwrap().reputation, 50);
+        assert_eq!(balance(&env, &client, &bidder), FUND - BOND);
+    }
+
+    #[test]
+    fn bid_after_winner_selected_is_rejected() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("decided");
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+        enter_reveal_window(&env, &client, &task_id);
+        client.reveal_bid(
+            &task_id,
+            &bidder,
+            &2_000_000,
+            &terms(&env, "t"),
+            &salt(&env, 9),
+        );
+        close_reveal_window(&env, &client, &task_id);
+        client.reveal_bids(&bidder, &task_id);
+
+        let late = Address::generate(&env);
+        fund(&env, &client, &late);
+        let c = client.commitment_of(
+            &task_id,
+            &late,
+            &2_000_000,
+            &terms(&env, "t"),
+            &salt(&env, 9),
+        );
+        let err = client.try_submit_bid(&task_id, &late, &c, &BOND, &50);
+        assert_eq!(err.err(), Some(Ok(Error::NotInBiddingPhase)));
+        assert!(client.get_bid(&task_id, &late).is_none());
+    }
+
+    #[test]
+    fn same_bidder_may_bid_on_different_auctions() {
+        let (env, client, task_id, bidder, commitment) = bid_fixture("auc_one");
+        client.submit_bid(&task_id, &bidder, &commitment, &BOND, &50);
+
+        let other = Symbol::new(&env, "auc_two");
+        create_test_auction(&env, &client, &Address::generate(&env), &other, BID_SECS);
+        let c2 = client.commitment_of(
+            &other,
+            &bidder,
+            &2_000_000,
+            &terms(&env, "t"),
+            &salt(&env, 9),
+        );
+        client.submit_bid(&other, &bidder, &c2, &BOND, &50);
+        assert_eq!(client.get_bidder_count(&other), 1);
+    }
+
     #[test]
     fn reveal_bid_rejects_price_above_cap() {
         let (env, client, _) = setup();
