@@ -189,6 +189,7 @@ export interface CostTotals {
 export interface TaskDb {
   insert(task: Task): void;
   findById(id: string): Task | undefined;
+  findByIdempotencyKey(walletPublicKey: string, idempotencyKey: string): Task | undefined;
   list(
     walletPublicKey: string,
     page: number,
@@ -250,11 +251,12 @@ export function createTaskDb(db: Database.Database): TaskDb {
     insert(task: Task): void {
       db.prepare(
         `
-        INSERT INTO tasks (id, prompt, walletPublicKey, status, dagJson, createdAt, updatedAt)
-        VALUES (@id, @prompt, @walletPublicKey, @status, @dagJson, @createdAt, @updatedAt)
+       INSERT INTO tasks (id, prompt, walletPublicKey, status, dagJson, createdAt, updatedAt, idempotencyKey)
+        VALUES (@id, @prompt, @walletPublicKey, @status, @dagJson, @createdAt, @updatedAt, @idempotencyKey)
       `,
       ).run({
         ...task,
+        idempotencyKey: task.idempotencyKey ?? null,
         dagJson: JSON.stringify(task.dag),
       });
     },
@@ -262,6 +264,25 @@ export function createTaskDb(db: Database.Database): TaskDb {
     findById(id: string): Task | undefined {
       const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as any;
       if (!row) return undefined;
+      return {
+        ...row,
+        dag: JSON.parse(row.dagJson),
+      };
+    },
+
+    findByIdempotencyKey(walletPublicKey: string, idempotencyKey: string): Task | undefined {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const row = db.prepare(
+        `SELECT * FROM tasks
+         WHERE walletPublicKey = ?
+         AND idempotencyKey = ?
+         AND createdAt >= ?
+         ORDER BY createdAt DESC
+         LIMIT 1`,
+      ).get(walletPublicKey, idempotencyKey, cutoff) as any;
+
+      if (!row) return undefined;
+
       return {
         ...row,
         dag: JSON.parse(row.dagJson),
