@@ -415,7 +415,7 @@ const envSchema = z.object({
   /** Ceiling for a single job retry delay, in ms. */
   JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
   /** Attempts before a job is moved to the dead-letter queue. */
-  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;
