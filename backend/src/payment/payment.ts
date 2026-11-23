@@ -19,39 +19,65 @@ import { tracingService } from "../services/tracing";
 import { currentTraceId, toW3cTraceId } from "../services/traceContext";
 import { getConfig, stellarClientOptions } from "../config";
 import { getCircuitBreaker } from "../services/circuitBreaker.js";
+import { createLogger } from "../utils/logger";
 
-const MAX_RETRIES = 5;
+const logger = createLogger({ component: "payment" });
 
-function isRetryable(err: unknown): boolean {
-  const message = (err as { message?: string })?.message ?? "";
-  const extras = (
-    err as {
-      response?: { data?: { extras?: { result_codes?: { transaction?: string } } } };
-    }
-  )?.response?.data?.extras?.result_codes?.transaction ?? "";
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const TRANSIENT_NETWORK_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+]);
+
+interface StellarFailure {
+  name?: string;
+  code?: string;
+  message?: string;
+  status?: number;
+  response?: {
+    status?: number;
+    data?: {
+      status?: number;
+      extras?: { result_codes?: { transaction?: string } };
+    };
+  };
+}
+
+export function isTransientStellarError(err: unknown): boolean {
+  const failure = (err ?? {}) as StellarFailure;
+  const status = Number(
+    failure.status ?? failure.response?.status ?? failure.response?.data?.status ?? 0,
+  );
+  const transactionCode = failure.response?.data?.extras?.result_codes?.transaction ?? "";
+
+  if (
+    failure.name === "NotFoundError" ||
+    failure.name === "BadRequestError" ||
+    failure.name === "AccountRequiresMemoError" ||
+    [400, 401, 403, 404, 422].includes(status)
+  ) {
+    return false;
+  }
+  if (transactionCode === "tx_too_late") return true;
+  if (transactionCode) return false;
+  if (TRANSIENT_NETWORK_CODES.has(failure.code ?? "")) return true;
+  if (TRANSIENT_HTTP_STATUSES.has(status)) return true;
+
+  const message = failure.message ?? "";
   return (
-    message.includes("TIMEOUT") ||
-    message.includes("TOO_MANY_REQUESTS") ||
-    message.includes("504") ||
-    message.includes("429") ||
-    extras === "tx_too_late"
+    /network error|timeout|service unavailable|too[_\s]many[_\s]requests/i.test(message) ||
+    /\b(408|429|500|502|503|504)\b/.test(message)
   );
 }
 
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-  let attempt = 0;
-  for (;;) {
-    try {
-      return await fn();
-    } catch (err) {
-      attempt++;
-      if (!isRetryable(err) || attempt >= MAX_RETRIES) {
-        if (isRetryable(err)) throw new HorizonUnavailableError(MAX_RETRIES);
-        throw err;
-      }
-      await new Promise((r) => setTimeout(r, 200 * 2 ** (attempt - 1)));
-    }
-  }
+export function retryDelayMs(attempt: number, baseMs: number, maxMs: number): number {
+  return Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1));
 }
 
 export interface PaymentServiceHooks {
@@ -65,6 +91,9 @@ export interface PaymentServiceHooks {
 export class PaymentService {
   private server: Server;
   private networkPassphrase: string;
+  private readonly maxRetries: number;
+  private readonly retryBaseMs: number;
+  private readonly retryMaxMs: number;
   private readonly horizonBreaker = getCircuitBreaker({
     name: 'stellar-horizon',
     failureThreshold: 3,
@@ -78,6 +107,31 @@ export class PaymentService {
     const config = getConfig();
     this.server = new Server(config.STELLAR_HORIZON_URL, stellarClientOptions(config));
     this.networkPassphrase = config.STELLAR_NETWORK_PASSPHRASE;
+    this.maxRetries = config.STELLAR_PAYMENT_MAX_RETRIES;
+    this.retryBaseMs = config.STELLAR_PAYMENT_RETRY_BASE_MS;
+    this.retryMaxMs = config.STELLAR_PAYMENT_RETRY_MAX_MS;
+  }
+
+  private async withRetry<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!isTransientStellarError(err)) throw err;
+        if (attempt >= this.maxRetries) {
+          throw new HorizonUnavailableError(this.maxRetries + 1);
+        }
+
+        attempt += 1;
+        const delayMs = retryDelayMs(attempt, this.retryBaseMs, this.retryMaxMs);
+        logger.warn(
+          { err, operation, attempt, maxRetries: this.maxRetries, delayMs },
+          "transient Stellar Horizon failure; retrying"
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
   }
 
   /** Enumerate all local payment records — the reconciliation source of truth. */
@@ -103,7 +157,7 @@ export class PaymentService {
       const amountStr = stroopsToXlm(amountStroops);
 
       const account = await this.horizonBreaker.execute(() =>
-        withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()))
+        this.withRetry("loadAccount", () => this.server.loadAccount(coordinatorKeypair.publicKey()))
       );
 
       const txBuilder = new TransactionBuilder(account, {
@@ -132,7 +186,7 @@ export class PaymentService {
       tx.sign(coordinatorKeypair);
 
       await this.horizonBreaker.execute(() =>
-        withRetry(() => this.server.submitTransaction(tx))
+        this.withRetry("submitTransaction", () => this.server.submitTransaction(tx))
       );
 
       const now = new Date().toISOString();
@@ -177,7 +231,7 @@ export class PaymentService {
 
     try {
       const account = await this.horizonBreaker.execute(() =>
-        withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()))
+        this.withRetry("loadAccount", () => this.server.loadAccount(coordinatorKeypair.publicKey()))
       );
 
       const txBuilder = new TransactionBuilder(account, {
@@ -196,7 +250,7 @@ export class PaymentService {
       tx.sign(coordinatorKeypair);
 
       const result = await this.horizonBreaker.execute(() =>
-        withRetry(() => this.server.submitTransaction(tx))
+        this.withRetry("submitTransaction", () => this.server.submitTransaction(tx))
       );
       const txHash = (result as unknown as { hash: string }).hash;
 
@@ -229,7 +283,7 @@ export class PaymentService {
     }
 
     const account = await this.horizonBreaker.execute(() =>
-      withRetry(() => this.server.loadAccount(coordinatorKeypair.publicKey()))
+      this.withRetry("loadAccount", () => this.server.loadAccount(coordinatorKeypair.publicKey()))
     );
 
     const tx = new TransactionBuilder(account, {
@@ -245,7 +299,7 @@ export class PaymentService {
     tx.sign(coordinatorKeypair);
 
     const result = await this.horizonBreaker.execute(() =>
-      withRetry(() => this.server.submitTransaction(tx))
+      this.withRetry("submitTransaction", () => this.server.submitTransaction(tx))
     );
     const txHash = (result as unknown as { hash: string }).hash;
 

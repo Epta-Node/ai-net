@@ -274,6 +274,80 @@ describe("agent schema initialisation", () => {
   });
 });
 
+describe("agent reputation columns (#910)", () => {
+  it("migration adds both columns with the documented defaults and rolls back", () => {
+    const dir = path.join(__dirname, "migrations", "agents");
+    const up = fs.readFileSync(path.join(dir, "003_agent_reputation.up.sql"), "utf8");
+    const down = fs.readFileSync(path.join(dir, "003_agent_reputation.down.sql"), "utf8");
+    const raw = new Database(":memory:");
+    raw.exec("CREATE TABLE agents (id TEXT PRIMARY KEY, reputationScore REAL NOT NULL DEFAULT 2.5)");
+    raw.prepare("INSERT INTO agents (id, reputationScore) VALUES ('a1', 3.2)").run();
+
+    raw.exec(up);
+    const row = raw.prepare(
+      "SELECT reputation_score, reputation_updated_at FROM agents WHERE id = 'a1'"
+    ).get() as { reputation_score: number; reputation_updated_at: string | null };
+    expect(row.reputation_score).toBeCloseTo(3.2);
+    expect(Object.prototype.hasOwnProperty.call(row, "reputation_updated_at")).toBe(true);
+
+    raw.exec(down);
+    const columns = raw.prepare("PRAGMA table_info(agents)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("reputation_score");
+    expect(columns.map((column) => column.name)).not.toContain("reputation_updated_at");
+  });
+
+  it("upsert writes both reputation columns and the update timestamp", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 1.2 }));
+
+    const row = raw.prepare(
+      "SELECT reputationScore, reputation_score, reputation_updated_at FROM agents WHERE id = 'agent-1'"
+    ).get() as { reputationScore: number; reputation_score: number; reputation_updated_at: string };
+    expect(row.reputationScore).toBeCloseTo(1.2);
+    expect(row.reputation_score).toBeCloseTo(1.2);
+    expect(typeof row.reputation_updated_at).toBe("string");
+  });
+
+  it("reads reputation from the new column", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 0.5 }));
+    raw.prepare(
+      "UPDATE agents SET reputation_score = 4.1, reputation_updated_at = '2026-01-01T00:00:00.000Z' WHERE id = 'agent-1'"
+    ).run();
+
+    expect(db.findById("agent-1")).toMatchObject({
+      reputationScore: 4.1,
+      reputationUpdatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("updateReputation keeps both columns in sync and stamps the time", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 0.5 }));
+    db.updateReputation("agent-1", 0.2);
+
+    const row = raw.prepare(
+      "SELECT reputationScore, reputation_score, reputation_updated_at FROM agents WHERE id = 'agent-1'"
+    ).get() as { reputationScore: number; reputation_score: number; reputation_updated_at: string };
+    expect(row.reputationScore).toBeCloseTo(0.7);
+    expect(row.reputation_score).toBeCloseTo(0.7);
+    expect(typeof row.reputation_updated_at).toBe("string");
+  });
+
+  it("filters by the new reputation column", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ id: "a1", reputationScore: 0.8 }));
+    raw.prepare("UPDATE agents SET reputation_score = 0.2 WHERE id = 'a1'").run();
+    db.upsert(makeAgent({ id: "a2", reputationScore: 0.5 }));
+
+    expect(db.list({ minReputation: 0.5 }).map((agent) => agent.id)).toEqual(["a2"]);
+  });
+});
+
 describe("createAgentDb — deleteOfflineAgents", () => {
   it("deletes old offline agents and returns count", () => {
     const raw = makeDb();
