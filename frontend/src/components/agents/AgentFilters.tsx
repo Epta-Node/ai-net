@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, X, SlidersHorizontal } from 'lucide-react'
 import type { AgentSortOption } from '../../hooks/useAgentRegistry'
 
@@ -14,6 +14,9 @@ interface AgentFiltersProps {
   onReset?: () => void
   className?: string
 }
+
+/** How long typing must pause before the search query is applied (#888). */
+export const SEARCH_DEBOUNCE_MS = 300
 
 const SORT_OPTIONS: Array<{ value: AgentSortOption; label: string }> = [
   { value: 'relevance', label: 'Relevance' },
@@ -34,22 +37,63 @@ export const AgentFilters: React.FC<AgentFiltersProps> = ({
   onReset,
   className = '',
 }) => {
-  // Controlled input with 300ms debounce
+  // The input is controlled by local state so every keystroke shows at once;
+  // only the (expensive) filter update is debounced (#888).
   const [localInput, setLocalInput] = useState(searchQuery)
 
+  // The pending debounce timer lives in a ref, so re-renders never restart or
+  // drop it. The previous effect-based version re-armed the timer on every
+  // parent render (`onSearchChange` is an inline arrow in AgentsPage).
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Always call the latest callback without making it a timer dependency.
+  const onSearchChangeRef = useRef(onSearchChange)
   useEffect(() => {
+    onSearchChangeRef.current = onSearchChange
+  }, [onSearchChange])
+
+  // The last query this component sent up. When the parent echoes it back as
+  // `searchQuery`, the input must not be reset, or keystrokes typed after the
+  // timer fired would be wiped.
+  const lastEmitted = useRef(searchQuery)
+
+  const cancelPendingSearch = useCallback(() => {
+    if (debounceTimer.current !== null) {
+      clearTimeout(debounceTimer.current)
+      debounceTimer.current = null
+    }
+  }, [])
+
+  const emitSearch = useCallback((value: string) => {
+    lastEmitted.current = value
+    onSearchChangeRef.current(value)
+  }, [])
+
+  // Adopt changes that come from outside (Reset, Clear filters, URL edits).
+  useEffect(() => {
+    if (searchQuery === lastEmitted.current) return
+    cancelPendingSearch()
+    lastEmitted.current = searchQuery
     setLocalInput(searchQuery)
-  }, [searchQuery])
+  }, [searchQuery, cancelPendingSearch])
 
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      if (localInput !== searchQuery) {
-        onSearchChange(localInput)
-      }
-    }, 300)
+  // Never fire after unmount.
+  useEffect(() => cancelPendingSearch, [cancelPendingSearch])
 
-    return () => clearTimeout(handler)
-  }, [localInput, searchQuery, onSearchChange])
+  const handleSearchInput = (value: string) => {
+    setLocalInput(value)
+    cancelPendingSearch()
+    debounceTimer.current = setTimeout(() => {
+      debounceTimer.current = null
+      if (value !== lastEmitted.current) emitSearch(value)
+    }, SEARCH_DEBOUNCE_MS)
+  }
+
+  const clearSearch = () => {
+    cancelPendingSearch()
+    setLocalInput('')
+    emitSearch('')
+  }
 
   return (
     <div className={`sticky top-0 z-20 space-y-3 rounded-2xl border border-[var(--border-subtle,#262626)] bg-[var(--surface-sunken,#121212)]/95 p-4 backdrop-blur-md shadow-md ${className}`}>
@@ -66,7 +110,7 @@ export const AgentFilters: React.FC<AgentFiltersProps> = ({
             id="agent-search-input"
             data-testid="agent-search-input"
             value={localInput}
-            onChange={(e) => setLocalInput(e.target.value)}
+            onChange={(e) => handleSearchInput(e.target.value)}
             placeholder="Search agents by name, ID or capability…"
             aria-label="Search agents"
             className="w-full rounded-xl border border-[var(--border-subtle,#2a2a2a)] bg-[var(--surface-sunken-hover,#181818)] py-2.5 pl-10 pr-9 text-sm text-[var(--text-primary,#fff)] placeholder-[var(--text-muted,#737373)] focus:border-[var(--primary,#9333ea)] focus:outline-none focus:ring-1 focus:ring-[var(--primary,#9333ea)]"
@@ -74,10 +118,7 @@ export const AgentFilters: React.FC<AgentFiltersProps> = ({
           {localInput && (
             <button
               type="button"
-              onClick={() => {
-                setLocalInput('')
-                onSearchChange('')
-              }}
+              onClick={clearSearch}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted,#737373)] hover:text-white"
               aria-label="Clear search query"
             >
@@ -109,7 +150,13 @@ export const AgentFilters: React.FC<AgentFiltersProps> = ({
           {onReset && (selectedCapabilities.length > 0 || localInput) && (
             <button
               type="button"
-              onClick={onReset}
+              onClick={() => {
+                // Drop any half-typed query too, even one that was never sent.
+                cancelPendingSearch()
+                lastEmitted.current = ''
+                setLocalInput('')
+                onReset()
+              }}
               className="rounded-xl border border-transparent px-2.5 py-1.5 text-xs text-purple-400 hover:text-purple-300"
             >
               Reset
