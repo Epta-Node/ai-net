@@ -204,9 +204,17 @@ export class PaymentService {
       });
 
       if (span) tracingService.endSpan(span.spanId, 'completed', { balanceId });
+      logger.info(
+        { paymentId: balanceId, taskId, nodeId, amount: amountXLM, amountStroops, recipient: agentPublicKey },
+        "payment escrow locked"
+      );
       return balanceId;
     } catch (err) {
       if (span) tracingService.endSpan(span.spanId, 'failed', { error: String(err) });
+      logger.error(
+        { err, paymentId: taskId, taskId, nodeId, amount: amountXLM, recipient: agentPublicKey },
+        "failed to lock payment escrow"
+      );
       throw err;
     }
   }
@@ -263,9 +271,17 @@ export class PaymentService {
       });
 
       if (span) tracingService.endSpan(span.spanId, 'completed', { txHash });
+      logger.info(
+        { paymentId: record.balanceId, txHash, taskId, nodeId, amount: record.amountStroops.toString(), recipient: nodeId },
+        "payment released"
+      );
       return txHash;
     } catch (err) {
       if (span) tracingService.endSpan(span.spanId, 'failed', { error: String(err) });
+      logger.error(
+        { err, paymentId: record.balanceId, taskId, nodeId, amount: record.amountStroops.toString(), recipient: nodeId },
+        "failed to release payment"
+      );
       throw err;
     }
   }
@@ -279,32 +295,48 @@ export class PaymentService {
     if (!record) throw new Error(`No payment record for task=${taskId} node=${nodeId}`);
 
     if (record.status === "released") {
+      logger.warn(
+        { paymentId: record.balanceId, taskId, nodeId, amount: record.amountStroops.toString(), recipient: nodeId },
+        "attempted to refund an already released payment"
+      );
       throw new PaymentAlreadyReleasedError(taskId, nodeId);
     }
 
-    const account = await this.horizonBreaker.execute(() =>
-      this.withRetry("loadAccount", () => this.server.loadAccount(coordinatorKeypair.publicKey()))
-    );
+    try {
+      const account = await this.horizonBreaker.execute(() =>
+        this.withRetry("loadAccount", () => this.server.loadAccount(coordinatorKeypair.publicKey()))
+      );
 
-    const tx = new TransactionBuilder(account, {
-      fee: BASE_FEE,
-      networkPassphrase: this.networkPassphrase,
-    })
-      .addOperation(
-        Operation.claimClaimableBalance({ balanceId: record.balanceId })
-      )
-      .setTimeout(30)
-      .build();
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(
+          Operation.claimClaimableBalance({ balanceId: record.balanceId })
+        )
+        .setTimeout(30)
+        .build();
 
-    tx.sign(coordinatorKeypair);
+      tx.sign(coordinatorKeypair);
 
-    const result = await this.horizonBreaker.execute(() =>
-      this.withRetry("submitTransaction", () => this.server.submitTransaction(tx))
-    );
-    const txHash = (result as unknown as { hash: string }).hash;
+      const result = await this.horizonBreaker.execute(() =>
+        this.withRetry("submitTransaction", () => this.server.submitTransaction(tx))
+      );
+      const txHash = (result as unknown as { hash: string }).hash;
 
-    this.db.updateStatus(taskId, nodeId, "refunded", txHash);
-    return txHash;
+      this.db.updateStatus(taskId, nodeId, "refunded", txHash);
+      logger.info(
+        { paymentId: record.balanceId, txHash, taskId, nodeId, amount: record.amountStroops.toString(), recipient: nodeId },
+        "payment refunded"
+      );
+      return txHash;
+    } catch (err) {
+      logger.error(
+        { err, paymentId: record.balanceId, taskId, nodeId, amount: record.amountStroops.toString(), recipient: nodeId },
+        "failed to refund payment"
+      );
+      throw err;
+    }
   }
 
   getPaymentStatus(taskId: string, nodeId: string): PaymentRecord | undefined {

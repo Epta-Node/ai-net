@@ -797,3 +797,18 @@ pub struct MultisigConfigUpdatedEvent {
     /// Timelock delay in seconds applied to proposal execution.
     pub timelock_delay: u64,
 }
+
+/// Data payload for `(registry, agent_updated)`.
+///
+/// Published after an agent owner's pricing update succeeds.  The owner and
+/// capability are retained so indexers can apply the update without another
+/// storage read.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentUpdatedEvent {
+    pub agent_id: Symbol,
+    pub owner: Address,
+    pub capability: Symbol,
+    pub old_price_stroops: i128,
+    pub new_price_stroops: i128,
+}

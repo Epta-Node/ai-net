@@ -1579,7 +1579,7 @@ impl AgentRegistryContract {
         for id in ids.iter() {
             let agent_key = DataKey::Agent(id.clone());
 
-            if let Some(record) = env.storage().persistent().get(&agent_key) {
+            if let Some(record) = env.storage().persistent().get::<_, AgentRecord>(&agent_key) {
                 ttl_keys.push_back(agent_key);
                 records.push_back(record);
             }
@@ -2070,7 +2070,8 @@ impl AgentRegistryContract {
         Ok(())
     }
 
-    /// Read the current minimum bond requirement (stroops).
+    /// Read the current minimum bond from instance storage, falling back to the
+    /// compile-time default (10 XLM = 100_000_000 stroops).
     pub fn get_min_bond(env: Env) -> i128 {
         min_bond(&env)
     }
@@ -2108,7 +2109,6 @@ impl AgentRegistryContract {
             .persistent()
             .get(&agent_key)
             .ok_or(Error::NotFound)?;
-        agent.owner.require_auth();
         let mut record = bond::load(&env, &agent_id)?;
         if record.status == bond::BondStatus::Cooldown {
             return Err(Error::CooldownNotElapsed);
@@ -2244,6 +2244,7 @@ impl AgentRegistryContract {
             return Err(Error::CooldownNotElapsed);
         }
         let returned = record.amount_stroops;
+        record.amount_stroops = 0;
         record.amount_stroops = 0;
         record.status = bond::BondStatus::Returned;
         record.cooldown_until = None;
@@ -2490,12 +2491,21 @@ impl AgentRegistryContract {
             .get(&agent_key)
             .ok_or(Error::NotFound)?;
 
-        record.owner.require_auth();
-
+        let old_price_stroops = record.price_stroops;
         record.price_stroops = new_price;
         env.storage().persistent().set(&agent_key, &record);
         extend_ttl_for_existing_key(&env, &agent_key);
 
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("agent_upd")),
+            events::AgentUpdatedEvent {
+                agent_id: agent_id.clone(),
+                owner: record.owner.clone(),
+                capability: record.capability.clone(),
+                old_price_stroops,
+                new_price_stroops: new_price,
+            },
+        );
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("price_upd")),
             (agent_id, new_price),

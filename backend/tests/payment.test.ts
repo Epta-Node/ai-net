@@ -1,4 +1,3 @@
-
 import { xlmToStroops, stroopsToXlm, PaymentAlreadyReleasedError, HorizonUnavailableError } from "../src/payment/utils";
 import {
   PaymentService,
@@ -118,6 +117,20 @@ describe("PaymentService.lock", () => {
     expect(record!.status).toBe("locked");
     expect(record!.balanceId).toBe("balance-id-abc");
     expect(record!.amountStroops).toBe(100_000_000n);
+
+    const loggerValue = (createLogger as jest.Mock).mock.results
+      .map((result) => result.value as { bindings?: { component?: string }; info: jest.Mock })
+      .find((value) => value?.bindings?.component === "payment");
+    expect(loggerValue?.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        paymentId: "balance-id-abc",
+        taskId: "t1",
+        nodeId: "n1",
+        amount: 10,
+        recipient: "GAGENT",
+      }),
+      "payment escrow locked"
+    );
   });
 
   it("stores amount as BigInt stroops (1 stroop = 0.0000001 XLM)", async () => {
