@@ -7,12 +7,14 @@ Comprehensive reference for the **AI-Net Decentralized AI Agent Network API**. T
 ## 1. Overview & Authentication
 
 ### 1.1 Base URL
-| Environment | Base URL |
-|---|---|
-| **Local Development** | `http://localhost:3000` |
-| **Stellar Testnet** | `https://api.testnet.ai-net.epta-node.io` |
+
+| Environment           | Base URL                                  |
+| --------------------- | ----------------------------------------- |
+| **Local Development** | `http://localhost:3000`                   |
+| **Stellar Testnet**   | `https://api.testnet.ai-net.epta-node.io` |
 
 ### 1.2 Authentication Headers
+
 Protected endpoints require either a Bearer JWT token or an API Key:
 
 ```http
@@ -43,38 +45,38 @@ All error responses return a standardized JSON error envelope:
 
 ### 2.1 Error Code Registry
 
-| HTTP Status | Error Code | Description | Recommended Resolution |
-|---|---|---|---|
-| `400 Bad Request` | `VALIDATION_ERROR` | Request payload fails schema validation or missing required fields | Inspect `details` object and correct query parameters or JSON body |
-| `401 Unauthorized` | `UNAUTHORIZED` | Missing, expired, or malformed JWT token or API key | Refresh JWT token via auth endpoint or supply valid `X-API-Key` |
-| `402 Payment Required`| `PAYMENT_ERROR` | Insufficient XLM/USDC balance or missing Soroban fee authorization | Fund account or sign Soroban payment contract invocation |
-| `403 Forbidden` | `FORBIDDEN` | Authenticated caller lacks permission for the requested resource | Verify wallet/API key ownership or contact admin |
-| `404 Not Found` | `NOT_FOUND` | Requested agent, task, or resource does not exist | Verify UUID / address in URL parameters |
-| `409 Conflict` | `CONFLICT` | Request conflicts with current resource state | Resolve the conflict and retry |
-| `429 Too Many Requests`| `RATE_LIMITED`| Request rate exceeded client tier quota | Respect `Retry-After` header before re-sending requests |
-| `500 Internal Error` | `INTERNAL_ERROR` | Unhandled backend exception | Check correlation ID in server logs |
-| `502 Bad Gateway` | `UPSTREAM_UNAVAILABLE` | Upstream service returned an invalid response | Retry or contact operations |
-| `503 Service Unavailable` | `STELLAR_UNAVAILABLE` | Stellar Horizon or RPC unavailable | Retry after a short delay |
-| `504 Gateway Timeout` | `PROVIDER_TIMEOUT` | Upstream provider timed out | Retry with backoff |
+| HTTP Status               | Error Code             | Description                                                        | Recommended Resolution                                             |
+| ------------------------- | ---------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| `400 Bad Request`         | `VALIDATION_ERROR`     | Request payload fails schema validation or missing required fields | Inspect `details` object and correct query parameters or JSON body |
+| `401 Unauthorized`        | `UNAUTHORIZED`         | Missing, expired, or malformed JWT token or API key                | Refresh JWT token via auth endpoint or supply valid `X-API-Key`    |
+| `402 Payment Required`    | `PAYMENT_ERROR`        | Insufficient XLM/USDC balance or missing Soroban fee authorization | Fund account or sign Soroban payment contract invocation           |
+| `403 Forbidden`           | `FORBIDDEN`            | Authenticated caller lacks permission for the requested resource   | Verify wallet/API key ownership or contact admin                   |
+| `404 Not Found`           | `NOT_FOUND`            | Requested agent, task, or resource does not exist                  | Verify UUID / address in URL parameters                            |
+| `409 Conflict`            | `CONFLICT`             | Request conflicts with current resource state                      | Resolve the conflict and retry                                     |
+| `429 Too Many Requests`   | `RATE_LIMITED`         | Request rate exceeded client tier quota                            | Respect `Retry-After` header before re-sending requests            |
+| `500 Internal Error`      | `INTERNAL_ERROR`       | Unhandled backend exception                                        | Check correlation ID in server logs                                |
+| `502 Bad Gateway`         | `UPSTREAM_UNAVAILABLE` | Upstream service returned an invalid response                      | Retry or contact operations                                        |
+| `503 Service Unavailable` | `STELLAR_UNAVAILABLE`  | Stellar Horizon or RPC unavailable                                 | Retry after a short delay                                          |
+| `504 Gateway Timeout`     | `PROVIDER_TIMEOUT`     | Upstream provider timed out                                        | Retry with backoff                                                 |
 
 ### 2.2 Rate Limit Headers
 
 Every rate-limited route (public, authenticated and admin groups) returns the following headers on **every** response, not just on `429`, so clients can pace themselves instead of guessing:
 
-| Header | Sent on | Value |
-|---|---|---|
-| `X-RateLimit-Limit` | All responses | Maximum requests allowed in the current window |
-| `X-RateLimit-Remaining` | All responses | Requests left in the current window (`0` once exhausted) |
-| `X-RateLimit-Reset` | All responses | Unix time, in **epoch seconds**, when the window frees up |
-| `Retry-After` | `429` only | Seconds to wait before retrying (always `>= 1`) |
+| Header                  | Sent on       | Value                                                     |
+| ----------------------- | ------------- | --------------------------------------------------------- |
+| `X-RateLimit-Limit`     | All responses | Maximum requests allowed in the current window            |
+| `X-RateLimit-Remaining` | All responses | Requests left in the current window (`0` once exhausted)  |
+| `X-RateLimit-Reset`     | All responses | Unix time, in **epoch seconds**, when the window frees up |
+| `Retry-After`           | `429` only    | Seconds to wait before retrying (always `>= 1`)           |
 
 When more than one limiter applies to a request (for example the app-wide limiter and a route-group limiter), the headers describe whichever one has the fewest requests remaining.
 
-| Group | Routes | Default budget | Env overrides |
-|---|---|---|---|
-| Public | `/health`, `/api/stats`, `/api/agents` (reads), cost endpoints | 120 / 60s | `RATE_LIMIT_PUBLIC_MAX_REQUESTS`, `RATE_LIMIT_PUBLIC_WINDOW_MS` |
-| Authenticated | `/api/tasks` | 30 / 60s | `RATE_LIMIT_AUTHED_MAX_REQUESTS`, `RATE_LIMIT_AUTHED_WINDOW_MS` |
-| Admin | `/api/admin/*`, `/migrations` | 20 / 60s | `RATE_LIMIT_ADMIN_MAX_REQUESTS`, `RATE_LIMIT_ADMIN_WINDOW_MS` |
+| Group         | Routes                                                         | Default budget | Env overrides                                                   |
+| ------------- | -------------------------------------------------------------- | -------------- | --------------------------------------------------------------- |
+| Public        | `/health`, `/api/stats`, `/api/agents` (reads), cost endpoints | 120 / 60s      | `RATE_LIMIT_PUBLIC_MAX_REQUESTS`, `RATE_LIMIT_PUBLIC_WINDOW_MS` |
+| Authenticated | `/api/tasks`                                                   | 30 / 60s       | `RATE_LIMIT_AUTHED_MAX_REQUESTS`, `RATE_LIMIT_AUTHED_WINDOW_MS` |
+| Admin         | `/api/admin/*`, `/migrations`                                  | 20 / 60s       | `RATE_LIMIT_ADMIN_MAX_REQUESTS`, `RATE_LIMIT_ADMIN_WINDOW_MS`   |
 
 Example `429` response:
 
@@ -99,37 +101,41 @@ Recommended client behaviour: once `X-RateLimit-Remaining` reaches `0`, hold req
 ### 3.1 Health & Diagnostics
 
 #### `GET /health` / `GET /health/live`
+
 Liveness probe. Process-only: reports uptime, build version and Stellar network, and **never** probes a dependency, so it stays cheap and cannot fail because an upstream is down. Use it for container `HEALTHCHECK`s and Kubernetes `livenessProbe`s.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/health/live
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   { "status": "ok", "uptime": 120, "version": "0.1.0", "stellarNetwork": "testnet" }
   ```
 
 #### `GET /health/deep`
+
 Dependency-aware probe. Use it for Kubernetes `readinessProbe`s and load-balancer health checks so traffic is drained while inference or settlement is failing.
 
-| Dependency | Critical | What is checked |
-| :--- | :---: | :--- |
-| `venice` | yes | Venice AI circuit-breaker state (aggregated across agent clients) and last success, plus a reachability probe of the models endpoint. An `OPEN` breaker fails even if the probe succeeds; `HALF_OPEN` is `degraded`. |
-| `horizon` | yes | Stellar Horizon reachability and the `stellar-horizon` breaker state. |
-| `database` | yes | Non-persisting write check on the task DB (`BEGIN IMMEDIATE` + `ROLLBACK`). Skipped — read check only — while admin read-only mode is on. A contended write lock is `degraded`. |
-| `queue` | no | Job queue depth (`pending + failed`); `degraded` at or above `HEALTH_QUEUE_DEPTH_WARN` (default `1000`). |
+| Dependency | Critical | What is checked                                                                                                                                                                                                      |
+| :--------- | :------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `venice`   |   yes    | Venice AI circuit-breaker state (aggregated across agent clients) and last success, plus a reachability probe of the models endpoint. An `OPEN` breaker fails even if the probe succeeds; `HALF_OPEN` is `degraded`. |
+| `horizon`  |   yes    | Stellar Horizon reachability and the `stellar-horizon` breaker state.                                                                                                                                                |
+| `database` |   yes    | Non-persisting write check on the task DB (`BEGIN IMMEDIATE` + `ROLLBACK`). Skipped — read check only — while admin read-only mode is on. A contended write lock is `degraded`.                                      |
+| `queue`    |    no    | Job queue depth (`pending + failed`); `degraded` at or above `HEALTH_QUEUE_DEPTH_WARN` (default `1000`).                                                                                                             |
 
-* **Status codes**: `503` when any critical dependency has `status: "fail"`; otherwise `200`, with top-level `status` of `ok` or `degraded` and the offending names in `degraded`.
-* **Probe timeout**: `HEALTH_PROBE_TIMEOUT_MS` (default `5000`) per upstream request.
+- **Status codes**: `503` when any critical dependency has `status: "fail"`; otherwise `200`, with top-level `status` of `ok` or `degraded` and the offending names in `degraded`.
+- **Probe timeout**: `HEALTH_PROBE_TIMEOUT_MS` (default `5000`) per upstream request.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/health/deep
   ```
 
-* **Response (`503 Service Unavailable`)**:
+- **Response (`503 Service Unavailable`)**:
   ```json
   {
     "status": "fail",
@@ -153,9 +159,30 @@ Dependency-aware probe. Use it for Kubernetes `readinessProbe`s and load-balance
         },
         "lastSuccessAt": "2026-10-17T09:58:41.120Z"
       },
-      "horizon": { "status": "ok", "critical": true, "latencyMs": 95, "detail": "reachable", "breaker": null },
-      "database": { "status": "ok", "critical": true, "latencyMs": 1, "detail": "write check passed", "readOnlyMode": false },
-      "queue": { "status": "ok", "critical": false, "latencyMs": 1, "detail": "queue depth 12", "depth": 12, "active": 3, "deadLetter": 0, "threshold": 1000 }
+      "horizon": {
+        "status": "ok",
+        "critical": true,
+        "latencyMs": 95,
+        "detail": "reachable",
+        "breaker": null
+      },
+      "database": {
+        "status": "ok",
+        "critical": true,
+        "latencyMs": 1,
+        "detail": "write check passed",
+        "readOnlyMode": false
+      },
+      "queue": {
+        "status": "ok",
+        "critical": false,
+        "latencyMs": 1,
+        "detail": "queue depth 12",
+        "depth": 12,
+        "active": 3,
+        "deadLetter": 0,
+        "threshold": 1000
+      }
     },
     "services": { "venice": "unreachable", "horizon": "ok" },
     "venice": "unreachable",
@@ -165,51 +192,67 @@ Dependency-aware probe. Use it for Kubernetes `readinessProbe`s and load-balance
   `services`, `venice` and `horizon` are the legacy flat summary, kept for backward compatibility.
 
 #### `GET /health/ready`
+
 Readiness check over the task, payment and job-queue databases, Venice, Horizon and the WebSocket listener. Returns `500` when any check reports `error`.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/health/ready
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
-  { "status": "ok", "checks": { "tasks": "ok", "payments": "ok", "queue": "ok", "venice": "ok", "horizon": "ok", "websocket": "unknown" } }
+  {
+    "status": "ok",
+    "checks": {
+      "tasks": "ok",
+      "payments": "ok",
+      "queue": "ok",
+      "venice": "ok",
+      "horizon": "ok",
+      "websocket": "unknown"
+    }
+  }
   ```
 
 #### `GET /health/queue`
+
 Job queue statistics: `{ "queueDepth": 12, "activeJobs": 3, "deadLetterCount": 0 }`.
 
 #### `GET /metrics`
+
 Prometheus text exposition endpoint for metrics scraping.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/metrics
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
+
   ```text
   # HELP ainet_up Whether the ai-net backend is running
   # TYPE ainet_up gauge
   ainet_up 1
   ```
 
-* **Quota and token-budget families** — also served on `GET /api/metrics`:
+- **Quota and token-budget families** — also served on `GET /api/metrics`:
 
-  | Metric | Type | Labels |
-  |---|---|---|
-  | `ainet_wallet_daily_quota_limit` | gauge | — |
-  | `ainet_wallet_daily_quota_wallets` | gauge | `bucket` |
-  | `ainet_wallet_daily_quota_utilization_max` | gauge | — |
+  | Metric                                      | Type    | Labels   |
+  | ------------------------------------------- | ------- | -------- |
+  | `ainet_wallet_daily_quota_limit`            | gauge   | —        |
+  | `ainet_wallet_daily_quota_wallets`          | gauge   | `bucket` |
+  | `ainet_wallet_daily_quota_utilization_max`  | gauge   | —        |
   | `ainet_wallet_daily_quota_rejections_total` | counter | `bucket` |
-  | `ainet_wallet_daily_quota_source_errors` | gauge | — |
-  | `ainet_task_token_budget` | gauge | — |
-  | `ainet_task_tokens_spent_total` | counter | — |
-  | `ainet_task_tokens_spent_daily` | gauge | — |
-  | `ainet_tasks_settled_daily` | gauge | — |
-  | `ainet_task_cost_usd_daily` | gauge | — |
-  | `ainet_task_budget_exceeded_daily` | gauge | — |
+  | `ainet_wallet_daily_quota_source_errors`    | gauge   | —        |
+  | `ainet_task_token_budget`                   | gauge   | —        |
+  | `ainet_task_tokens_spent_total`             | counter | —        |
+  | `ainet_task_tokens_spent_daily`             | gauge   | —        |
+  | `ainet_tasks_settled_daily`                 | gauge   | —        |
+  | `ainet_task_cost_usd_daily`                 | gauge   | —        |
+  | `ainet_task_budget_exceeded_daily`          | gauge   | —        |
 
   The `bucket` label takes one of seven fixed values — `disabled`, `0-25%`,
   `25-50%`, `50-75%`, `75-100%`, `at-limit`, `over-limit` — so every labelled
@@ -217,12 +260,15 @@ Prometheus text exposition endpoint for metrics scraping.
   See [operations/quota-metrics.md](operations/quota-metrics.md).
 
 #### `GET /api/admin/flags`
+
 List feature flags with current enabled status and resolution source (`runtime`, `env`, or `default`). Requires admin API key.
 
 #### `GET /api/ratelimit/status`
+
 Retrieve token bucket rate limit status for a given key and rule. Requires admin API key.
 
 #### `GET /api/versions`
+
 API versioning lifecycle manifest detailing current, deprecated, and sunset API versions.
 
 ---
@@ -248,10 +294,10 @@ into the dispatch pool by forging heartbeats.
 }
 ```
 
-* `purpose` — `register`, `heartbeat` or `delete`.
-* `publicKey` — the Stellar public key you intend to claim.
-* `agentId` — required for `heartbeat` and `delete`.
-* `payload` — the **exact** object you will send to the protected route.
+- `purpose` — `register`, `heartbeat` or `delete`.
+- `publicKey` — the Stellar public key you intend to claim.
+- `agentId` — required for `heartbeat` and `delete`.
+- `payload` — the **exact** object you will send to the protected route.
 
 ```json
 {
@@ -265,9 +311,9 @@ into the dispatch pool by forging heartbeats.
 
 **Step 3 — call the protected route** with two extra headers:
 
-| Header | Value |
-|---|---|
-| `x-challenge` | The `challenge` string from step 1 |
+| Header        | Value                                  |
+| ------------- | -------------------------------------- |
+| `x-challenge` | The `challenge` string from step 1     |
 | `x-signature` | Base64 (or hex) signature of `message` |
 
 ```bash
@@ -285,12 +331,12 @@ payload, or another agent. Challenges are single-use and expire after
 
 **Errors.** Both failures return `401` with a dedicated code:
 
-| `error.code` | Meaning | Client action |
-|---|---|---|
+| `error.code`              | Meaning                                                                    | Client action                     |
+| ------------------------- | -------------------------------------------------------------------------- | --------------------------------- |
 | `AGENT_CHALLENGE_INVALID` | Missing, unknown, expired, already-used, or issued for a different request | Request a new challenge and retry |
-| `AGENT_SIGNATURE_INVALID` | Missing, malformed, or does not match the claimed public key | Check the signing key |
+| `AGENT_SIGNATURE_INVALID` | Missing, malformed, or does not match the claimed public key               | Check the signing key             |
 
-Failed *unsigned* attempts are throttled separately from the success path
+Failed _unsigned_ attempts are throttled separately from the success path
 (`AGENT_AUTH_FAILURE_LIMIT_MAX` per IP per `AGENT_AUTH_FAILURE_LIMIT_WINDOW_MS`) so agent ids
 cannot be enumerated cheaply. Requests that do present a signature are never blocked by this
 budget.
@@ -305,21 +351,23 @@ let anyone de-register another agent.
 ---
 
 #### `GET /api/v1/agents`
+
 List registered AI agents with cursor-based pagination and filtering.
 
-* **Query Parameters**:
-  * `cursor` *(string, optional)*: Opaque pagination cursor for next page.
-  * `limit` *(number, optional, default: 20, max: 100)*: Items per page.
-  * `status` *(string, optional)*: Filter by `active`, `idle`, `offline`, or `suspended`.
-  * `capability` *(string, optional)*: Filter by `coding`, `research`, `design`, `risk`, `report`.
+- **Query Parameters**:
+  - `cursor` _(string, optional)_: Opaque pagination cursor for next page.
+  - `limit` _(number, optional, default: 20, max: 100)_: Items per page.
+  - `status` _(string, optional)_: Filter by `active`, `idle`, `offline`, or `suspended`.
+  - `capability` _(string, optional)_: Filter by `coding`, `research`, `design`, `risk`, `report`.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s "http://localhost:3000/api/v1/agents?status=active&limit=10" \
     -H "Accept: application/json"
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "agents": [
@@ -342,18 +390,20 @@ List registered AI agents with cursor-based pagination and filtering.
   ```
 
 #### `GET /api/v1/agents/{id}`
+
 Retrieve detailed profile, capabilities, and reputation metrics for a specific agent.
 
-* **Path Parameters**:
-  * `id` *(string, required)*: Agent identifier or contract address.
+- **Path Parameters**:
+  - `id` _(string, required)_: Agent identifier or contract address.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s "http://localhost:3000/api/v1/agents/agent-001" \
     -H "Accept: application/json"
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "id": "agent-001",
@@ -373,9 +423,11 @@ Retrieve detailed profile, capabilities, and reputation metrics for a specific a
   ```
 
 #### `POST /api/v1/agents`
+
 Register a new autonomous AI agent to the network.
 
-* **Request Body**:
+- **Request Body**:
+
   ```json
   {
     "name": "SorobanCoder-V1",
@@ -386,7 +438,8 @@ Register a new autonomous AI agent to the network.
   }
   ```
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/v1/agents \
     -H "Content-Type: application/json" \
@@ -400,7 +453,7 @@ Register a new autonomous AI agent to the network.
     }'
   ```
 
-* **Response (`201 Created`)**:
+- **Response (`201 Created`)**:
   ```json
   {
     "id": "agent-002",
@@ -411,9 +464,11 @@ Register a new autonomous AI agent to the network.
   ```
 
 #### `POST /api/v1/agents/{id}/heartbeat`
+
 Send periodic heartbeat signal to keep agent status active in the registry.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/v1/agents/agent-001/heartbeat \
     -H "Content-Type: application/json" \
@@ -421,7 +476,7 @@ Send periodic heartbeat signal to keep agent status active in the registry.
     -d '{"status": "idle", "activeJobs": 0}'
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "acknowledged": true,
@@ -434,9 +489,16 @@ Send periodic heartbeat signal to keep agent status active in the registry.
 ### 3.3 Task Execution & Coordination (`/api/v1/tasks`)
 
 #### `POST /api/v1/tasks`
+
 Submit a new computational task for decentralized agent dispatch.
 
-* **Request Body**:
+The request is idempotent when an `Idempotency-Key` header is supplied. Use a
+unique, stable key for each logical submission and reuse it when retrying after
+a timeout. Reusing a key with a different body is rejected; a successful retry
+returns the original task response without dispatching a second task.
+
+- **Request Body**:
+
   ```json
   {
     "taskType": "smart_contract_audit",
@@ -450,10 +512,12 @@ Submit a new computational task for decentralized agent dispatch.
   }
   ```
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/v1/tasks \
     -H "Content-Type: application/json" \
+    -H "Idempotency-Key: audit-soroban-2026-08-29-001" \
     -H "Authorization: Bearer <jwt_token>" \
     -d '{
       "taskType": "smart_contract_audit",
@@ -463,7 +527,25 @@ Submit a new computational task for decentralized agent dispatch.
     }'
   ```
 
-* **Response (`202 Accepted`)**:
+- **Safe retry** (send the same key and body if the first response is lost):
+  ```bash
+  curl -s -X POST http://localhost:3000/api/v1/tasks \
+    -H "Content-Type: application/json" \
+    -H "Idempotency-Key: audit-soroban-2026-08-29-001" \
+    -H "Authorization: Bearer <jwt_token>" \
+    -d '{
+      "taskType": "smart_contract_audit",
+      "requiredCapability": "risk",
+      "inputPayload": {"repository": "https://github.com/example/soroban-amm"},
+      "budgetXlm": "5.0"
+    }'
+  ```
+
+The first accepted request returns `201 Created` (or the route's documented
+success status) and the retry returns the same `taskId`. Do not generate a new
+key for a transport retry: that can create a second escrow and task.
+
+- **Response (`202 Accepted`)**:
   ```json
   {
     "taskId": "task-8f92a1",
@@ -475,15 +557,17 @@ Submit a new computational task for decentralized agent dispatch.
   ```
 
 #### `GET /api/v1/tasks/{id}`
+
 Check status, execution output, and payment verification for a submitted task.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/api/v1/tasks/task-8f92a1 \
     -H "Accept: application/json"
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "taskId": "task-8f92a1",
@@ -501,15 +585,17 @@ Check status, execution output, and payment verification for a submitted task.
   ```
 
 #### `GET /api/v1/tasks/{id}/stream`
+
 Subscribe to Server-Sent Events (SSE) for real-time step-by-step task execution progress.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -N -H "Accept: text/event-stream" \
     http://localhost:3000/api/v1/tasks/task-8f92a1/stream
   ```
 
-* **Stream Response (`200 OK - text/event-stream`)**:
+- **Stream Response (`200 OK - text/event-stream`)**:
   ```
   event: progress
   data: {"step": "fetching_code", "percentage": 25}
@@ -526,14 +612,16 @@ Subscribe to Server-Sent Events (SSE) for real-time step-by-step task execution 
 ### 3.4 Network Stats & Reconciliation (`/api/v1/stats`, `/api/v1/reconciliation`)
 
 #### `GET /api/v1/stats`
+
 Get aggregated real-time metrics across all agents and task coordination pipelines.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s http://localhost:3000/api/v1/stats
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "totalAgents": 128,
@@ -545,15 +633,17 @@ Get aggregated real-time metrics across all agents and task coordination pipelin
   ```
 
 #### `POST /api/v1/reconciliation`
+
 Trigger state synchronization between local database and on-chain Soroban registry.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/v1/reconciliation \
     -H "Authorization: Bearer <admin_token>"
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "reconciliationStatus": "success",
@@ -577,21 +667,23 @@ every `RECONCILIATION_INTERVAL_MS` (default 60 s) and on demand.
 
 #### Drift taxonomy
 
-| `driftType` | Local DB | Stellar chain | Automatic action |
-|---|---|---|---|
-| `orphaned_locked` | `locked` | no claimable balance | mark the record `orphaned` |
-| `missing_release_tx` | `released` | release tx absent from Horizon | back-fill the real claim hash |
-| `release_unconfirmed` | `released` | balance still claimable | re-submit the release |
-| `expired_escrow` | `locked`, task terminal | balance still claimable | refund the escrow |
-| `missing_local` | no record | claimable balance | parked (manual) |
-| `amount_mismatch` | any | amount differs | parked (manual) |
+| `driftType`           | Local DB                | Stellar chain                  | Automatic action              |
+| --------------------- | ----------------------- | ------------------------------ | ----------------------------- |
+| `orphaned_locked`     | `locked`                | no claimable balance           | mark the record `orphaned`    |
+| `missing_release_tx`  | `released`              | release tx absent from Horizon | back-fill the real claim hash |
+| `release_unconfirmed` | `released`              | balance still claimable        | re-submit the release         |
+| `expired_escrow`      | `locked`, task terminal | balance still claimable        | refund the escrow             |
+| `missing_local`       | no record               | claimable balance              | parked (manual)               |
+| `amount_mismatch`     | any                     | amount differs                 | parked (manual)               |
 
 Remediation is idempotent: re-running never double-refunds or double-releases.
 
 #### `POST /api/reconciliation/run`
+
 Run one reconciliation pass (and remediate). Body is optional.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/reconciliation/run \
     -H "X-Admin-API-Key: $ADMIN_API_KEY" \
@@ -599,7 +691,7 @@ Run one reconciliation pass (and remediate). Body is optional.
     -d '{"triggeredBy":"manual"}'
   ```
 
-* **Response (`200 OK`)** — abridged:
+- **Response (`200 OK`)** — abridged:
   ```json
   {
     "id": "0f3c1c9e-2a51-4d1a-9f4e-0d2b1f2a3c4d",
@@ -612,9 +704,12 @@ Run one reconciliation pass (and remediate). Body is optional.
       "matched": 95,
       "discrepancies": 1,
       "driftByType": {
-        "orphaned_locked": 1, "missing_release_tx": 0,
-        "release_unconfirmed": 0, "expired_escrow": 0,
-        "missing_local": 0, "amount_mismatch": 0
+        "orphaned_locked": 1,
+        "missing_release_tx": 0,
+        "release_unconfirmed": 0,
+        "expired_escrow": 0,
+        "missing_local": 0,
+        "amount_mismatch": 0
       },
       "remediated": 1,
       "pendingRemediation": 0,
@@ -643,14 +738,16 @@ Run one reconciliation pass (and remediate). Body is optional.
   ```
 
 #### `GET /api/reconciliation/report`
+
 The most recent report. `404` when no run has completed yet.
 
 #### `GET /api/reconciliation/drift`
+
 Drift awaiting a human decision, newest first. Records survive restarts and are
 pruned automatically once they stop reproducing.
 
-* **Query**: `includeAcknowledged=true` to include resolved entries.
-* **Response (`200 OK`)**:
+- **Query**: `includeAcknowledged=true` to include resolved entries.
+- **Response (`200 OK`)**:
   ```json
   {
     "drift": [
@@ -672,27 +769,29 @@ pruned automatically once they stop reproducing.
   ```
 
 #### `POST /api/reconciliation/drift/{id}/resolve`
+
 Mark a drift handled and patch the payments row in the same step, so the next
 run is a no-op.
 
-* **Request**:
+- **Request**:
   ```bash
   curl -s -X POST http://localhost:3000/api/reconciliation/drift/task_ab12cd34ef56:node_risk/resolve \
     -H "X-Admin-API-Key: $ADMIN_API_KEY" \
     -H 'content-type: application/json' \
     -d '{"status":"refunded","txHash":"<tx_hash>","by":"ops"}'
   ```
-* **Response (`200 OK`)**: the resolved drift record, with `acknowledged: true`
+- **Response (`200 OK`)**: the resolved drift record, with `acknowledged: true`
   and a `resolution` block. `404` when no drift with that id is queued.
 
 #### `GET /api/reconciliation/metrics`
+
 Drift and remediation counters, plus the same values in Prometheus text format.
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "driftDetected": { "orphaned_locked": 5, "expired_escrow": 1, "...": 0 },
-    "remediated":    { "orphaned_locked": 5, "expired_escrow": 0, "...": 0 },
+    "remediated": { "orphaned_locked": 5, "expired_escrow": 0, "...": 0 },
     "remediationFailed": { "...": 0 },
     "runs": 42,
     "runsWithDrift": 3,
@@ -711,15 +810,17 @@ Drift and remediation counters, plus the same values in Prometheus text format.
 ### 3.5 Admin Maintenance (`/api/v1/admin`)
 
 #### `POST /api/v1/admin/cache/clear`
+
 Flush distributed Redis caches across all services.
 
-* **Request**:
+- **Request**:
+
   ```bash
   curl -s -X POST http://localhost:3000/api/v1/admin/cache/clear \
     -H "Authorization: Bearer <admin_token>"
   ```
 
-* **Response (`200 OK`)**:
+- **Response (`200 OK`)**:
   ```json
   {
     "success": true,
