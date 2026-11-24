@@ -63,4 +63,10 @@ pub enum Error {
     RegistryNotSet = 26,
     /// The voter had no voting power at the proposal's snapshot point.
     NoSnapshotPower = 27,
+    /// The referenced proposal does not exist.
+    ProposalNotFound = 28,
+    /// The proposal has already been executed.
+    ProposalAlreadyExecuted = 29,
+    /// Not enough approvals to execute the proposal.
+    InsufficientApprovals = 30,
 }
