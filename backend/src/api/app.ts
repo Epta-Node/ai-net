@@ -321,6 +321,14 @@ export function createApp(opts: AppOptions = {}): {
   app.use('/metrics', metricsRouter);
   app.use('/api/metrics', metricsRouter);
 
+  // ── Prometheus metrics ──────────────────────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+
+  // ── Idempotency middleware for state-mutating POST endpoints ────────────────
+  app.post("/api/tasks", idempotencyMiddleware);
+  app.post("/api/agents/register", idempotencyMiddleware);
+  app.post("/api/admin/dlq/:id/replay", idempotencyMiddleware);
+
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use('/api/stats', publicLimiter.middleware, createStatsRouter(getTaskDb()));
 
@@ -448,6 +456,12 @@ export function createApp(opts: AppOptions = {}): {
 
   // ── Versioning lifecycle endpoint (#426) ───────────────────────────────────
   app.use('/api/versions', createVersionsRouter());
+
+  // ── Audit log verify route — Issue #1004 ───────────────────────────────────
+  app.use("/api/admin/audit", auditRouter);
+
+  // ── Task export routes — Issue #1005 ──────────────────────────────────────
+  app.use("/api/tasks/:id/export", exportRouter);
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use(
