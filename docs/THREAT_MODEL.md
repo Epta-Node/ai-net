@@ -1,6 +1,7 @@
 # Threat Model — ai-net
 
-**Last updated:** 2026-08-29  
+**Last updated:** 2026-11-24
+
 **Scope:** smart-contracts (coordinator, payment, registry), backend services, frontend
 
 ---
@@ -23,8 +24,8 @@
 
 | Component | Can Sign Tx | Can Claim Balance | Can Read DB | Can Write DB | Can Deregister Agents |
 |-----------|-------------|-------------------|-------------|--------------|----------------------|
-| Coordinator | Yes (keypair) | Yes (sole claimant) | Yes | Yes | Yes |
-| Agent | No | No | No | No | No |
+| Coordinator | Yes (keypair) | Yes (see payment paths below) | Yes | Yes | Yes |
+| Agent | Own wallet only | If named as a claimant | No | No | No |
 | User/Browser | No (wallet signs) | No | No | No | No |
 | Payment Service | Yes (via coordinator) | Yes (via coordinator) | Yes (payment DB) | Yes (payment DB) | No |
 
@@ -33,6 +34,9 @@
 ## 3. Reentrancy & Replay Notes
 
 ### 3.1 Stellar Claimable Balances
+
+The following controls describe the standalone payment helper. Section 3.4 covers the backend service as well.
+
 - **Reentrancy risk:** LOW. `releasePayment` atomically claims + pays in a single Stellar transaction. No intermediate state is observable.
 - **Replay protection:** Stellar transactions include `sequence` numbers. Each tx is unique. The `setTimeout(180)` envelope prevents stale tx submission.
 - **Double-release protection:** `EscrowAlreadySettledError` thrown if balance already claimed. Horizon returns 404 for non-existent balances.
@@ -44,6 +48,33 @@
 ### 3.3 Coordinator Dispatch
 - **Replay:** HTTP requests to agents include `X-Correlation-ID` for tracing. Agent idempotency is the agent's responsibility.
 - **Timeout handling:** `AbortController` enforces `timeoutMs`. Aborted requests throw `RetryableAgentError`.
+
+### 3.4 Agent-to-agent payment flow
+
+A paying agent requests work from a worker agent. The coordinator links their off-chain task to an on-chain balance. The task database records intent and progress. The ledger determines whether the balance was consumed and which account received the funds.
+
+```mermaid
+flowchart LR
+    P[Paying agent] -->|Task and agreed terms| C[Coordinator]
+    W[Worker agent] -->|Result and wallet identity| C
+    C -->|Task, node and balance ID| DB[(Payment records)]
+    C -->|Signed lock or claim| L[Stellar ledger]
+    L -->|Transaction and operation results| R[Reconciliation]
+    R -->|Confirmed payment status| DB
+    P -. Contested work .-> D[Soroban dispute resolution]
+    W -. Evidence .-> D
+    D -. Final ruling for settlement .-> C
+```
+
+**Wallet and ledger boundary.** Validate the paying identity, worker destination, asset and amount against the authorized task before signing. The standalone helper names the coordinator as sole claimant and combines the claim and payment to the agent in one transaction. The backend service names both the coordinator and agent as unconditional claimants. Its release operation claims the balance as the coordinator. For that path, confirm the actual destination on the ledger before treating the local `released` status as proof of payment to the worker. [Standalone helper](../smart-contracts/src/payment/payment.ts) · [Backend payment service](../backend/src/payment/payment.ts)
+
+| Threat | Control and verification |
+| --- | --- |
+| Double spending or duplicate funding | Stellar consumes a claimable balance once. Track the original balance ID alongside the task and node IDs. After a timeout, reconcile the original transaction before authorizing another lock. Two separately funded balances are separate obligations. |
+| Front-running or conflicting claims | In a bidding market, use the contract's sealed commit/reveal phases. Commitments bind the bid to its contract, task and bidder. At settlement, check the claimant policy against the agreement. If payment depends on work approval, use an escrow that enforces that condition on-chain. An unconditional claimant can claim before approval. [Bidding contract](../smart-contracts/contracts/agent_bidding/src/lib.rs) |
+| Replayed transaction or task instruction | Signed Stellar envelopes bind the network, source sequence and time bounds. At the application boundary, use a durable task/node identifier and the original balance ID and transaction hash to recognize retries. Confirm a prior submission's result before signing a replacement. A trace ID is for correlation. |
+
+**Dispute boundary.** For a contested task, preserve its agreed terms, evidence references, balance ID and transaction hashes. The dispute contract accepts evidence and authorized votes. Its first ruling opens an appeal window. Settlement logic should wait for a final ruling, then reconcile the resulting ledger operations. A ruling cannot reverse an already-confirmed Stellar claim. [Dispute contract](../smart-contracts/contracts/dispute_resolution/src/lib.rs)
 
 ---
 
