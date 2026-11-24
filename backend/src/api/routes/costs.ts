@@ -136,7 +136,8 @@ export function createCostRouter(): Router {
    *       - in: path
    *         name: id
    *         required: true
-   *         schema: { type: string }
+   *         schema:
+   *           type: string
    *         description: Task identifier
    *         example: "task_ab12cd34ef56"
    *     responses:
@@ -145,30 +146,53 @@ export function createCostRouter(): Router {
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     taskId: { type: string }
-   *                     budgetTokens: { type: integer }
-   *                     usedTokens: { type: integer }
-   *                     remainingTokens: { type: integer }
-   *                     costUsd: { type: number }
-   *                     currency: { type: string, example: USD }
-   *                     exceeded: { type: boolean }
-   *                     calls: { type: integer }
-   *                     inProgress: { type: boolean }
-   *                     agents:
-   *                       type: array
-   *                       items: { type: object }
-   *                 _meta: { type: object }
+   *               $ref: '#/components/schemas/TaskCostResponse'
+   *             example:
+   *               data:
+   *                 taskId: "task_ab12cd34ef56"
+   *                 budgetTokens: 10000
+   *                 usedTokens: 1550
+   *                 remainingTokens: 8450
+   *                 costUsd: 0.00155
+   *                 currency: "USD"
+   *                 exceeded: false
+   *                 calls: 2
+   *                 inProgress: false
+   *                 agents:
+   *                   - nodeId: "node_research_1"
+   *                     agentId: "agent-1"
+   *                     agentType: "research"
+   *                     model: "llama-3.3-70b"
+   *                     calls: 2
+   *                     promptTokens: 1200
+   *                     completionTokens: 350
+   *                     totalTokens: 1550
+   *                     costUsd: 0.00155
+   *                     trimmed: false
+   *                     budgetExhausted: false
+   *               _meta:
+   *                 version: "2.0"
+   *                 timestamp: "2026-08-25T17:05:00.000Z"
+   *                 requestId: "req_c918a245"
+   *                 apiVersion: "2.0"
    *       401:
    *         description: Missing or invalid wallet key
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
    *       403:
    *         description: Wallet key does not own the task
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/ForbiddenError'
    *       404:
    *         description: Task not found
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/NotFoundError'
    */
   router.get("/tasks/:id/cost", (req: Request, res: Response, next: NextFunction): void => {
     try {
@@ -234,48 +258,108 @@ export function createCostRouter(): Router {
    *     parameters:
    *       - in: query
    *         name: agentLimit
-   *         schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           maximum: 200
+   *           default: 50
+   *         description: Maximum number of per-agent rows to return
    *       - in: query
    *         name: recentLimit
-   *         schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           maximum: 100
+   *           default: 20
+   *         description: Maximum number of recent task cost rows to return
    *       - in: query
    *         name: agentId
-   *         schema: { type: string }
+   *         schema:
+   *           type: string
+   *         description: Filter breakdown rows by agent ID
    *       - in: query
    *         name: agentType
-   *         schema: { type: string }
+   *         schema:
+   *           type: string
+   *         description: Filter breakdown rows by agent type
    *       - in: query
    *         name: model
-   *         schema: { type: string }
+   *         schema:
+   *           type: string
+   *         description: Filter breakdown rows by model
    *       - in: query
    *         name: day
-   *         schema: { type: string, format: date }
+   *         schema:
+   *           type: string
+   *           format: date
    *         description: Filter breakdown to a single day (YYYY-MM-DD)
    *         example: "2026-08-25"
    *       - in: query
    *         name: breakdownLimit
-   *         schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+   *         schema:
+   *           type: integer
+   *           minimum: 1
+   *           maximum: 500
+   *           default: 100
+   *         description: Maximum number of breakdown rows to return
    *     responses:
    *       200:
    *         description: Platform cost totals in the v2 `{ data, _meta }` envelope
    *         content:
    *           application/json:
    *             schema:
-   *               type: object
-   *               properties:
-   *                 data:
-   *                   type: object
-   *                   properties:
-   *                     totals: { type: object }
-   *                     byAgent: { type: array, items: { type: object } }
-   *                     breakdown: { type: array, items: { type: object } }
-   *                     recent: { type: array, items: { type: object } }
-   *                 _meta: { type: object }
+   *               $ref: '#/components/schemas/PlatformCostsResponse'
+   *             example:
+   *               data:
+   *                 totals:
+   *                   taskCount: 42
+   *                   totalTokens: 125000
+   *                   totalCostUsd: 1.2345
+   *                   exceededCount: 2
+   *                 byAgent:
+   *                   - agentId: "agent-1"
+   *                     agentType: "research"
+   *                     model: "llama-3.3-70b"
+   *                     taskCount: 10
+   *                     calls: 24
+   *                     promptTokens: 50000
+   *                     completionTokens: 12000
+   *                     totalTokens: 62000
+   *                     costUsd: 0.62
+   *                 breakdown:
+   *                   - agentId: "agent-1"
+   *                     agentType: "research"
+   *                     model: "llama-3.3-70b"
+   *                     day: "2026-08-25"
+   *                     calls: 8
+   *                     promptTokens: 16000
+   *                     completionTokens: 4000
+   *                     totalTokens: 20000
+   *                     costUsd: 0.2
+   *                 recent:
+   *                   - taskId: "task_ab12cd34ef56"
+   *                     walletPublicKey: "GBZXN7PIRZGNMHGA728XZVOG2GUFIDLAZ6AF2I2MD2OCYTAF2K1K4AAA"
+   *                     usedTokens: 1550
+   *                     budgetTokens: 10000
+   *                     costUsd: 0.00155
+   *                     exceeded: false
+   *                     settledAt: "2026-08-25T17:05:00.000Z"
+   *               _meta:
+   *                 version: "2.0"
+   *                 timestamp: "2026-08-25T17:05:00.000Z"
+   *                 requestId: "req_c918a245"
+   *                 apiVersion: "2.0"
    *       400:
    *         description: Invalid query parameters
    *         content:
    *           application/json:
-   *             schema: { $ref: '#/components/schemas/ValidationError' }
+   *             schema:
+   *               $ref: '#/components/schemas/ValidationError'
+   *             example:
+   *               error: "Validation failed"
+   *               details:
+   *                 - field: "day"
+   *                   message: "Query parameter \"day\" must be formatted YYYY-MM-DD"
    */
   router.get("/costs", (req: Request, res: Response, next: NextFunction): void => {
     try {
