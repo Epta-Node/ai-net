@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { GripVertical } from 'lucide-react';
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -53,6 +54,10 @@ export interface PreviewNodeData {
   status?: NodeExecutionStatus;
   /** Whether this node is currently selected. */
   selected?: boolean;
+  /** Drag-and-drop start callback. */
+  onDragStart?: (nodeId: string, e: React.DragEvent) => void;
+  /** Drop callback for node repositioning/reordering. */
+  onNodeDrop?: (draggedNodeId: string, targetNodeId: string) => void;
 }
 
 /** Normalise caller-supplied status strings to the four rendered states. */
@@ -159,17 +164,50 @@ function PreviewNode({ id, data, selected }: NodeProps<PreviewNodeData>) {
 
   const showTooltip = selected || hovered;
 
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    data.onDragStart?.(id, e);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const draggedId = e.dataTransfer.getData('text/plain');
+    if (draggedId && draggedId !== id) {
+      data.onNodeDrop?.(draggedId, id);
+    }
+  };
+
   return (
     <div
       className={`${styles.node} ${statusClassName(data.status)} ${selected ? styles.nodeSelected : ''}`}
       style={{ '--node-accent': accentColor } as React.CSSProperties}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
       aria-selected={selected}
       aria-label={`${data.label} node`}
       data-testid={`dag-node-${id}`}
       data-status={data.status ?? 'none'}
     >
+      <div
+        className={styles.dragHandle}
+        data-testid={`dag-drag-handle-${id}`}
+        draggable
+        onDragStart={handleDragStart}
+        aria-label={`Drag handle for ${data.label}`}
+        title="Drag to reposition node"
+      >
+        <GripVertical size={14} className={styles.dragIcon} />
+      </div>
+
       <Handle
         type="target"
         position={Position.Left}
@@ -363,13 +401,13 @@ interface InnerProps {
 function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onNodeSelect }: InnerProps) {
   const { t } = useTranslation();
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
+  const [customPositions, setCustomPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
 
   const isControlled = controlledSelectedId !== undefined || onNodeSelect !== undefined;
   const selectedNodeId = isControlled ? (controlledSelectedId ?? null) : internalSelectedId;
 
-  // ── Stable topology: positions are derived from node identity ONCE and
-  // cached. WebSocket status updates change `liveStatuses` / node data only
-  // and never re-run layout, so active pan/zoom viewport stays stable.
+  // Stable topology: default positions derived from node identity and cached.
   const topologyKey = useMemo(() => nodes.map((n) => n.id).join('|'), [nodes]);
   const positionsRef = useRef(new Map<string, { x: number; y: number }>());
   const positions = useMemo(() => {
@@ -384,9 +422,60 @@ function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onN
       }
     });
     return positionsRef.current;
-    // Topology only — status-only updates must not re-run layout.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topologyKey]);
+
+  const getNodePosition = useCallback(
+    (nodeId: string): { x: number; y: number } => {
+      if (customPositions[nodeId]) {
+        return customPositions[nodeId];
+      }
+      return positions.get(nodeId) ?? { x: 0, y: 60 };
+    },
+    [customPositions, positions],
+  );
+
+  const handleNodeDrop = useCallback(
+    (sourceId: string, targetId: string) => {
+      const sourcePos = getNodePosition(sourceId);
+      const targetPos = getNodePosition(targetId);
+      setCustomPositions((prev) => ({
+        ...prev,
+        [sourceId]: { ...targetPos },
+        [targetId]: { ...sourcePos },
+      }));
+    },
+    [getNodePosition],
+  );
+
+  const handleCanvasDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const nodeId = e.dataTransfer.getData('text/plain') || draggedNodeId;
+      if (!nodeId) return;
+
+      const clientX = typeof e.clientX === 'number' && !Number.isNaN(e.clientX) ? e.clientX : 150;
+      const clientY = typeof e.clientY === 'number' && !Number.isNaN(e.clientY) ? e.clientY : 100;
+      const rect = e.currentTarget?.getBoundingClientRect?.() ?? { left: 0, top: 0 };
+      const rawX = clientX - (rect.left || 0) - 85;
+      const rawY = clientY - (rect.top || 0) - 35;
+      const x = Math.max(0, Math.round(rawX));
+      const y = Math.max(0, Math.round(rawY));
+
+      setCustomPositions((prev) => ({
+        ...prev,
+        [nodeId]: { x, y },
+      }));
+      setDraggedNodeId(null);
+    },
+    [draggedNodeId],
+  );
+
+  const handleNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
+    setCustomPositions((prev) => ({
+      ...prev,
+      [node.id]: { x: Math.round(node.position.x), y: Math.round(node.position.y) },
+    }));
+  }, []);
 
   const flowNodes = useMemo<Node<PreviewNodeData>[]>(
     () =>
@@ -396,26 +485,28 @@ function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onN
         const liveRaw = liveStatuses?.[node.id];
         const status = normalizeStatus(liveRaw ?? ext.status);
         const isSelected = selectedNodeId === node.id;
+        const position = customPositions[node.id] ?? positions.get(node.id) ?? { x: 0, y: 60 };
 
         return {
           id: node.id,
           type: 'previewNode',
+          dragHandle: `.${styles.dragHandle}`,
           data: {
             label: node.label,
             capability: ext.capability,
             cost: ext.cost,
             status,
             selected: isSelected,
+            onDragStart: (id: string) => setDraggedNodeId(id),
+            onNodeDrop: handleNodeDrop,
           },
-          // Stable horizontal layout; positions cached by topology, untouched
-          // by in-place data updates so pan/zoom never jumps on WS events.
-          position: positions.get(node.id) ?? { x: 0, y: 60 },
+          // Custom node positions are persisted in component state; defaults to topology layout
+          position,
           selected: isSelected,
-          // Nodes are not draggable in preview — only in full task detail view
-          draggable: false,
+          draggable: true,
         };
       }),
-    [nodes, liveStatuses, selectedNodeId, positions],
+    [nodes, liveStatuses, selectedNodeId, positions, customPositions, handleNodeDrop],
   );
 
   const flowEdges = useMemo<Edge[]>(
@@ -475,6 +566,11 @@ function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onN
       className={styles.container}
       aria-label={t('agent.dag.controls')}
       data-testid="dag-preview-canvas"
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+      }}
+      onDrop={handleCanvasDrop}
     >
       <ReactFlow
         nodes={flowNodes}
@@ -482,6 +578,7 @@ function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onN
         nodeTypes={nodeTypes}
         onNodeClick={handleNodeClick}
         onPaneClick={handlePaneClick}
+        onNodeDragStop={handleNodeDragStop}
         fitView
         fitViewOptions={{ padding: 0.25 }}
         connectionLineType={ConnectionLineType.SmoothStep}
@@ -492,7 +589,7 @@ function DAGPreviewInner({ nodes, edges, liveStatuses, controlledSelectedId, onN
         panOnDrag
         panOnScroll={false}
         nodesConnectable={false}
-        nodesDraggable={false}
+        nodesDraggable={true}
         preventScrolling
         // ── Attribution ─────────────────────────────────────────────────────
         attributionPosition="bottom-left"
