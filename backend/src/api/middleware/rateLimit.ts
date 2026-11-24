@@ -262,7 +262,7 @@ export function getRateLimiter(): RedisRateLimiter {
 //
 //   public    — unauthenticated endpoints (/api/stats, /api/agents GET, /health)
 //   authed    — authenticated task creation (/api/tasks)
-//   admin     — admin-only endpoints (/api/admin/*)
+//   admin     — admin-only endpoints (/api/admin/*), stricter and allowlist-aware
 //
 // Limits are intentionally conservative; operators should tune via env.
 
@@ -286,12 +286,50 @@ export function createAuthedLimiter(): RateLimiter {
   });
 }
 
+/** Normalise an IP for allowlist comparison (Express may report ::ffff:a.b.c.d). */
+export function normalizeAdminIp(ip: string): string {
+  const normalized = ip.trim().toLowerCase();
+  return normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
+}
+
+/** Trusted IPs exempt from admin rate limiting, from `ADMIN_IP_ALLOWLIST`. */
+export function adminIpAllowlist(): string[] {
+  const raw = (getConfig() as { ADMIN_IP_ALLOWLIST?: string }).ADMIN_IP_ALLOWLIST ?? "";
+  return String(raw)
+    .split(",")
+    .map(normalizeAdminIp)
+    .filter((ip) => ip.length > 0);
+}
+
+/** True when the request's IP is explicitly exempt from admin rate limiting. */
+export function isAdminIpAllowed(ip: string | undefined): boolean {
+  if (!ip) return false;
+  return adminIpAllowlist().includes(normalizeAdminIp(ip));
+}
+
+/**
+ * Admin limiter: 10 req/min per IP by default, with an optional IP allowlist
+ * for trusted operators. Allowlisted IPs bypass counting entirely so a burst of
+ * maintenance calls cannot lock out an internal client.
+ */
 export function createAdminLimiter(): RateLimiter {
   const cfg = getConfig();
-  return createRateLimiter({
+  const limiter = createRateLimiter({
     windowMs: cfg.RATE_LIMIT_ADMIN_WINDOW_MS,
     maxRequests: cfg.RATE_LIMIT_ADMIN_MAX_REQUESTS,
   });
+  if (adminIpAllowlist().length === 0) return limiter;
+
+  return {
+    ...limiter,
+    middleware: (req, res, next) => {
+      if (isAdminIpAllowed(req.ip)) {
+        next();
+        return;
+      }
+      limiter.middleware(req, res, next);
+    },
+  };
 }
 
 // ── Module-level singleton instances ─────────────────────────────────────────

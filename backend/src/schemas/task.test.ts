@@ -11,7 +11,10 @@
  */
 
 import {
+  MAX_AGENT_PREFERENCES,
+  MAX_AGENT_PREFERENCE_LENGTH,
   MAX_PROMPT_LENGTH,
+  agentPreferenceSchema,
   createTaskSchema,
   listTasksQuerySchema,
   promptSchema,
@@ -118,11 +121,22 @@ describe("promptSchema", () => {
     expect(promptSchema.safeParse(12345).success).toBe(false);
   });
 
-  it("reduces a whitespace-only prompt to an empty string", () => {
-    // `.min(1)` runs before the trim, so this passes length validation and then
-    // sanitises down to nothing. Pinned so reordering the checks is a visible
-    // change rather than a silent one.
-    expect(promptSchema.parse("   ")).toBe("");
+  it("rejects a whitespace-only prompt once sanitised", () => {
+    const result = promptSchema.safeParse("   ");
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("Prompt is required");
+  });
+
+  it("rejects a prompt made only of stripped control characters", () => {
+    expect(promptSchema.safeParse("\x00\x07 \x1F").success).toBe(false);
+  });
+
+  it("gives a descriptive message for a non-string prompt", () => {
+    const result = promptSchema.safeParse(12345);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("Prompt must be a string");
   });
 });
 
@@ -166,5 +180,113 @@ describe("updateTaskStatusSchema", () => {
 
   it("rejects a missing status even with other fields present", () => {
     expect(updateTaskStatusSchema.safeParse({ prompt: "x" }).success).toBe(false);
+  });
+});
+const VALID_WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN";
+
+describe("createTaskSchema — request body validation (#894)", () => {
+  it("reports a missing prompt as required", () => {
+    const result = createTaskSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.path).toEqual(["prompt"]);
+    expect(result.error.issues[0]!.message).toBe("Prompt is required");
+  });
+
+  it("accepts a well-formed Stellar wallet public key", () => {
+    expect(createTaskSchema.parse({ prompt: "x", walletPublicKey: VALID_WALLET }).walletPublicKey)
+      .toBe(VALID_WALLET);
+  });
+
+  it.each([
+    ["too short", "GABC"],
+    ["wrong leading letter", `S${VALID_WALLET.slice(1)}`],
+    ["lowercase", VALID_WALLET.toLowerCase()],
+    ["characters outside base32", `G${"1".repeat(55)}`],
+    ["one character too long", `${VALID_WALLET}A`],
+    ["empty", ""],
+  ])("rejects a wallet public key that is %s", (_label, walletPublicKey) => {
+    const result = createTaskSchema.safeParse({ prompt: "x", walletPublicKey });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.path).toEqual(["walletPublicKey"]);
+    expect(result.error.issues[0]!.message).toBe("Must be a valid Stellar public key");
+  });
+
+  it("still allows the wallet to be omitted", () => {
+    expect(createTaskSchema.safeParse({ prompt: "x" }).success).toBe(true);
+  });
+
+  it("describes a non-numeric budget", () => {
+    const result = createTaskSchema.safeParse({ prompt: "x", maxBudgetXLM: "10" });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("maxBudgetXLM must be a number");
+  });
+
+  it("describes a budget below the floor", () => {
+    const result = createTaskSchema.safeParse({ prompt: "x", maxBudgetXLM: 0.05 });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("maxBudgetXLM must be at least 0.1");
+  });
+});
+
+describe("agentPreferenceSchema", () => {
+  it("trims surrounding whitespace", () => {
+    expect(agentPreferenceSchema.parse("  research-agent-v1  ")).toBe("research-agent-v1");
+  });
+
+  it("accepts an entry of exactly the maximum length", () => {
+    expect(agentPreferenceSchema.safeParse("a".repeat(MAX_AGENT_PREFERENCE_LENGTH)).success).toBe(
+      true,
+    );
+  });
+
+  it("rejects an entry one character over the maximum length", () => {
+    expect(
+      agentPreferenceSchema.safeParse("a".repeat(MAX_AGENT_PREFERENCE_LENGTH + 1)).success,
+    ).toBe(false);
+  });
+
+  it.each([[""], ["   "]])("rejects an empty entry %j", (value) => {
+    const result = agentPreferenceSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("Agent preference must not be empty");
+  });
+
+  it("rejects a non-string entry", () => {
+    const result = agentPreferenceSchema.safeParse(7);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe("Agent preference must be a string");
+  });
+});
+
+describe("createTaskSchema — agentPreferences bounds", () => {
+  it("accepts exactly the maximum number of preferences", () => {
+    const agentPreferences = Array.from({ length: MAX_AGENT_PREFERENCES }, (_, i) => `agent-${i}`);
+    expect(createTaskSchema.safeParse({ prompt: "x", agentPreferences }).success).toBe(true);
+  });
+
+  it("rejects more than the maximum number of preferences", () => {
+    const agentPreferences = Array.from(
+      { length: MAX_AGENT_PREFERENCES + 1 },
+      (_, i) => `agent-${i}`,
+    );
+    const result = createTaskSchema.safeParse({ prompt: "x", agentPreferences });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.message).toBe(
+      `At most ${MAX_AGENT_PREFERENCES} agent preferences allowed`,
+    );
+  });
+
+  it("rejects a blank entry inside the list and reports its index", () => {
+    const result = createTaskSchema.safeParse({ prompt: "x", agentPreferences: ["research", " "] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]!.path).toEqual(["agentPreferences", 1]);
   });
 });

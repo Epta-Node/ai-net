@@ -5,6 +5,7 @@
  */
 
 import { httpDispatch, DEFAULT_DISPATCH_OPTIONS, type DispatchOptions } from './dispatch';
+import { _resetCircuitBreakerRegistry } from '../services/circuitBreaker';
 import type { AgentRegistration } from '../types/agent';
 import type { DAGNode } from '../types/task';
 
@@ -94,6 +95,8 @@ function failThenSucceedFetch(failCount: number, successBody: unknown): typeof f
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('httpDispatch', () => {
+  beforeEach(() => _resetCircuitBreakerRegistry());
+
   describe('successful dispatch', () => {
     it('returns parsed JSON response from the agent', async () => {
       const expected = { summary: 'Solar energy is growing fast in SEA.' };

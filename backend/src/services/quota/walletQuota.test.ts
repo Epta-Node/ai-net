@@ -226,3 +226,97 @@ describe('QuotaExceededError', () => {
     expect(err.statusCode).toBe(429);
   });
 });
+
+describe('wallet quota edge cases (Issue #904)', () => {
+  it('increments used count as tasks are consumed and decrements remaining headroom', () => {
+    const limit = 3;
+    const before = checkWalletQuota(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    expect(before).toMatchObject({ used: 0, remaining: 3, rejected: false });
+
+    checkAndConsumeTask(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    const afterOne = checkWalletQuota(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    expect(afterOne).toMatchObject({ used: 1, remaining: 2, rejected: false });
+
+    checkAndConsumeTask(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    checkAndConsumeTask(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    const afterThree = checkWalletQuota(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    expect(afterThree).toMatchObject({ used: 3, remaining: 0, rejected: true });
+  });
+
+  it('resets quota at the next UTC midnight boundary by excluding prior-window events', () => {
+    const justBeforeMidnight = Date.parse('2026-10-18T23:59:59.000Z');
+    const nextReset = '2026-10-19T00:00:00.000Z';
+    checkAndConsumeTask(WALLET, {
+      taskLimit: 1,
+      tokenLimit: 0,
+      now: () => justBeforeMidnight,
+    });
+
+    const beforeReset = checkWalletQuota(WALLET, {
+      taskLimit: 1,
+      tokenLimit: 0,
+      now: () => justBeforeMidnight,
+    });
+    expect(beforeReset.resetAt).toBe(nextReset);
+    expect(beforeReset.rejected).toBe(true);
+
+    const afterWindow = Date.parse('2026-10-19T23:59:59.001Z');
+    const afterReset = checkWalletQuota(WALLET, {
+      taskLimit: 1,
+      tokenLimit: 0,
+      now: () => afterWindow,
+    });
+    expect(afterReset.used).toBe(0);
+    expect(afterReset.remaining).toBe(1);
+    expect(afterReset.rejected).toBe(false);
+    expect(afterReset.resetAt).toBe('2026-10-20T00:00:00.000Z');
+  });
+
+  it('rejects when quota is exhausted and does not record additional task events', () => {
+    checkAndConsumeTask(WALLET, { taskLimit: 2, tokenLimit: 0, now });
+    checkAndConsumeTask(WALLET, { taskLimit: 2, tokenLimit: 0, now });
+
+    expect(() => checkAndConsumeTask(WALLET, { taskLimit: 2, tokenLimit: 0, now })).toThrow(
+      QuotaExceededError
+    );
+    expect(() => checkAndConsumeTask(WALLET, { taskLimit: 2, tokenLimit: 0, now })).toThrow(
+      'Task submission quota reached'
+    );
+
+    const { n } = mem
+      .prepare(
+        "SELECT COUNT(*) AS n FROM wallet_quota_events WHERE walletPublicKey = ? AND kind = 'task'"
+      )
+      .get(WALLET) as { n: number };
+    expect(n).toBe(2);
+
+    const exhausted = checkWalletQuota(WALLET, { taskLimit: 2, tokenLimit: 0, now });
+    expect(exhausted.rejected).toBe(true);
+    expect(exhausted.remaining).toBe(0);
+  });
+
+  it('handles concurrent quota updates consistently', async () => {
+    const limit = 10;
+    const attempts = Array.from({ length: 10 }, () =>
+      Promise.resolve().then(() =>
+        checkAndConsumeTask(WALLET, { taskLimit: limit, tokenLimit: 0, now })
+      )
+    );
+
+    const results = await Promise.all(attempts);
+    expect(results).toHaveLength(10);
+    expect(results.every((r) => r.rejected === false)).toBe(true);
+
+    const check = checkWalletQuota(WALLET, { taskLimit: limit, tokenLimit: 0, now });
+    expect(check.used).toBe(10);
+    expect(check.remaining).toBe(0);
+    expect(check.rejected).toBe(true);
+
+    const { n } = mem
+      .prepare(
+        "SELECT COUNT(*) AS n FROM wallet_quota_events WHERE walletPublicKey = ? AND kind = 'task'"
+      )
+      .get(WALLET) as { n: number };
+    expect(n).toBe(10);
+  });
+});

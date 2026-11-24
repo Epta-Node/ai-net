@@ -9,7 +9,7 @@ import {
   resetDbQueryMetrics,
 } from "./queryMetrics";
 
-// Force the defaults: slow threshold 200ms and the built-in bucket bounds.
+// Force the defaults: slow threshold 100ms and the built-in bucket bounds.
 jest.mock("../config", () => ({
   getConfig: () => {
     throw new Error("config unavailable in this test");

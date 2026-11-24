@@ -173,7 +173,59 @@ For on-chain contract upgrades, see [`smart-contracts/docs/STORAGE_MIGRATION.md`
 
 ---
 
-## 6. References
+## 6. SQLite migrations for payments, agents, and tasks
+
+From `backend/`, `npm run db:migrate` opens three SQLite files in the current working directory. Each has its own numbered SQL sequence and its own `schema_migrations` ledger. A migration and its ledger update commit together in that database. Earlier migrations can remain committed if a later migration fails. [CLI targets](../backend/src/db/cli.ts) · [Migration runner](../backend/src/db/migrator.ts)
+
+| Database | Schema managed by its migrations |
+| --- | --- |
+| `payments.db` | `payments` tracks escrow by composite key `(taskId, nodeId)`, with balance ID, amount in stroops, status, transaction hash, and timestamps. [Payments SQL](../backend/src/db/migrations/payments) |
+| `agents.db` | `agents` stores identity, capabilities, pricing, endpoint, wallet, heartbeat, and reputation. `agent_alerts` records watchdog alerts. [Agents SQL](../backend/src/db/migrations/agents) |
+| `tasks.db` | `tasks` holds the prompt, wallet, status, DAG JSON, and idempotency key. `task_events` records ordered events. Related tables hold quality scores, costs, token usage, and feature flags. [Tasks SQL](../backend/src/db/migrations/tasks) |
+
+### Add a migration
+
+Choose the owning directory and its next unused numeric version. Add two files with the same version and name. Keep applied files intact because the runner verifies the checksum of applied up SQL. For example, a transaction-hash lookup in payments could add this pair after version 003.
+
+```sql
+-- payments/004_index_payment_tx_hash.up.sql
+CREATE INDEX idx_payments_tx_hash ON payments (txHash);
+```
+
+```sql
+-- payments/004_index_payment_tx_hash.down.sql
+DROP INDEX idx_payments_tx_hash;
+```
+
+### Exercise an upgrade and rollback locally
+
+Start in `backend/` with the backend development dependencies available. Run the three-store CLI from a disposable directory. For a data migration, start with consistent copies of representative databases taken before the proposed change and compare affected rows before and after each step.
+
+```bash
+backend_dir="$PWD"
+scratch_dir="$(mktemp -d)"
+(
+  cd "$scratch_dir" || exit 1
+  dbcli() { "$backend_dir/node_modules/.bin/ts-node" --project "$backend_dir/tsconfig.json" "$backend_dir/src/db/cli.ts" "$@"; }
+  dbcli migrate || exit 1
+  sqlite3 payments.db 'SELECT version, name FROM schema_migrations ORDER BY version;'
+  sqlite3 payments.db 'PRAGMA index_list(payments);'
+  dbcli rollback --steps 1 || exit 1
+  sqlite3 payments.db 'PRAGMA index_list(payments);'
+  dbcli migrate || exit 1
+  sqlite3 payments.db 'PRAGMA integrity_check;'
+)
+```
+
+With the example pair, the index should appear on upgrade, disappear on rollback, and return on reapplication. Repeat the ledger and schema checks for the other two files. A second migrate at the latest version should have no pending work.
+
+### Roll back a deployment
+
+Pause writers and take a consistent backup of **each** file, for example with SQLite's `.backup` command. Inspect the latest ledger row and its matching down SQL in each store. The three-store CLI's `rollback --steps 1` undoes one applied migration **in each database**, even when the release only changed payments. Use it only when all three reversals are intended. For a single-store correction, use a new forward migration in the affected directory or restore a consistent backup set.
+
+The backend's `npm run db:rollback` and `db:migrate:status` scripts invoke the separate consolidated-database runner. For the three files, inspect each `schema_migrations` table directly. Review what each down file actually reverses. For example, payments 003 removes its index on rollback but retains its timestamp columns, so reapplying its original `ADD COLUMN` statements can fail. Restore the pre-change backup when an exact reversal is required. [Package scripts](../backend/package.json) · [Payments 003 down SQL](../backend/src/db/migrations/payments/003_add_payments_timestamps.down.sql)
+
+## 7. References
 
 - [REST API Reference](./API_REFERENCE.md) — current endpoint schemas and error codes
 - [On-Chain Events](../smart-contracts/docs/events.md) — Soroban event catalog

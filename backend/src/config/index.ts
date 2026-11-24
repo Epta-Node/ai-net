@@ -89,6 +89,8 @@ const envSchema = z.object({
   STELLAR_COORDINATOR_SECRET: z.string().optional().superRefine(rejectPlaceholder),
   STELLAR_TEST_SECRET: z.string().optional().superRefine(rejectPlaceholder),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+  /** Primary frontend origin allowed by CORS for public API routes. */
+  FRONTEND_ORIGIN: z.string().url().optional(),
   NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? '0.1.0'),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
   HEALTH_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
@@ -129,7 +131,13 @@ const envSchema = z.object({
   RATE_LIMIT_AUTHED_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_AUTHED_MAX_REQUESTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(10),
+  /**
+   * Comma-separated IPs exempt from admin rate limiting (trusted operators or
+   * internal proxies). Empty by default. IPv4-mapped IPv6 addresses are
+   * normalised, so `127.0.0.1` also matches `::ffff:127.0.0.1`.
+   */
+  ADMIN_IP_ALLOWLIST: z.string().default(''),
   DAILY_TASK_LIMIT_PER_WALLET: z.coerce.number().int().min(0).default(100),
 
   // ── Per-wallet abuse-control quota (issue #803) ─────────────────────────────
@@ -166,6 +174,8 @@ const envSchema = z.object({
    * `0` disables the budget.
    */
   DAILY_COST_BUDGET_USD: z.coerce.number().min(0).default(0),
+  /** Max estimated inference cost per request for Venice router model selection. */
+  MAX_INFERENCE_COST_USD: z.coerce.number().min(0).default(0.05),
 
   HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   HEARTBEAT_STALE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(5),
@@ -303,7 +313,7 @@ const envSchema = z.object({
   WS_PONG_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
   // ── SSE task event stream (#751) ────────────────────────────────────────────
-  SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(5),
+  SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(50),
   SSE_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   /** Socket write-buffer size above which task events are dropped for a slow client (#813). */
   SSE_HIGH_WATER_MARK_BYTES: z.coerce.number().int().positive().default(65_536),
@@ -369,8 +379,8 @@ const envSchema = z.object({
   // ── Database observability (#807) ───────────────────────────────────────────
   /** Comma-separated query-latency histogram bounds in milliseconds. Default: 1,5,10,50,100,500,1000 */
   DB_LATENCY_BUCKETS: z.string().optional(),
-  /** Statements at or above this duration are logged as `slow_query`. Default: 200 */
-  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(200),
+  /** Statements at or above this duration are logged as `slow_query`, with their SQL text. Default: 100 (#923) */
+  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(100),
 
   // ── Agent ownership proof (#557, #558) ───────────────────────────────────────
   /**
@@ -415,7 +425,9 @@ const envSchema = z.object({
   /** Ceiling for a single job retry delay, in ms. */
   JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
   /** Attempts before a job is moved to the dead-letter queue. */
-  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /** Concurrent background task workers. */
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(3),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;

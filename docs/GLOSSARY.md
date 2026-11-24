@@ -100,35 +100,37 @@ dependencies are eligible for immediate dispatch; nodes with dependencies are
 dispatched only after every listed dependency has completed successfully.
 See `backend/src/coordinator/dag.ts` and [ADR-004](../docs/architecture/decisions/ADR-004-dag-task-decomposition.md).
 
+### Soroban
+
+Stellar's smart contract platform. An ai-net contract compiles to WebAssembly (Wasm) and runs at a contract address on the Stellar network. Its code can read ledger state and request authorization from an account or another contract. [WASM Hash](#wasm-hash) · [require_auth](#require_auth)
+
+### Ledger Entry
+
+A record in Stellar's ledger state with a key that identifies it. Accounts, contract code, and contract data are examples. A single contract can own many data entries. [Persistent Storage](#persistent-storage)
+
+### TTL
+
+Time to live, measured in ledgers. A contract entry remains live through its last live ledger sequence. Extending its TTL moves that boundary forward. At expiry, the storage type determines whether the data can be restored. [Persistent Storage](#persistent-storage) · [Temporary Storage](#temporary-storage)
+
 ### Ledger Rent
 
-The ongoing storage fee charged by the Stellar network for keeping data in
-a smart contract's persistent or temporary storage between ledgers. If rent
-is not paid (by extending the TTL via `extend_ttl`), the entry eventually
-expires and is deleted. ai-net contracts call `extend_ttl` on writes to
-agent and task records to avoid unexpected eviction.
+The resource fee for keeping contract code or data live over a number of ledgers. The size of an entry and the duration of an extension affect rent. [TTL](#ttl)
 
 ### Persistent Storage
 
-One of Soroban's three storage tiers. Entries in persistent storage survive
-indefinitely as long as their TTL is extended and rent is paid. ai-net uses
-persistent storage for canonical records that must never be silently deleted
-— agent registrations, task outcomes, and reputation scores. See [ADR-001](../docs/architecture/decisions/ADR-001-stellar-soroban-payments.md).
+Each key has its own ledger entry and TTL. Use it for records such as balances that must remain recoverable. Expired persistent entries are archived and can be restored. [Stellar storage guide](https://developers.stellar.org/docs/build/guides/storage/use-persistent)
 
 ### Temporary Storage
 
-One of Soroban's three storage tiers. Entries in temporary storage expire
-automatically after a fixed number of ledgers and cannot be restored once
-expired. ai-net uses temporary storage for short-lived coordination state
-such as open bid windows and nonce locks.
+Each key has its own TTL. Expiration permanently removes the value, making this tier suitable for data such as a short-lived lock. [TTL](#ttl)
 
 ### Instance Storage
 
-One of Soroban's three storage tiers. Instance storage is contract-level
-(one entry per contract instance rather than per key). ai-net uses instance
-storage for contract-wide configuration — admin key, fee parameters, and
-feature flags — because it is the cheapest to read and shares the TTL of the
-contract instance itself.
+Small contract-wide settings, such as an admin address, can live inside the contract instance entry. All keys in instance storage share that entry's TTL and are archived and restored with it. [Ledger Entry](#ledger-entry)
+
+### require_auth
+
+A Soroban SDK method that asks the host to verify an address authorized the current invocation. For a privileged operation, the contract selects or checks the permitted address and calls `require_auth()` on it. [Smart Contract Upgrade](#smart-contract-upgrade)
 
 ### Idempotency Key
 
@@ -224,27 +226,31 @@ contract. See [Payment Flows & Escrow Lifecycle](../docs/architecture/payment-es
 
 ### WASM Hash
 
-The SHA-256 hash of a compiled Soroban contract's WebAssembly binary, used
-as its identifier on the Stellar network. When uploading a new contract
-version, the uploader first stores the WASM binary (obtaining its hash), then
-deploys or upgrades a contract instance to point to that hash. The
-`smart-contracts/scripts/deploy.ts` script prints the WASM hash after each
-build for reproducibility verification.
+The SHA-256 digest of the compiled WebAssembly bytes. Uploading code makes it available by this hash. Multiple contract instances can reference the same code while keeping separate addresses and state. [Smart Contract Upgrade](#smart-contract-upgrade)
+
+### Smart Contract Upgrade
+
+An existing instance switches to a new uploaded Wasm hash through its upgrade logic. Its address and data persist. If the new code expects a different data layout, the upgrade needs a compatible reader or a migration. [Upgrade guide](../smart-contracts/docs/UPGRADE_GUIDE.md) · [Storage migration](../smart-contracts/docs/STORAGE_MIGRATION.md)
+
+### Testnet
+
+Stellar's public development network. Test XLM pays for transactions, and periodic resets clear accounts and deployments. [Friendbot](#friendbot) · [Stellar networks](https://developers.stellar.org/docs/networks)
+
+### Mainnet
+
+Stellar's production network, where transactions move real assets. Mainnet has its own ledger and network passphrase, so clients must select it explicitly when signing for production. [Testnet](#testnet)
 
 ### Horizon
 
-Stellar's public HTTP API server, maintained by the Stellar Development
-Foundation, that provides REST access to ledger data, account balances,
-transactions, and operation history. ai-net's backend queries Horizon to
-verify on-chain payment settlement. Testnet endpoint:
-`https://horizon-testnet.stellar.org`.
+Stellar's REST API for indexed account, transaction, and operation history. The market-report E2E test looks up payment operations through Horizon to check what was released. [E2E guide](./e2e-testing.md)
+
+### RPC
+
+Stellar Remote Procedure Call service. A contract client can simulate an invocation, submit a signed transaction, query its result, and read ledger entries. [Ledger Entry](#ledger-entry) · [Stellar RPC](https://developers.stellar.org/docs/data/apis/rpc)
 
 ### Friendbot
 
-A Stellar testnet utility that funds a freshly-generated keypair with test
-XLM at no cost. Used in contributor onboarding and CI to obtain testnet funds
-without requiring a real wallet. Endpoint:
-`https://friendbot.stellar.org?addr=<PUBLIC_KEY>`.
+A faucet that accepts a public address and funds it with test XLM. The market-report E2E suite uses it to fund the coordinator and agent before exercising payments. [Testnet](#testnet)
 
 ### Freighter
 

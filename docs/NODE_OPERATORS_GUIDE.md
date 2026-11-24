@@ -10,6 +10,7 @@ Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provide
 2. [Hardware & Network Requirements](#2-hardware--network-requirements)
 3. [Prerequisites & Tooling](#3-prerequisites--tooling)
 4. [Secrets Management & Keypair Configuration](#4-secrets-management--keypair-configuration)
+   - [Feature flags](#feature-flags)
 5. [Smart Contract Deployment & Linking](#5-smart-contract-deployment--linking)
 6. [Funding Accounts & Escrow Setup](#6-funding-accounts--escrow-setup)
 7. [Running the Node](#7-running-the-node)
@@ -17,6 +18,8 @@ Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provide
    - [Option B: Systemd Daemon](#option-b-systemd-daemon)
 8. [Node Verification Checklist](#8-node-verification-checklist)
 9. [Observability, Metrics & Health Monitoring](#9-observability-metrics--health-monitoring)
+   - [Grafana dashboard](#grafana-dashboard)
+   - [Prometheus alert rules](#prometheus-alert-rules)
 10. [Downtime Handling & Graceful Shutdown](#10-downtime-handling--graceful-shutdown)
 11. [Backup & Disaster Recovery](#11-backup--disaster-recovery)
 12. [Troubleshooting & Common Errors](#12-troubleshooting--common-errors)
@@ -72,7 +75,7 @@ An **ai-net Node** is an autonomous coordination daemon that connects AI agents 
 | `3001` | TCP | Ingress / Reverse Proxy (Nginx/Cloudflare) | Backend REST API & WebSockets |
 | `3000` | TCP | Ingress / Internal | Frontend Dashboard (optional) |
 | `5432` | TCP | `127.0.0.1` / Private Subnet only | PostgreSQL Database |
-| `9090` | TCP | Prometheus Scraper / Private VPC | Prometheus Metrics Endpoint (`/metrics`) |
+| `9090` | TCP | Monitoring network | Prometheus server. The scraper reads `/metrics` on the backend HTTP port. |
 
 > ⚠️ **Security Warning**: Never expose port `5432` (PostgreSQL) or your raw secrets to the public internet. Always use SSL/TLS termination with valid certificates.
 
@@ -188,6 +191,38 @@ RECONCILIATION_WEBHOOK_URL=
 forwarded headers are ignored. Set it to a trusted proxy hop count or trusted
 IP/CIDR ranges only when the backend is reachable exclusively through those
 proxies.
+
+### Feature flags
+
+The backend resolves a flag from its runtime override, then its environment, then its compiled default. Set environment values in the backend process (for example, `FEATURE_STREAMING_RESPONSES=false`) and restart or recreate it. Use `true` or `false`. An empty variable falls back to the default. A persisted runtime override still takes precedence after restart.
+
+| Flag | Environment variable | Default | Scope |
+| --- | --- | --- | --- |
+| `streaming_responses` | `FEATURE_STREAMING_RESPONSES` | on | Task event SSE endpoint |
+| `dag_preview` | `FEATURE_DAG_PREVIEW` | off | Registered for DAG previews |
+| `experimental_agents` | `FEATURE_EXPERIMENTAL_AGENTS` | off | Registered for experimental agents |
+| `quality_scorer` | `FEATURE_QUALITY_SCORER` | on | Registered for output quality scoring |
+| `reconciliation` | `FEATURE_RECONCILIATION` | on | Registered for payment reconciliation |
+| `agent_ownership_proof` | `FEATURE_AGENT_OWNERSHIP_PROOF` | on | Ownership checks for agent registration and heartbeats |
+
+A flag affects callers that consult it. For the four entries marked *registered*, verify the consuming code path before relying on a flag as an operational switch. Keep ownership proof enabled in normal operation.
+
+**Admin API.** Set `ADMIN_API_KEY` on the backend and use the same key in the request header. These examples use the repository Compose backend on port 3000. The GET response includes the master value and its source under `flags`, and rollout settings and audit fields under `records`.
+
+```sh
+FLAGS_URL=http://localhost:3000/api/admin/flags
+curl --fail -H "X-Admin-API-Key: ${ADMIN_API_KEY}" "$FLAGS_URL"
+curl --fail -X PUT -H "X-Admin-API-Key: ${ADMIN_API_KEY}" \
+  -H 'Content-Type: application/json' -d '{"enabled":true,"rolloutPercent":10,"enabledWallets":[]}' \
+  "$FLAGS_URL/dag_preview"
+curl --fail -X DELETE -H "X-Admin-API-Key: ${ADMIN_API_KEY}" "$FLAGS_URL/dag_preview"
+```
+
+PUT requires boolean `enabled`. Omitted rollout fields retain their previous values. A new record defaults to 100% and an empty wallet list. DELETE removes the override and restores environment/default evaluation. Runtime records persist in the tasks database and load into memory on startup. Verify the effective settings on each backend replica.
+
+**Wallet rollout.** An explicitly listed wallet is enabled even when the master switch is off. For other wallets, enable the switch and set an integer percentage from 0 through 100. The service hashes `flag:walletPublicKey` with SHA-256 and uses the first four bytes as an unsigned big-endian integer modulo 100. At 10%, buckets 0–9 participate. Raising the percentage keeps the existing cohort. A call without a wallet context is off during a partial rollout. To disable a flag for everyone, send `{"enabled":false,"enabledWallets":[]}`.
+
+**Adding a flag.** Add its key to `KNOWN_FLAGS` and its default to `DEFAULTS`, declare the corresponding optional environment key in the config schema, and list it in the environment example. Gate the feature at its entry point with `isEnabled(key, { walletPublicKey })` when it supports per-wallet rollout. Cover default, environment, runtime and wallet-context behavior in the flag and consumer tests. The admin API also accepts runtime-only keys that match `^[a-z][a-z0-9_]{1,63}$`. [Flag service](../backend/src/services/featureFlags.ts) · [Config schema](../backend/src/config/index.ts) · [Environment example](../backend/.env.example) · [Admin routes](../backend/src/api/routes/flags.ts)
 
 ---
 
@@ -430,13 +465,46 @@ Monitor the logs (`journalctl -u ainet-node -f` or `docker compose logs -f`) to 
 
 ### Prometheus Metrics
 
-The node exposes Prometheus-compatible metrics at `GET /metrics`:
+The backend serves Prometheus text at `GET /metrics`. The response's `# HELP` and `# TYPE` lines describe the series available on that node. Some families appear only after the first request or database record. [Metric collector](../backend/src/services/prometheus.ts)
 
-- `ainet_tasks_total{status="completed|failed"}`: Total processed workflow tasks.
-- `ainet_task_duration_seconds`: Task execution latency histogram.
-- `ainet_escrow_settlements_total`: Number of on-chain escrow settlements.
-- `ainet_stellar_rpc_latency_seconds`: Latency of Stellar Horizon / Soroban RPC calls.
-- `ainet_active_agents`: Current count of active registered agents.
+| Series | What to look for |
+| --- | --- |
+| `up{job="ai-net-backend"}`, `ainet_up` | Prometheus sets `up` to 0 when a scrape fails. The backend emits `ainet_up 1` when it can answer. Check target reachability first. |
+| `ainet_http_request_duration_milliseconds_bucket`, `ainet_http_server_errors_total` | Compare HTTP latency with server errors. The HTTP collector derives both from its retained request samples. |
+| `ainet_tasks_total{status="running"}`, `ainet_agents_total{status="online"}` | Current database counts by status. A growing queue with fewer online agents points to a capacity or heartbeat issue. |
+| `ainet_queue_pending`, `ainet_queue_dlq_depth` | Pending jobs await processing. A sustained dead-letter backlog warrants inspecting failed jobs and their last error before replay. |
+| `ainet_payment_amount_xlm`, `ainet_payments_total` | Amount in XLM and record count grouped by local payment status. Reconcile long-lived locks against the ledger. |
+| `ainet_llm_latency_milliseconds_bucket`, `ainet_cost_budget_used_ratio` | Agent execution latency and fraction of daily budget used. A ratio of 0.75 means 75%. |
+| `ainet_process_memory_rss_bytes`, `sse_events_dropped_total` | Track resident memory over time and increasing drops from SSE backpressure. |
+
+### Grafana dashboard
+
+1. From the repository root, supply `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` to Compose and run `docker compose --profile monitoring up -d backend prometheus grafana`. The checked-in Compose file publishes the backend at port 3000, Grafana at 3001 and Prometheus at 9090. [Compose services](../docker-compose.yml)
+2. Open `http://localhost:9090/targets`. The `ai-net-backend` job should show **UP** for `backend:3000/metrics` after a 15-second scrape interval. A separate systemd deployment needs a scrape target reachable from its Prometheus server. [Scrape configuration](../backend/grafana/prometheus.yml)
+3. Open `http://localhost:3001`, sign in, and select **Dashboards → AI-Net → AI-Net Platform SLIs**. Compose mounts the dashboard JSON and provisions the data source with UID `prometheus`. For standalone Grafana, configure that UID with a Prometheus URL reachable from Grafana, then import the same JSON. [Dashboard JSON](../backend/grafana/ai-net-dashboard.json) · [Data source](../backend/grafana/provisioning/datasources/prometheus.yml) · [Dashboard provider](../backend/grafana/provisioning/dashboards/ai-net.yml)
+4. If a panel shows **No data**, query its metric in Prometheus and inspect the backend's `/metrics` output for that name and labels. Reconciliation drift and remediation counts come from authenticated JSON at `GET /api/reconciliation/metrics`.
+
+### Prometheus alert rules
+
+The following rules detect a failed scrape and jobs that stay in the dead-letter queue. Tune the durations to your incident response window.
+
+```yaml
+groups:
+  - name: ai-net
+    rules:
+      - alert: AiNetBackendUnreachable
+        expr: up{job="ai-net-backend"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "Backend scrape failed for two minutes" }
+      - alert: AiNetDeadLetterBacklog
+        expr: ainet_queue_dlq_depth{job="ai-net-backend"} > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Inspect jobs in the dead-letter queue" }
+```
+
+Save this as `ai-net.rules.yml` on the Prometheus host. For Compose, mount it read-only at `/etc/prometheus/ai-net.rules.yml` in the Prometheus service. Add `rule_files: [/etc/prometheus/ai-net.rules.yml]` at the top level of the scrape configuration, recreate Prometheus, and confirm both rules appear at `/rules`. Configure an Alertmanager receiver if notifications should leave Prometheus.
 
 ### Health Probes
 
@@ -464,7 +532,7 @@ Add to `/etc/prometheus/prometheus.yml`:
 
 ```yaml
 scrape_configs:
-  - job_name: 'ainet_node'
+  - job_name: 'ai-net-backend'
     scrape_interval: 15s
     static_configs:
       - targets: ['localhost:3001']

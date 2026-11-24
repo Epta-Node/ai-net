@@ -116,12 +116,41 @@
 }
 
 .imageWrapper {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   max-width: 90vw;
   max-height: 80vh;
   touch-action: none;
+  min-width: min(480px, 70vw);
+  min-height: min(320px, 50vh);
+}
+
+.imagePlaceholder {
+  position: absolute;
+  inset: 12%;
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(
+      110deg,
+      var(--white-alpha-05) 25%,
+      var(--white-alpha-12) 37%,
+      var(--white-alpha-05) 63%
+    );
+  background-size: 200% 100%;
+  animation: lightboxShimmer 1.2s ease-in-out infinite;
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+@keyframes lightboxShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }
 
 .lightboxImage {
@@ -131,6 +160,34 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   pointer-events: auto;
+  transition: filter 0.35s ease, opacity 0.35s ease;
+}
+
+.lightboxImageLoading {
+  filter: blur(16px);
+  opacity: 0.55;
+}
+
+.lightboxImageLoaded {
+  filter: blur(0);
+  opacity: 1;
+}
+
+.imageError {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: min(360px, 60vw);
+  min-height: min(220px, 40vh);
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--white-alpha-25);
+  background: var(--surface-panel-translucent);
+  color: var(--text-secondary, var(--text-primary));
+  font-size: 0.95rem;
+  text-align: center;
 }
 
 .navBtn {
@@ -214,4 +271,14 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.thumbError {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-panel-translucent);
+  color: var(--text-secondary, var(--text-primary));
 }
