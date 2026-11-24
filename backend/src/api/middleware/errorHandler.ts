@@ -9,7 +9,7 @@ const isProduction = process.env.NODE_ENV === "production";
 /**
  * Build the canonical error envelope for every API response.
  *
- * Schema: { error: { code, message, details?, path, correlationId, timestamp? } }
+ * Schema: { error: { code, message, details?, path, correlationId, requestId, timestamp? } }
  */
 function buildErrorEnvelope({
   code,
@@ -40,6 +40,8 @@ function buildErrorEnvelope({
       message,
       path,
       correlationId,
+      // Every error response is traceable back to the originating request.
+      requestId: requestId ?? correlationId,
     },
   };
 

@@ -1,6 +1,43 @@
 import { randomUUID } from 'crypto';
 import type { SpanStatus, Trace, TraceSpan } from './tracing.types';
-import { toW3cTraceId, toW3cSpanId } from './traceContext';
+import {
+  currentTraceContext,
+  toW3cTraceId,
+  toW3cSpanId,
+  toW3cTraceparent,
+} from './traceContext';
+
+/** Headers every outbound call carries so downstream logs share this request's ID. */
+export interface PropagationHeaders {
+  traceparent: string;
+  'x-request-id': string;
+  'x-trace-id': string;
+  'x-correlation-id': string;
+}
+
+/**
+ * Build propagation headers from a trace context. The request ID is also sent
+ * as W3C `traceparent` so services that only understand OpenTelemetry can still
+ * correlate the call; `x-request-id` carries the exact upstream identifier.
+ */
+export function propagationHeaders(context: {
+  traceId: string;
+  spanId: string;
+  requestId?: string;
+}): PropagationHeaders {
+  return {
+    traceparent: toW3cTraceparent(context.traceId, context.spanId),
+    'x-request-id': context.requestId ?? context.traceId,
+    'x-trace-id': context.traceId,
+    'x-correlation-id': context.traceId,
+  };
+}
+
+/** Propagation headers for the active request, or `undefined` outside one. */
+export function currentPropagationHeaders(): PropagationHeaders | undefined {
+  const ctx = currentTraceContext();
+  return ctx ? propagationHeaders(ctx) : undefined;
+}
 
 /**
  * In-memory distributed tracing service.
@@ -75,6 +112,13 @@ export class TracingService {
     operation: string,
     metadata?: Record<string, unknown>
   ): TraceSpan {
+    // Downstream spans created inside a request carry the request ID from the
+    // AsyncLocalStorage context even when the caller did not pass it explicitly.
+    const requestId =
+      (typeof metadata?.requestId === 'string' ? metadata.requestId : undefined) ??
+      currentTraceContext()?.requestId;
+    const spanMetadata =
+      requestId !== undefined ? { ...metadata, requestId } : metadata;
     const span: TraceSpan = {
       spanId: randomUUID(),
       correlationId,
@@ -82,7 +126,7 @@ export class TracingService {
       operation,
       startedAt: new Date().toISOString(),
       status: 'running',
-      ...(metadata !== undefined ? { metadata: { ...metadata } } : {}),
+      ...(spanMetadata !== undefined ? { metadata: { ...spanMetadata } } : {}),
     };
 
     // Sampling decision at span start. Unsampled spans skip the trace bucket
@@ -110,8 +154,8 @@ export class TracingService {
 
     // Index requestId → correlationId when present, so admins can query
     // traces by requestId.
-    if (metadata?.requestId && typeof metadata.requestId === 'string') {
-      this.requestIndex.set(metadata.requestId, correlationId);
+    if (requestId !== undefined) {
+      this.requestIndex.set(requestId, correlationId);
     }
 
     return span;

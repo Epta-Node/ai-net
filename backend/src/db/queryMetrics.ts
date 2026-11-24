@@ -21,6 +21,7 @@ import { createHash } from "crypto";
 import type Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
 import { getConfig } from "../config";
+import { currentTraceContext } from "../services/traceContext";
 
 const logger = createLogger({ component: "db-query-metrics" });
 
@@ -169,6 +170,9 @@ export function recordDbQuery(dbName: string, sql: string, durationMs: number): 
 
     if (durationMs >= slowMs) {
       series.slowQueries += 1;
+      // Explicit request/trace IDs make slow-query lines correlatable even
+      // when the logger is used outside a child logger bound to the request.
+      const ctx = currentTraceContext();
       logger.warn(
         {
           event: "slow_query",

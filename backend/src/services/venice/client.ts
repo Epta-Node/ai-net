@@ -18,7 +18,7 @@ import {
   type VeniceKeyHealthStore,
 } from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
-import { currentTraceContext, toW3cTraceparent } from '../traceContext.js';
+import { currentPropagationHeaders } from '../tracing.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -1001,17 +1001,14 @@ export class VeniceClient implements VeniceClientLike {
       }
 
       try {
-        // Propagate the active W3C trace context to Venice so provider-side
-        // logs correlate with our request spans (#856).
-        const traceCtx = currentTraceContext();
+        // Propagate the active request ID and W3C trace context to Venice so
+        // provider-side logs correlate with our request spans (#856, #903).
         const response = await fetch(`${provider.baseUrl ?? this.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${provider.apiKey}`,
-            ...(traceCtx
-              ? { traceparent: toW3cTraceparent(traceCtx.traceId, traceCtx.spanId) }
-              : {}),
+            ...(currentPropagationHeaders() ?? {}),
           },
           body,
           signal: controller.signal,
