@@ -82,74 +82,29 @@ describe("POST /api/tasks", () => {
     expect(res.body.error.details.fieldErrors.body.prompt).toBeDefined();
   });
 
-  it("returns 400 when prompt is only whitespace", async () => {
+  // One request on purpose: this suite shares a single rate-limit window under
+  // fake timers, so per-field route tests live in the schema unit tests instead.
+  it("returns 400 with a descriptive message for every invalid field at once", async () => {
     const res = await request(app.httpServer)
       .post("/api/tasks")
-      .set("walletpublickey", WALLET)
-      .send({ prompt: "   \n\t  ", maxBudgetXLM: 1 });
+      .send({
+        prompt: "   ",
+        walletPublicKey: "not-a-wallet",
+        maxBudgetXLM: 0.01,
+        agentPreferences: ["research-agent-v1", "  "],
+      });
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe("VALIDATION_ERROR");
-    expect(res.body.error.details.fieldErrors.body.prompt).toContain("Prompt is required");
-  });
-
-  it("returns 400 with a descriptive error when prompt is not a string", async () => {
-    const res = await request(app.httpServer)
-      .post("/api/tasks")
-      .set("walletpublickey", WALLET)
-      .send({ prompt: 42 });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error.details.fieldErrors.body.prompt).toContain("Prompt must be a string");
-  });
-
-  it("returns 400 when walletPublicKey is not a valid Stellar public key", async () => {
-    const res = await request(app.httpServer)
-      .post("/api/tasks")
-      .send({ prompt: "do something", walletPublicKey: "not-a-wallet" });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe("VALIDATION_ERROR");
-    expect(res.body.error.details.fieldErrors.body.walletPublicKey).toContain(
-      "Must be a valid Stellar public key",
-    );
-  });
-
-  it("returns 400 when agentPreferences contains a blank entry", async () => {
-    const res = await request(app.httpServer)
-      .post("/api/tasks")
-      .set("walletpublickey", WALLET)
-      .send({ prompt: "do something", agentPreferences: ["research-agent-v1", "  "] });
-
-    expect(res.status).toBe(400);
+    const body = res.body.error.details.fieldErrors.body;
+    expect(body.prompt).toContain("Prompt is required");
+    expect(body.walletPublicKey).toContain("Must be a valid Stellar public key");
+    expect(body.maxBudgetXLM).toContain("maxBudgetXLM must be at least 0.1");
     expect(
       res.body.error.details.flatErrors.some((e: { field: string }) =>
         e.field.endsWith("agentPreferences.1"),
       ),
     ).toBe(true);
-  });
-
-  it("returns 400 when agentPreferences lists more than 20 agents", async () => {
-    const res = await request(app.httpServer)
-      .post("/api/tasks")
-      .set("walletpublickey", WALLET)
-      .send({
-        prompt: "do something",
-        agentPreferences: Array.from({ length: 21 }, (_, i) => `agent-${i}`),
-      });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error.details.fieldErrors.body.agentPreferences).toBeDefined();
-  });
-
-  it("reports every invalid field in a single response", async () => {
-    const res = await request(app.httpServer)
-      .post("/api/tasks")
-      .send({ walletPublicKey: "bad", maxBudgetXLM: 0.01 });
-
-    expect(res.status).toBe(400);
-    const fields = Object.keys(res.body.error.details.fieldErrors.body);
-    expect(fields).toEqual(expect.arrayContaining(["prompt", "walletPublicKey", "maxBudgetXLM"]));
   });
 
   it("returns 400 when prompt exceeds 10 000 characters", async () => {
