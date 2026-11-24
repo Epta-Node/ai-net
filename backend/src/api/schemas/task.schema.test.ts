@@ -23,6 +23,8 @@ function rejectionOf(schema: z.ZodTypeAny, value: unknown): z.ZodIssue {
   return error.issues[0]!;
 }
 
+const VALID_WALLET = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGDG6NXGPTVMLHK4HZ7HHNN";
+
 describe("CreateTaskSchema — prompt", () => {
   it("accepts a plain prompt and applies the documented defaults", () => {
     expect(CreateTaskSchema.parse({ prompt: "analyse the DEX" })).toEqual({
@@ -80,13 +82,17 @@ describe("CreateTaskSchema — prompt", () => {
   });
 
   it("rejects a prompt that is only whitespace", () => {
-    // `.min(1)` runs before the trim, so this passes length validation and then
-    // sanitises down to an empty string. Pinned so a future reordering of the
-    // checks is a visible change rather than a silent one.
     const parsed = CreateTaskSchema.safeParse({ prompt: "   " });
-    expect(parsed.success).toBe(true);
-    if (!parsed.success) return;
-    expect(parsed.data.prompt).toBe("");
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues[0]!.message).toBe("Prompt is required");
+  });
+
+  it("reports a missing prompt as required", () => {
+    const parsed = CreateTaskSchema.safeParse({});
+    expect(parsed.success).toBe(false);
+    if (parsed.success) return;
+    expect(parsed.error.issues[0]!.message).toBe("Prompt is required");
   });
 
   it("rejects a null prompt", () => {
@@ -102,14 +108,14 @@ describe("CreateTaskSchema — budget, priority and preferences", () => {
   it("accepts an explicit priority and optional keys", () => {
     const parsed = CreateTaskSchema.parse({
       prompt: "x",
-      walletPublicKey: "GKEY",
+      walletPublicKey: VALID_WALLET,
       maxBudgetXLM: 25,
       agentPreferences: ["research", "audit"],
       priority: "critical",
     });
     expect(parsed).toEqual({
       prompt: "x",
-      walletPublicKey: "GKEY",
+      walletPublicKey: VALID_WALLET,
       maxBudgetXLM: 25,
       agentPreferences: ["research", "audit"],
       priority: "critical",
@@ -146,6 +152,25 @@ describe("CreateTaskSchema — budget, priority and preferences", () => {
     expect(
       CreateTaskSchema.safeParse({ prompt: "x", agentPreferences: ["research", 7] }).success,
     ).toBe(false);
+  });
+
+  it("rejects a malformed Stellar walletPublicKey", () => {
+    for (const walletPublicKey of ["GKEY", "", `S${VALID_WALLET.slice(1)}`, VALID_WALLET.toLowerCase()]) {
+      const parsed = CreateTaskSchema.safeParse({ prompt: "x", walletPublicKey });
+      expect(parsed.success).toBe(false);
+    }
+  });
+
+  it("rejects blank and oversized agentPreferences entries", () => {
+    expect(CreateTaskSchema.safeParse({ prompt: "x", agentPreferences: [" "] }).success).toBe(false);
+    expect(
+      CreateTaskSchema.safeParse({ prompt: "x", agentPreferences: ["a".repeat(65)] }).success,
+    ).toBe(false);
+  });
+
+  it("rejects more than 20 agentPreferences", () => {
+    const agentPreferences = Array.from({ length: 21 }, (_, i) => `agent-${i}`);
+    expect(CreateTaskSchema.safeParse({ prompt: "x", agentPreferences }).success).toBe(false);
   });
 
   it("rejects a non-string walletPublicKey", () => {
