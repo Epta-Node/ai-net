@@ -56,14 +56,33 @@ export interface TaskStreamSubscription {
    * full replay; pass the client's `lastEventId` to resume where it left off.
    */
   lastEventId?: number;
+  /**
+   * Called when the server starts shutting down, before any connection is
+   * closed. Transports that need to notify clients (SSE sends a `close` event)
+   * provide this so their clients are not dropped silently.
+   */
+  onShutdown?: () => void;
+  /**
+   * Called if a client has not detached within the shutdown drain window.
+   * The transport may destroy the underlying socket here.
+   */
+  onForceClose?: () => void;
 }
 
 interface Subscriber {
+  id: number;
+  taskId: string;
   cursor: number;
   deliver: (event: StoredEvent) => void;
+  onShutdown?: () => void;
+  onForceClose?: () => void;
+  detached: boolean;
 }
 
 const DEFAULT_PAGE_SIZE = 500;
+
+/** Maximum time graceful shutdown waits for stream clients to drain. */
+export const SSE_SHUTDOWN_DRAIN_TIMEOUT_MS = 10_000;
 
 /** Cursor meaning "nothing delivered yet" — `taskSeq` starts at 0. */
 const EARLIEST_CURSOR = -1;
@@ -79,6 +98,10 @@ export class TaskStreamHub {
   private readonly draining = new Set<string>();
   /** Tasks that emitted again while mid-drain and need another pass. */
   private readonly reentrant = new Set<string>();
+  /** True once `shutdown()` has begun; no new subscribers are accepted. */
+  private shuttingDown = false;
+  /** Shared promise so concurrent callers wait for the same drain. */
+  private shutdownPromise?: Promise<void>;
 
   private nextSubscriberId = 1;
 
@@ -101,6 +124,13 @@ export class TaskStreamHub {
     subscription: TaskStreamSubscription,
     deliver: (event: StoredEvent) => void,
   ): () => void {
+    // Once shutdown has started, tell late arrivals why they are being closed
+    // rather than accepting a stream that would be dropped a moment later.
+    if (this.shuttingDown) {
+      subscription.onShutdown?.();
+      return () => { /* nothing was attached */ };
+    }
+
     let subscribers = this.subscribersByTask.get(taskId);
     if (!subscribers) {
       subscribers = new Map();
@@ -109,8 +139,13 @@ export class TaskStreamHub {
 
     const id = this.nextSubscriberId++;
     subscribers.set(id, {
+      id,
+      taskId,
       cursor: subscription.lastEventId ?? EARLIEST_CURSOR,
       deliver,
+      onShutdown: subscription.onShutdown,
+      onForceClose: subscription.onForceClose,
+      detached: false,
     });
 
     // One bus listener per task, not per client — this is what keeps
@@ -128,18 +163,73 @@ export class TaskStreamHub {
     return () => {
       if (!attached) return;
       attached = false;
-
-      const current = this.subscribersByTask.get(taskId);
-      if (!current) return;
-      current.delete(id);
-      if (current.size > 0) return;
-
-      // Last subscriber left: stop paying for this task's bus subscription.
-      this.subscribersByTask.delete(taskId);
-      this.detachByTask.get(taskId)?.();
-      this.detachByTask.delete(taskId);
-      this.reentrant.delete(taskId);
+      this.detachSubscriber(taskId, id);
     };
+  }
+
+  private detachSubscriber(taskId: string, id: number): void {
+    const current = this.subscribersByTask.get(taskId);
+    if (!current) return;
+    const subscriber = current.get(id);
+    if (subscriber) subscriber.detached = true;
+    current.delete(id);
+    if (current.size > 0) return;
+
+    // Last subscriber left: stop paying for this task's bus subscription.
+    this.subscribersByTask.delete(taskId);
+    this.detachByTask.get(taskId)?.();
+    this.detachByTask.delete(taskId);
+    this.reentrant.delete(taskId);
+  }
+
+  /**
+   * Graceful shutdown: notify every connected client, then wait up to
+   * `timeoutMs` (default 10s) for their streams to detach. Clients that still
+   * have not detached when the deadline expires are force-closed.
+   *
+   * Only subscribers with an `onShutdown` hook are waited on — transports
+   * without one (e.g. WebSockets, which the HTTP server closes itself) are not
+   * part of the SSE drain contract.
+   */
+  shutdown(timeoutMs: number = SSE_SHUTDOWN_DRAIN_TIMEOUT_MS): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.shuttingDown = true;
+    this.shutdownPromise = this.drainSubscribers(timeoutMs);
+    return this.shutdownPromise;
+  }
+
+  private async drainSubscribers(timeoutMs: number): Promise<void> {
+    const pending: Subscriber[] = [];
+    for (const subscribers of this.subscribersByTask.values()) {
+      for (const subscriber of subscribers.values()) {
+        if (!subscriber.onShutdown) continue;
+        pending.push(subscriber);
+        try {
+          subscriber.onShutdown();
+        } catch {
+          // A broken client must not prevent the rest from being notified.
+        }
+      }
+    }
+
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (pending.some((subscriber) => !subscriber.detached)) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(25, remaining)));
+    }
+
+    // Force-close anyone still attached, then release their hub state. This
+    // guarantees `shutdown()` never leaves a stream open past the deadline.
+    for (const subscriber of pending) {
+      if (subscriber.detached) continue;
+      try {
+        subscriber.onForceClose?.();
+      } catch {
+        // Forced closure is best-effort; state is released below regardless.
+      }
+      this.detachSubscriber(subscriber.taskId, subscriber.id);
+    }
   }
 
   /**

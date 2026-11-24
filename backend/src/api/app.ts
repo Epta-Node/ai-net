@@ -511,11 +511,15 @@ export function createApp(opts: AppOptions = {}): {
       watchdog.stop();
       metricsService.setWebSocketProbe(null);
       detachStream();
-      if (httpServer.listening) {
-        httpServer.close(callback);
-      } else if (callback) {
-        callback();
-      }
+      // Notify SSE clients (event: close) and give their streams up to 10s to
+      // drain before the HTTP server stops accepting/keeping connections (#901).
+      void taskStreamHub.shutdown().finally(() => {
+        if (httpServer.listening) {
+          httpServer.close(callback);
+        } else if (callback) {
+          callback();
+        }
+      });
       if (costFlushTimer) {
         clearInterval(costFlushTimer);
         try {
