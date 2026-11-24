@@ -152,3 +152,19 @@ pub struct AdminChangedEvent {
     pub old_admin: Address,
     pub new_admin: Address,
 }
+
+/// Event: BondSlashed
+///
+/// Emitted when an agent's bond is slashed as a result of a dispute resolution.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondSlashedEvent {
+    pub dispute_id: Symbol,
+    pub agent_id: Address,
+    pub registry_agent_id: Symbol,
+    pub slash_percentage: u32,
+    pub amount_slashed: i128,
+    pub remaining_bond: i128,
+    pub reason: String,
+    pub slashed_at: u64,
+}
