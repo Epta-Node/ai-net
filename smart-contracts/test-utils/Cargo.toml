@@ -1,0 +1,14 @@
+[package]
+name = "contract-test-utils"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Shared storage-footprint and gas-snapshot assertions for ai-net Soroban contract tests."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

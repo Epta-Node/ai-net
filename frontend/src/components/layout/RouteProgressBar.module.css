@@ -1,0 +1,60 @@
+.track {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  pointer-events: none;
+  /* Fade the whole track in/out */
+  transition: opacity 300ms ease;
+}
+
+.hidden {
+  opacity: 0;
+}
+
+.visible {
+  opacity: 1;
+}
+
+.bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--gradient-primary);
+  transform-origin: left center;
+  transition: transform 200ms ease;
+  border-radius: 0 2px 2px 0;
+}
+
+.track.error .bar {
+  background: var(--danger);
+}
+
+/* Glowing puck at the leading edge */
+.puck {
+  position: absolute;
+  top: -2px;
+  width: 80px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 12px 4px var(--accent-cyan);
+  transform: translateX(-50%);
+  pointer-events: none;
+  /* puck tracks the bar without an explicit transition so it follows the
+     bar's CSS transition implicitly via left % updates */
+}
+
+/* Respect reduced-motion: keep the bar but remove the glow animation */
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    transition: none;
+  }
+  .puck {
+    display: none;
+  }
+}

@@ -1,0 +1,51 @@
+# cliff.toml — changelog configuration for git-cliff
+# See https://git-cliff.org/docs/configuration
+
+[changelog]
+header = """
+# Changelog\n
+All notable changes to this project will be documented here.\n
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | strtitle }}
+    {% for commit in commits %}
+        - {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }}\
+            {% if commit.github.pr_number %} ([#{{ commit.github.pr_number }}]({{ commit.github.pr_url }})){% endif %}\
+            {% if commit.breaking %} — **BREAKING**{% endif %}
+    {%- endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Bug Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Refactoring" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", group = "Tests" },
+  { message = "^ci", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^style", skip = true },
+]
+filter_commits = true
+tag_pattern = "v[0-9]+.[0-9]+.[0-9]+"
+skip_tags = ""
+ignore_tags = ""
+topo_order = false
+sort_commits = "newest"
+
+[remote.github]
+owner = "Epta-Node"
+repo = "ai-net"

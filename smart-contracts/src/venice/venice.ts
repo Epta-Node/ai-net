@@ -23,7 +23,7 @@ export class VeniceClient {
   private failureCount = 0;
   private openedAt: number | null = null;
 
-  constructor(private readonly apiKey = process.env.VENICE_API_KEY ?? '') {}
+  constructor(private readonly apiKey = process.env['VENICE_API_KEY'] ?? '') {}
 
   getModelForAgent(capability: string): string {
     return MODEL_ROUTING[capability] ?? 'venice-xl';

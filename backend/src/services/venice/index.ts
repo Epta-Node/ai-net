@@ -1,9 +1,4 @@
-export { VeniceClient } from './client.js';
-export type {
-  AgentType,
-  CompleteOptions,
-  VeniceChatOptions,
-  VeniceClientConfig,
-  VeniceClientLike,
-  VeniceMessage,
-} from './types.js';
+export * from './client.js'; 
+export * from './types.js'; 
+export * from './circuitBreaker.js'; 
+export { TokenBudgetExceededError, VeniceStatusError, VeniceUnavailableError } from './errors.js';

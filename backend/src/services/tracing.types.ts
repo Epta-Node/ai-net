@@ -8,7 +8,7 @@
  */
 
 /** Lifecycle status of an individual span. */
-export type SpanStatus = 'running' | 'completed' | 'failed';
+export type SpanStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
 /**
  * A single unit of work within a trace.

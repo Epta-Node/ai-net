@@ -3,25 +3,29 @@
  *
  * Uses an in-memory SQLite database so no files are created on disk.
  */
+import fs from "fs";
+import os from "os";
+import path from "path";
 import Database from "better-sqlite3";
-import { createAgentDb, type AgentRecord } from "./agents";
+import {
+  closeAgentDb,
+  createAgentDb,
+  ensureAgentTable,
+  getAgentDb,
+  getAgentPool,
+  type AgentRecord,
+} from "./agents";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * A raw handle with the schema already applied, mirroring what the pool's
+ * `onCreate` hook leaves behind. `createAgentDb` is a pure mapping now, so the
+ * fixture has to initialise the schema itself.
+ */
 function makeDb(): Database.Database {
   const db = new Database(":memory:");
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id               TEXT PRIMARY KEY,
-      capabilities     TEXT NOT NULL,
-      pricingXLM       REAL NOT NULL,
-      endpoint         TEXT NOT NULL,
-      stellarPublicKey TEXT NOT NULL,
-      reputationScore  REAL NOT NULL DEFAULT 0,
-      lastSeenAt       TEXT NOT NULL,
-      status           TEXT NOT NULL DEFAULT 'online'
-    )
-  `);
+  ensureAgentTable(db);
   return db;
 }
 
@@ -209,6 +213,138 @@ describe("createAgentDb — markStaleAgents", () => {
     db.upsert(makeAgent({ id: "fresh", status: "online" })); // just inserted = fresh
     const count = db.markStaleAgents(5);
     expect(count).toBe(0);
+  });
+});
+
+// ── Schema initialisation & wrapper memoisation ──────────────────────────────
+
+/** Schema DDL issued through `exec` (the only channel `ensureAgentTable` uses). */
+function ddlFrom(execSpy: jest.SpyInstance): string[] {
+  return execSpy.mock.calls
+    .map(([sql]: [string]) => String(sql))
+    .filter((sql) => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql));
+}
+
+describe("agent schema initialisation", () => {
+  let execSpy: jest.SpyInstance;
+  let dir: string;
+
+  beforeEach(() => {
+    // Spying on the prototype catches the DDL the pool runs while it is still
+    // being constructed, before a test could reach the handle.
+    execSpy = jest.spyOn(Database.prototype as unknown as { exec: () => void }, "exec");
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agents-init-"));
+  });
+
+  afterEach(() => {
+    closeAgentDb();
+    execSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("creates the agents schema while the pool is being initialised", () => {
+    getAgentPool(path.join(dir, "agents.db"));
+
+    const ddl = ddlFrom(execSpy).join("\n");
+    expect(ddl).toMatch(/CREATE TABLE IF NOT EXISTS agents/i);
+    // `bondAmountXLM` only appears in `ensureAgentTable`, so this pins the
+    // schema setup to the pool's onCreate hook specifically.
+    expect(ddl).toMatch(/bondAmountXLM/);
+  });
+
+  it("issues zero DDL when wrapping an already-initialised handle", () => {
+    const file = path.join(dir, "agents.db");
+    getAgentPool(file);
+    execSpy.mockClear();
+
+    for (let i = 0; i < 25; i += 1) {
+      createAgentDb(getAgentDb(file));
+    }
+
+    expect(execSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns the same wrapper reference for the same handle", () => {
+    const raw = makeDb();
+    expect(createAgentDb(raw)).toBe(createAgentDb(raw));
+  });
+
+  it("returns a distinct wrapper for a different handle", () => {
+    expect(createAgentDb(makeDb())).not.toBe(createAgentDb(makeDb()));
+  });
+});
+
+describe("agent reputation columns (#910)", () => {
+  it("migration adds both columns with the documented defaults and rolls back", () => {
+    const dir = path.join(__dirname, "migrations", "agents");
+    const up = fs.readFileSync(path.join(dir, "003_agent_reputation.up.sql"), "utf8");
+    const down = fs.readFileSync(path.join(dir, "003_agent_reputation.down.sql"), "utf8");
+    const raw = new Database(":memory:");
+    raw.exec("CREATE TABLE agents (id TEXT PRIMARY KEY, reputationScore REAL NOT NULL DEFAULT 2.5)");
+    raw.prepare("INSERT INTO agents (id, reputationScore) VALUES ('a1', 3.2)").run();
+
+    raw.exec(up);
+    const row = raw.prepare(
+      "SELECT reputation_score, reputation_updated_at FROM agents WHERE id = 'a1'"
+    ).get() as { reputation_score: number; reputation_updated_at: string | null };
+    expect(row.reputation_score).toBeCloseTo(3.2);
+    expect(Object.prototype.hasOwnProperty.call(row, "reputation_updated_at")).toBe(true);
+
+    raw.exec(down);
+    const columns = raw.prepare("PRAGMA table_info(agents)").all() as Array<{ name: string }>;
+    expect(columns.map((column) => column.name)).not.toContain("reputation_score");
+    expect(columns.map((column) => column.name)).not.toContain("reputation_updated_at");
+  });
+
+  it("upsert writes both reputation columns and the update timestamp", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 1.2 }));
+
+    const row = raw.prepare(
+      "SELECT reputationScore, reputation_score, reputation_updated_at FROM agents WHERE id = 'agent-1'"
+    ).get() as { reputationScore: number; reputation_score: number; reputation_updated_at: string };
+    expect(row.reputationScore).toBeCloseTo(1.2);
+    expect(row.reputation_score).toBeCloseTo(1.2);
+    expect(typeof row.reputation_updated_at).toBe("string");
+  });
+
+  it("reads reputation from the new column", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 0.5 }));
+    raw.prepare(
+      "UPDATE agents SET reputation_score = 4.1, reputation_updated_at = '2026-01-01T00:00:00.000Z' WHERE id = 'agent-1'"
+    ).run();
+
+    expect(db.findById("agent-1")).toMatchObject({
+      reputationScore: 4.1,
+      reputationUpdatedAt: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  it("updateReputation keeps both columns in sync and stamps the time", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ reputationScore: 0.5 }));
+    db.updateReputation("agent-1", 0.2);
+
+    const row = raw.prepare(
+      "SELECT reputationScore, reputation_score, reputation_updated_at FROM agents WHERE id = 'agent-1'"
+    ).get() as { reputationScore: number; reputation_score: number; reputation_updated_at: string };
+    expect(row.reputationScore).toBeCloseTo(0.7);
+    expect(row.reputation_score).toBeCloseTo(0.7);
+    expect(typeof row.reputation_updated_at).toBe("string");
+  });
+
+  it("filters by the new reputation column", () => {
+    const raw = makeDb();
+    const db = createAgentDb(raw);
+    db.upsert(makeAgent({ id: "a1", reputationScore: 0.8 }));
+    raw.prepare("UPDATE agents SET reputation_score = 0.2 WHERE id = 'a1'").run();
+    db.upsert(makeAgent({ id: "a2", reputationScore: 0.5 }));
+
+    expect(db.list({ minReputation: 0.5 }).map((agent) => agent.id)).toEqual(["a2"]);
   });
 });
 

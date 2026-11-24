@@ -1,0 +1,192 @@
+/* src/components/tasks/TaskCostPanel.module.css */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem;
+  border: 1px solid var(--border-subtle, rgb(255 255 255 / 0.08));
+  border-radius: 0.75rem;
+  background: var(--bg-elevated, rgb(255 255 255 / 0.02));
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.provisional {
+  padding: 0.125rem 0.4375rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+  gap: 0.75rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  min-width: 0;
+}
+
+.statLabel {
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.6;
+}
+
+.statValue {
+  font-size: 1rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.statValue[data-tone='warn'] {
+  color: var(--color-warning, #f59e0b);
+}
+
+.statValue[data-tone='danger'] {
+  color: var(--color-danger, #ef4444);
+}
+
+/* Budget bar: a thin track with a fill, so overspend is visible as overflow
+   rather than only as a number. */
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.meterTrack {
+  position: relative;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.08);
+  overflow: hidden;
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: 999px;
+  background: currentColor;
+  transition: width 400ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.meterFill[data-tone='warn'] {
+  background: var(--color-warning, #f59e0b);
+}
+
+.meterFill[data-tone='danger'] {
+  background: var(--color-danger, #ef4444);
+}
+
+.meterCaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.65;
+}
+
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.breakdownRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+}
+
+.breakdownRow:nth-child(odd) {
+  background: rgb(255 255 255 / 0.02);
+}
+
+.nodeId {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  min-width: 0;
+}
+
+.nodeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.nodeMeta {
+  font-size: 0.6875rem;
+  opacity: 0.55;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.tag[data-tone='trimmed'] {
+  background: rgb(245 158 11 / 0.15);
+  color: var(--color-warning, #f59e0b);
+}
+
+.tag[data-tone='exhausted'] {
+  background: rgb(239 68 68 / 0.15);
+  color: var(--color-danger, #ef4444);
+}
+
+.cost {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 1.5rem 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  opacity: 0.6;
+}

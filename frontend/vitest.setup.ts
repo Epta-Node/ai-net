@@ -12,6 +12,22 @@ class ResizeObserverMock {
 
 globalThis.ResizeObserver = ResizeObserverMock;
 
+// jsdom has no IntersectionObserver — needed by framer-motion's `whileInView`
+// (used throughout the landing page for scroll-triggered animation).
+class IntersectionObserverMock {
+  readonly root = null;
+  readonly rootMargin = '';
+  readonly thresholds: ReadonlyArray<number> = [];
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords(): IntersectionObserverEntry[] {
+    return [];
+  }
+}
+
+globalThis.IntersectionObserver = IntersectionObserverMock as unknown as typeof IntersectionObserver;
+
 // Initialize i18next with the REAL translation resources, pinned to English, so
 // component queries keep matching the literal English copy and no test needs a
 // translation-aware wrapper.
@@ -25,4 +41,31 @@ globalThis.ResizeObserver = ResizeObserverMock;
 i18n.use(initReactI18next).init({
   ...i18nBaseOptions,
   lng: 'en',
+});
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => {
+    const parseMaxWidth = query.match(/max-width:\s*(\d+)px/)
+    const parseMinWidth = query.match(/min-width:\s*(\d+)px/)
+    const parseMaxHeight = query.match(/max-height:\s*(\d+)px/)
+    const parseMinHeight = query.match(/min-height:\s*(\d+)px/)
+
+    let matches = false
+    if (parseMaxWidth) matches = window.innerWidth <= parseInt(parseMaxWidth[1])
+    else if (parseMinWidth) matches = window.innerWidth >= parseInt(parseMinWidth[1])
+    else if (parseMaxHeight) matches = window.innerHeight <= parseInt(parseMaxHeight[1])
+    else if (parseMinHeight) matches = window.innerHeight >= parseInt(parseMinHeight[1])
+
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }
+  },
 });

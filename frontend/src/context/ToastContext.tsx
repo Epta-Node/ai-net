@@ -1,65 +1,202 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import { useTranslation } from 'react-i18next';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
+import { ToastContainer } from '../components/common/Toast'
 
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = 'success' | 'error' | 'warning' | 'info'
+
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
 
 export interface Toast {
-  id: string;
-  message: string;
-  type: ToastType;
-  duration?: number;
+  id: string
+  message: string
+  type: ToastType
+  duration: number
+  count?: number
+  action?: ToastAction
+  createdAt: number
 }
 
-interface ToastContextValue {
-  toasts: Toast[];
-  showToast: (message: string, type?: ToastType, duration?: number) => void;
-  dismissToast: (id: string) => void;
+export interface ToastOptions {
+  duration?: number
+  action?: ToastAction
 }
 
-const ToastContext = createContext<ToastContextValue | null>(null);
+export interface ToastContextValue {
+  toasts: Toast[]
+  showToast: (message: string, type?: ToastType, durationOrOptions?: number | ToastOptions) => string
+  dismissToast: (id: string) => void
+}
+
+const defaultDurations: Record<ToastType, number> = {
+  success: 5000,
+  info: 5000,
+  warning: 7000,
+  error: 8000,
+}
+
+export const ToastContext = createContext<ToastContextValue | undefined>(undefined)
 
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const timers = useRef<Map<string, number>>(new Map())
 
   const dismissToast = useCallback((id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
-
-  const showToast = useCallback((message: string, type: ToastType = 'info', duration = 5000) => {
-    const id = Math.random().toString(36).slice(2);
-    setToasts(prev => [...prev, { id, message, type, duration }]);
-
-    if (duration > 0) {
-      setTimeout(() => dismissToast(id), duration);
+    const t = timers.current.get(id)
+    if (t) {
+      window.clearTimeout(t)
+      timers.current.delete(id)
     }
-  }, [dismissToast]);
+    setToasts((prev) => prev.filter((toast) => toast.id !== id))
+  }, [])
+
+  const showToast = useCallback(
+    (message: string, type: ToastType = 'info', durationOrOptions: number | ToastOptions = defaultDurations[type]) => {
+      // Normalize options: allow legacy number or {duration, action}
+      let duration: number
+      let action: ToastAction | undefined
+      if (typeof durationOrOptions === 'number') {
+        duration = durationOrOptions
+      } else {
+        duration = durationOrOptions.duration ?? defaultDurations[type]
+        action = durationOrOptions.action
+      }
+
+      const trimmed = message.trim()
+      if (!trimmed) return ''
+
+      // — Group duplicates: same message + type merges and increments count.
+      //
+      // React 18 invokes state updaters twice in StrictMode and may defer them
+      // in concurrent rendering, so we must NOT read or write outer variables
+      // (grouped, targetId) from inside a setToasts updater — the updater must
+      // be a pure function of prev.
+      //
+      // Instead, we derive whether a duplicate exists by reading the current
+      // toasts value from a ref that is kept in sync with the state, so that
+      // the decision (and any timer management) happens outside the updater.
+      const existing = toasts.find((t) => t.message === trimmed && t.type === type)
+
+      if (existing) {
+        // Clear the old dismiss timer so it restarts from now.
+        const oldTimer = timers.current.get(existing.id)
+        if (oldTimer) {
+          window.clearTimeout(oldTimer)
+          timers.current.delete(existing.id)
+        }
+
+        const targetId = existing.id
+
+        // Pure updater — no side-effects, no outer-variable mutations.
+        setToasts((prev) => {
+          const idx = prev.findIndex((t) => t.id === targetId)
+          if (idx === -1) return prev
+          const updated: Toast = {
+            ...prev[idx],
+            count: (prev[idx].count ?? 1) + 1,
+            duration,
+            createdAt: Date.now(),
+            action: action ?? prev[idx].action,
+          }
+          // Move to end (top of stack visual) for freshness.
+          const next = [...prev]
+          next.splice(idx, 1)
+          next.push(updated)
+          return next
+        })
+
+        // Schedule the new dismiss timer after updating state.
+        if (duration > 0) {
+          const timer = window.setTimeout(() => dismissToast(targetId), duration)
+          timers.current.set(targetId, timer)
+        }
+        return targetId
+      }
+
+      const id =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : Math.random().toString(36).slice(2)
+
+      const toast: Toast = {
+        id,
+        message: trimmed,
+        type,
+        duration,
+        count: 1,
+        action,
+        createdAt: Date.now(),
+      }
+
+      // stacking: keep max 6 visible, drop oldest if exceeded
+      setToasts((prev) => {
+        const next = [...prev, toast]
+        if (next.length > 6) return next.slice(next.length - 6)
+        return next
+      })
+
+      if (duration > 0) {
+        const timer = window.setTimeout(() => dismissToast(id), duration)
+        timers.current.set(id, timer)
+      }
+
+      return id
+    },
+    // toasts is read to detect duplicates outside the updater — must be in
+    // the dependency array so showToast always sees the latest list.
+    [dismissToast, toasts],
+  )
+
+  // External dispatch support (used by services/api.ts notifyToast)
+  useEffect(() => {
+    const handleExternalToast = (event: Event) => {
+      const customEvent = event as CustomEvent<{
+        message?: string
+        type?: ToastType
+        duration?: number
+        action?: ToastAction
+      }>
+      const message = customEvent.detail?.message
+      if (!message) return
+      const t = customEvent.detail?.type ?? 'info'
+      const dur = customEvent.detail?.duration ?? defaultDurations[t]
+      const act = customEvent.detail?.action
+      showToast(message, t, act ? { duration: dur, action: act } : dur)
+    }
+
+    window.addEventListener('app-toast', handleExternalToast as EventListener)
+    return () => window.removeEventListener('app-toast', handleExternalToast as EventListener)
+  }, [showToast])
+
+  // cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      timers.current.forEach((timer) => window.clearTimeout(timer))
+      timers.current.clear()
+    }
+  }, [])
+
+  const value = useMemo<ToastContextValue>(() => ({ toasts, showToast, dismissToast }), [toasts, showToast, dismissToast])
 
   return (
-    <ToastContext.Provider value={{ toasts, showToast, dismissToast }}>
+    <ToastContext.Provider value={value}>
       {children}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </ToastContext.Provider>
-  );
+  )
 }
 
 export function useToast() {
-  const context = useContext(ToastContext);
-  if (!context) throw new Error('useToast must be used within ToastProvider');
-  return context;
-}
-
-function ToastContainer({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: string) => void }) {
-  const { t } = useTranslation();
-
-  if (toasts.length === 0) return null;
-  return (
-    <div className="toast-container" role="alert" aria-live="polite">
-      {toasts.map(toast => (
-        <div key={toast.id} className={`toast toast-${toast.type}`}>
-          <span>{toast.message}</span>
-          <button onClick={() => onDismiss(toast.id)} aria-label={t('a11y.dismiss')}>&times;</button>
-        </div>
-      ))}
-    </div>
-  );
+  const ctx = useContext(ToastContext)
+  if (!ctx) {
+    // Fallback for isolated tests without provider (see hooks/useToast)
+    return {
+      toasts: [],
+      showToast: () => '',
+      dismissToast: () => {},
+    } as unknown as ToastContextValue
+  }
+  return ctx
 }

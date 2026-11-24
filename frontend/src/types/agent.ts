@@ -80,3 +80,21 @@ export type AgentResult =
   | DesignResult
   | null
   | undefined;
+
+export interface ReputationDimensions {
+  quality: number;
+  speed: number;
+  reliability: number;
+  cost: number;
+}
+
+export interface ReputationHistory {
+  date: string;
+  score: number;
+}
+
+export interface AgentReputation {
+  id: string;
+  dimensions: ReputationDimensions;
+  history: ReputationHistory[];
+}

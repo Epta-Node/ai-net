@@ -1,14 +1,15 @@
-import React, { useState, useRef } from 'react'
+import React from 'react'
 import { useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell } from 'lucide-react'
-import { useWallet } from '../../context/WalletContext'
-import { useNotifications } from '../../hooks/useNotifications'
-import { NotificationCenter } from '../notifications/NotificationCenter'
+import { useWallet, NETWORK_LABELS } from '../../context/WalletContext'
+import { NotificationBell } from '../notifications/NotificationBell'
 import { SUPPORTED_LANGUAGES } from '../../i18n/options'
+import { NAV_ITEMS } from './navigation'
 import type { SupportedLanguage } from '../../i18n/options'
 import './TopNav.css'
 import useTheme from '../../hooks/useTheme'
+import { useWalletBalance } from '../../hooks/useWalletBalance'
+import { useAnimatedCounter } from '../../hooks/useAnimatedCounter'
 import { Sun, Moon, Monitor } from 'lucide-react'
 
 interface TopNavProps {
@@ -32,6 +33,7 @@ const LANGUAGE_OPTIONS: Record<
 > = {
   en: { flag: '🇬🇧', nativeName: 'English', shortLabel: 'EN' },
   zh: { flag: '🇨🇳', nativeName: '中文', shortLabel: '中文' },
+  es: { flag: '🇪🇸', nativeName: 'Español', shortLabel: 'ES' },
 }
 
 const TopNav: React.FC<TopNavProps> = ({ 
@@ -41,34 +43,41 @@ const TopNav: React.FC<TopNavProps> = ({
   isMobile,
   isDrawerOpen = false,
 }) => {
-  const { publicKey, connected, ready, connectionMethod, disconnect } = useWallet()
-  const { unreadCount } = useNotifications()
-  const [isNotificationOpen, setIsNotificationOpen] = useState(false)
-  const bellButtonRef = useRef<HTMLButtonElement>(null)
+  const { publicKey, connected, connecting, ready, connectionMethod, network, networkMismatch, disconnect } = useWallet()
   const { t, i18n } = useTranslation()
   const location = useLocation()
   const { mode, setMode } = useTheme()
 
   const activeLanguage = (i18n.resolvedLanguage ?? 'en') as SupportedLanguage
 
+  const { balanceXLM, isLoading: balanceLoading } = useWalletBalance(
+    connected && ready && publicKey ? publicKey : null
+  )
+  const numericBalance = balanceXLM ? parseFloat(balanceXLM) || 0 : 0
+  const animatedBalance = useAnimatedCounter(Math.round(numericBalance * 100)) / 100
+
+  // The title mirrors the sidebar's labels via the shared nav config, so the
+  // page heading and the highlighted nav entry can never disagree.
   const getTitle = () => {
     const path = location.pathname
-    switch (path) {
-      case '/': return t('nav.dashboard')
-      case '/agents': return t('nav.agentRegistry')
-      case '/tasks/new': return t('nav.newTask')
-      case '/tasks/history': return t('nav.taskHistory')
-      case '/wallet': return t('nav.wallet')
-      default:
-        if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
-        return t('nav.dashboard')
-    }
+    // The registry page gets a fuller heading than its terse nav label.
+    if (path === '/agents') return t('nav.agentRegistry')
+
+    const navItem = NAV_ITEMS.find((item) => item.path === path)
+    if (navItem) return t(navItem.labelKey)
+
+    if (path.startsWith('/tasks/')) return t('nav.taskMonitoring')
+    return t('nav.dashboard')
   }
 
+  // `GABC…XYZ` — four leading and three trailing characters. Anything shorter
+  // is shown in full rather than truncated into something unreadable.
   const truncateKey = (key: string) => {
-    if (key.length <= 8) return key
+    if (key.length <= 10) return key
     return `${key.slice(0, 4)}...${key.slice(-3)}`
   }
+
+  const networkLabel = network ? (NETWORK_LABELS[network] ?? network) : null
 
   return (
     <header className="top-nav" role="banner">
@@ -107,31 +116,7 @@ const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       <div className="nav-right">
-        <div className="notification-wrapper">
-          <button
-            ref={bellButtonRef}
-            type="button"
-            className={`notification-bell-btn ${isNotificationOpen ? 'active' : ''}`}
-            onClick={() => setIsNotificationOpen(prev => !prev)}
-            aria-label="Notifications"
-            aria-expanded={isNotificationOpen}
-            id="btn-notifications"
-            data-testid="notification-bell-btn"
-          >
-            <Bell size={20} />
-            {unreadCount > 0 && (
-              <span className="notification-badge" data-testid="notification-badge">
-                {unreadCount > 99 ? '99+' : unreadCount}
-              </span>
-            )}
-          </button>
-
-          <NotificationCenter
-            isOpen={isNotificationOpen}
-            onClose={() => setIsNotificationOpen(false)}
-            anchorRef={bellButtonRef}
-          />
-        </div>
+        <NotificationBell />
 
         {/* Theme toggle: cycles light -> dark -> system */}
         <button
@@ -176,11 +161,44 @@ const TopNav: React.FC<TopNavProps> = ({
         {connected && publicKey ? (
           ready ? (
             <>
-              <span className="wallet-chip connected" id="wallet-pubkey-display">
+              <span
+                className="wallet-chip connected"
+                id="wallet-pubkey-display"
+                title={publicKey}
+                data-testid="wallet-pubkey"
+              >
                 {truncateKey(publicKey)}
               </span>
+              <span
+                className="wallet-chip connected"
+                id="wallet-balance-display"
+                data-testid="wallet-balance"
+                title={balanceXLM ? `${balanceXLM} XLM` : 'Loading balance...'}
+                style={{ fontSize: '11px', fontWeight: 600 }}
+              >
+                {balanceLoading && !balanceXLM ? '...' : `${animatedBalance.toFixed(2)} XLM`}
+              </span>
+              {networkLabel && (
+                <span
+                  className={`wallet-chip ${networkMismatch ? 'network-mismatch' : 'connected'}`}
+                  id="wallet-network-badge"
+                  data-testid="wallet-network-badge"
+                  style={{ fontSize: '10px', padding: '2px 6px' }}
+                  title={
+                    networkMismatch
+                      ? t('wallet.networkMismatchTitle')
+                      : t('wallet.networkLabel', { network: networkLabel })
+                  }
+                >
+                  {networkLabel}
+                </span>
+              )}
               {connectionMethod && (
-                <span className="wallet-chip connected" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                <span
+                  className="wallet-chip connected"
+                  style={{ fontSize: '10px', padding: '2px 6px' }}
+                  data-testid="wallet-connection-method"
+                >
                   {connectionMethod === 'freighter' ? t('wallet.freighter') : t('wallet.secretKey')}
                 </span>
               )}
@@ -197,14 +215,14 @@ const TopNav: React.FC<TopNavProps> = ({
               <span className="wallet-chip connected" id="wallet-pubkey-display" style={{ opacity: 0.6 }}>
                 {truncateKey(publicKey)}
               </span>
-              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: '#fef3c7', color: '#92400e' }}>
+              <span className="wallet-chip" style={{ fontSize: '10px', padding: '2px 6px', background: 'var(--status-warning-surface-strong)', color: 'var(--status-warning-text)' }}>
                 {t('wallet.reconnectRequired')}
               </span>
             </>
           )
         ) : (
           <span className="wallet-chip disconnected" id="wallet-pubkey-display">
-            {t('wallet.notConnected')}
+            {connecting ? t('common.connecting') : t('wallet.notConnected')}
           </span>
         )}
       </div>

@@ -35,6 +35,12 @@ function buildApp(
     res.setHeader("Content-Type", "text/plain");
     res.send(largePayload());
   });
+  app.get("/sse", (_req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.write("data: first\n\n");
+    res.end("data: second\n\n");
+  });
   return app;
 }
 
@@ -153,6 +159,34 @@ describe("compressionMiddleware — gzip", () => {
       .get("/test")
       .set("Accept-Encoding", "gzip");
     expect(res.headers["content-encoding"]).toBe("gzip");
+  });
+});
+
+describe("compressionMiddleware — brotli", () => {
+  it("compresses large responses over the threshold", async () => {
+    const app = buildApp({ data: largePayload() }, "application/json");
+    const res = await request(app).get("/test").set("Accept-Encoding", "br");
+
+    expect(res.headers["content-encoding"]).toBe("br");
+    expect(res.body).toEqual({ data: largePayload() });
+  });
+
+  it("does not compress small responses below the threshold", async () => {
+    const app = buildApp({ tiny: "x" }, "application/json");
+    const res = await request(app).get("/test").set("Accept-Encoding", "br");
+
+    expect(res.headers["content-encoding"]).toBeUndefined();
+  });
+
+  it("does not compress SSE streams", async () => {
+    const app = buildApp();
+    for (const acceptEncoding of ["br", "gzip"]) {
+      const res = await request(app).get("/sse").set("Accept-Encoding", acceptEncoding);
+      expect(res.headers["content-type"]).toContain("text/event-stream");
+      expect(res.headers["content-encoding"]).toBeUndefined();
+      expect(res.text).toContain("data: first");
+      expect(res.text).toContain("data: second");
+    }
   });
 });
 

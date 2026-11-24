@@ -2,6 +2,27 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .kpiSkeleton {
@@ -9,7 +30,7 @@
   flex-direction: column;
   gap: 0.5rem;
   min-height: 80px;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .health {
@@ -27,6 +48,6 @@
 .heading {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--surface-canvas);
   margin: 0;
 }

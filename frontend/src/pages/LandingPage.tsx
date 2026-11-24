@@ -4,6 +4,8 @@ import Navbar from '../components/landing/Navbar'
 import Sidebar from '../components/landing/Sidebar'
 import Hero from '../components/landing/Hero'
 import StatsBar from '../components/landing/StatsBar'
+import ValuePropsSection from '../components/landing/ValuePropsSection'
+import LiveDemoSection from '../components/landing/LiveDemoSection'
 import SpecialistAgentsSection from '../components/landing/SpecialistAgentsSection'
 import Footer from '../components/landing/Footer'
 
@@ -39,6 +41,8 @@ const LandingPage: React.FC = () => {
         >
           <Hero />
           <StatsBar />
+          <ValuePropsSection />
+          <LiveDemoSection />
           <SpecialistAgentsSection />
           <Footer />
         </motion.main>

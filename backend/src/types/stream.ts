@@ -2,11 +2,18 @@
  * WebSocket protocol types for the live task-stream endpoint
  * (ws://<host>/tasks/:id/stream).
  *
- * Handshake:
- *   1. Client connects and sends an {@link AuthMessage} as its FIRST message.
- *   2. Server validates ownership of the task; on mismatch it closes the
- *      socket with {@link WS_CLOSE.FORBIDDEN} (a 403-equivalent close frame).
- *   3. Server replays all past {@link DAGEvent}s from the store, then streams
+ * Handshake (#653):
+ *   1. Server sends a {@link ServerChallengeMessage} with a single-use,
+ *      expiring nonce immediately after the socket opens.
+ *   2. Client signs the nonce with its Stellar secret key and sends an
+ *      {@link AuthMessage} (`walletPublicKey`, `nonce`, `signature`) as its
+ *      FIRST message.
+ *   3. Server verifies ownership of the task AND the Ed25519 signature using
+ *      the same challenge/verify flow as the agents endpoints
+ *      (`verifyWalletSignature`). A correct public key without a valid
+ *      signature is rejected; on mismatch it closes the socket with
+ *      {@link WS_CLOSE.FORBIDDEN} (a 403-equivalent close frame).
+ *   4. Server replays all past {@link DAGEvent}s from the store, then streams
  *      live events as they are emitted.
  *
  * Heartbeat:
@@ -15,9 +22,21 @@
  *   {@link ClientPongMessage} within 10s.
  */
 
-/** First message a client must send: proves which wallet owns the task. */
+/**
+ * First message a client must send: proves ownership of the task by signing
+ * the server-issued nonce. `signature` is the base64 Ed25519 signature of
+ * `nonce` made with the wallet's Stellar secret key.
+ */
 export interface AuthMessage {
   walletPublicKey: string;
+  nonce: string;
+  signature: string;
+}
+
+/** Server's opening message carrying the single-use auth nonce. */
+export interface ServerChallengeMessage {
+  type: 'auth_challenge';
+  nonce: string;
 }
 
 /** Client's reply to a server heartbeat ping. */
@@ -43,7 +62,7 @@ export const WS_CLOSE = {
   BAD_REQUEST: 4400,
   /** No auth message arrived before the handshake deadline. */
   AUTH_TIMEOUT: 4401,
-  /** walletPublicKey does not own the task — HTTP 403 equivalent. */
+  /** walletPublicKey does not own the task or signature invalid — HTTP 403 equivalent. */
   FORBIDDEN: 4403,
   /** Unknown taskId — HTTP 404 equivalent. */
   TASK_NOT_FOUND: 4404,

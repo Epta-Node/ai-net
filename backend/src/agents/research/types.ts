@@ -35,6 +35,16 @@ export interface AgentError {
   error: string;
 }
 
+/**
+ * Token counts the agent reports back to the coordinator so the task can be
+ * billed accurately rather than estimated (Issue #390).
+ */
+export interface AgentUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 /** Input accepted by every agent's execute() method. */
 export interface AgentTask {
   taskId: string;
@@ -42,4 +52,11 @@ export interface AgentTask {
   prompt: string;
   /** Optional upstream results or context forwarded by the Coordinator. */
   context?: string;
+  /**
+   * Token allowance for this node, sent by the coordinator. Absent for older
+   * coordinators, in which case the agent falls back to client defaults.
+   */
+  budget?: {
+    maxTokens?: number;
+  };
 }

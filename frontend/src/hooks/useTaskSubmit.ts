@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { createTask, TaskSubmissionPayload, TaskSubmitResponse } from '../services/taskService';
+import { notifyTaskStarted } from './useWalletBalance';
 
 export type TaskSubmitStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -15,6 +16,7 @@ export function useTaskSubmit() {
 
     try {
       const response = await createTask(payload);
+      notifyTaskStarted();
       setData(response);
       setStatus('success');
       return response;

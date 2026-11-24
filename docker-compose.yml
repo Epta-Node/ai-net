@@ -1,0 +1,137 @@
+version: '3.8'
+
+services:
+  stellar-standalone:
+    image: stellar/quickstart:testing
+    container_name: ai-net-stellar-standalone
+    ports:
+      - "8000:8000"
+      - "11626:11626"
+    command: --standalone --enable-soroban-rpc
+    environment:
+      - STELLAR_NETWORK=standalone
+      - ENABLE_SOROBAN_RPC=true
+    healthcheck:
+      # Horizon answering and Soroban RPC reporting healthy. (Horizon's root
+      # JSON never contains "Stellar", so the old grep never passed.)
+      test:
+        - CMD-SHELL
+        - >-
+          curl -sf http://localhost:8000/ > /dev/null &&
+          curl -sf -X POST -H 'content-type: application/json'
+          -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}'
+          http://localhost:8000/soroban/rpc | grep -q '"healthy"'
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      # Quickstart needs a while to bring up core + Soroban RPC.
+      start_period: 120s
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    # Fixed tag so CI can prebuild with a layer cache and `up --no-build`.
+    image: ai-net-backend:local
+    container_name: ai-net-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      # A filesystem path: resolveDatabasePath() rejects URL schemes.
+      - DATABASE_URL=/app/backend/data/ai-net.db
+      # "local" selects the standalone passphrase and allows the node's http URLs.
+      - STELLAR_NETWORK=local
+      - SOROBAN_RPC_URL=http://stellar-standalone:8000/soroban/rpc
+      - STELLAR_HORIZON_URL=http://stellar-standalone:8000
+      - VENICE_API_KEY=${VENICE_API_KEY:-mock_local_key}
+      - SKIP_STELLAR_ACCOUNT_VERIFY=true
+      - OTEL_SAMPLING_RATE=${OTEL_SAMPLING_RATE:-1}
+      # Set to http://otel-collector:4318 when running `--profile monitoring`.
+      - OTEL_EXPORTER_ENDPOINT=${OTEL_EXPORTER_ENDPOINT:-}
+    volumes:
+      - sqlite_data:/app/backend/data
+    depends_on:
+      stellar-standalone:
+        condition: service_healthy
+    healthcheck:
+      # Liveness only; use /health/deep for dependency-aware readiness.
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: ai-net-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:3000
+      - VITE_STELLAR_NETWORK=standalone
+      - VITE_SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # Integration smoke runner (issue #753), only started with `--profile test`:
+  #   docker compose --profile test up --build --exit-code-from smoke smoke
+  # Stock node image, no install step: the script uses Node built-ins only.
+  smoke:
+    profiles: ["test"]
+    image: node:24-alpine
+    working_dir: /smoke
+    volumes:
+      - ./tests/e2e/compose-smoke.mjs:/smoke/compose-smoke.mjs:ro
+    environment:
+      - SMOKE_BASE_URL=http://backend:3000
+    command: ["node", "compose-smoke.mjs"]
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # ── Observability stack (issue #853 / #856) ─────────────────────────────────
+  # Started only with `docker compose --profile monitoring up` so the base
+  # stack keeps its default footprint.
+  otel-collector:
+    image: jaegertracing/all-in-one:1.57
+    container_name: ai-net-otel-collector
+    profiles: ["monitoring"]
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "16686:16686"
+
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: ai-net-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./backend/grafana/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: ai-net-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/ai-net-dashboard.json
+    volumes:
+      - ./backend/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./backend/grafana/ai-net-dashboard.json:/var/lib/grafana/dashboards/ai-net-dashboard.json:ro
+    depends_on:
+      - prometheus
+
+volumes:
+  sqlite_data:
+    driver: local

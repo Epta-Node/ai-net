@@ -13,6 +13,7 @@ This directory contains the full-stack End-to-End integration test suite for `ai
 ```
 tests/e2e/
 ├── docker-compose.test.yml         # Local Stellar node + backend container orchestration
+├── compose-smoke.mjs               # Smoke suite for the root docker-compose `test` profile
 ├── jest.config.js                  # E2E Jest configuration
 ├── setup.ts                        # Global test setup (deploy contracts, reset state)
 ├── teardown.ts                     # Global test cleanup
@@ -67,6 +68,25 @@ To spin up a local Stellar standalone validator alongside the backend:
 ```bash
 docker-compose -f tests/e2e/docker-compose.test.yml up --build
 ```
+
+### Compose Integration Smoke (`test` profile)
+
+`compose-smoke.mjs` runs against the real containers from the root `docker-compose.yml`, not an in-process app. It checks: backend liveness, agent registration with a signed challenge, task submission, and the first event on the task's SSE stream.
+
+```bash
+# Stellar standalone + backend + smoke runner; exits with the smoke result
+docker compose --profile test up --build --exit-code-from smoke smoke
+
+# Graceful shutdown: the backend must exit 0 on SIGTERM
+docker compose stop -t 30 backend
+docker compose ps -a backend --format '{{.ExitCode}}'
+
+docker compose --profile test down -v
+```
+
+Point it at any running backend with `SMOKE_BASE_URL=http://localhost:3000 node tests/e2e/compose-smoke.mjs`. It uses Node built-ins only, so no install step is needed.
+
+In CI the `integration-compose` job runs the same commands (backend image built with a buildx layer cache, 20 min timeout) whenever `backend/**`, `docker-compose.yml` or the smoke script change, and uploads compose logs on failure. It is part of `ci-gate`.
 
 ---
 

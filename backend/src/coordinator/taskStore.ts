@@ -1,8 +1,47 @@
 import type { Task, DAGNode } from '../types/task';
-import { getTaskDb, createTaskDb } from '../db/tasks';
+import { getTaskDb, createTaskDb, type TaskEventHistoryOptions } from '../db/tasks';
 
 function db() {
   return createTaskDb(getTaskDb());
+}
+
+// ---------------------------------------------------------------------------
+// In-process AbortController registry (Issue #62)
+//
+// Tracks one AbortController per running task so that DELETE /api/tasks/:id
+// can abort an in-flight DAG execution without a round-trip to the database.
+// The map is process-local; entries are removed when the task reaches a
+// terminal state (completed / failed / cancelled).
+// ---------------------------------------------------------------------------
+
+const runningControllers = new Map<string, AbortController>();
+
+/**
+ * Register an AbortController for a task that is about to start executing.
+ * Called by the coordinator before invoking executeDAG.
+ */
+export function registerTaskController(taskId: string, controller: AbortController): void {
+  runningControllers.set(taskId, controller);
+}
+
+/**
+ * Remove the AbortController for a task that has reached a terminal state.
+ * Called by the coordinator after executeDAG resolves or rejects.
+ */
+export function unregisterTaskController(taskId: string): void {
+  runningControllers.delete(taskId);
+}
+
+/**
+ * Abort the in-flight execution of a running task.
+ * Returns true if a controller was found and signalled, false otherwise.
+ */
+export function abortTask(taskId: string): boolean {
+  const controller = runningControllers.get(taskId);
+  if (!controller) return false;
+  controller.abort();
+  runningControllers.delete(taskId);
+  return true;
 }
 
 export function createTask(task: Task): void {
@@ -32,6 +71,6 @@ export function updateNode(taskId: string, nodeId: string, patch: Partial<DAGNod
   db().updateDagJson(taskId, JSON.stringify(task.dag));
 }
 
-export function getEventHistory(taskId: string) {
-  return db().getEventHistory(taskId);
+export function getEventHistory(taskId: string, options?: TaskEventHistoryOptions) {
+  return db().getEventHistory(taskId, options);
 }

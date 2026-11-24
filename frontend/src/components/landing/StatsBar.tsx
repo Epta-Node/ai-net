@@ -2,11 +2,7 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { motion } from 'framer-motion'
 import { Bot, Zap, Globe, CreditCard } from 'lucide-react'
-
-const containerVariants = {
-  hidden: { opacity: 0, y: 30 },
-  visible: { opacity: 1, y: 0, transition: { duration: 0.6, delay: 0.4 } },
-}
+import { staggerDelayed } from '../../utils/animationPresets'
 
 const StatsBar: React.FC = () => {
   const { t } = useTranslation()
@@ -22,7 +18,7 @@ const StatsBar: React.FC = () => {
   return (
     <motion.section
       className="px-4 max-w-[800px] mx-auto mb-20 w-full relative z-10"
-      variants={containerVariants}
+      variants={staggerDelayed}
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: '-50px' }}

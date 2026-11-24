@@ -5,7 +5,7 @@
 //! callers can branch on the numeric code without coupling to a specific SDK
 //! build.
 //!
-//! The code range used here (`1..=17`) is local to this contract. Codes are
+//! The code range used here (`1..=36`) is local to this contract. Codes are
 //! chosen to read naturally in logs while remaining stable across releases:
 //! **never renumber an existing variant** once the contract is deployed.
 
@@ -40,7 +40,7 @@ pub enum Error {
     NotEnoughBids = 11,
     /// Reputation score is out of the accepted `[0, 100]` range.
     InvalidReputation = 12,
-    /// The bid price must be positive and at least the reserve price.
+    /// The bid price must be positive and within `[reserve_price, max_price]`.
     InvalidPrice = 13,
     /// The locked bond does not match the auction's required bond.
     InvalidBond = 14,
@@ -50,4 +50,61 @@ pub enum Error {
     WinnerNotDetermined = 16,
     /// The escrow for this auction has already been created.
     EscrowAlreadyCreated = 17,
+    // ── Added by the front-running / commit-reveal hardening pass (#350) ────
+    /// The reveal window has closed; this bid can no longer be revealed.
+    RevealPeriodEnded = 18,
+    /// The reveal window is still open, so the winner cannot be finalised yet.
+    RevealPeriodActive = 19,
+    /// The auction already holds [`MAX_BIDDERS`] sealed bids.
+    ///
+    /// [`MAX_BIDDERS`]: crate::MAX_BIDDERS
+    AuctionFull = 20,
+    /// A phase duration is outside `[MIN_PHASE_DURATION_SECS, MAX_PHASE_DURATION_SECS]`.
+    InvalidDuration = 21,
+    /// The revealed `terms` string exceeds [`MAX_TERMS_LEN`] bytes.
+    ///
+    /// [`MAX_TERMS_LEN`]: crate::MAX_TERMS_LEN
+    TermsTooLong = 22,
+    /// The auction's price bounds are inconsistent (e.g. `max_price < reserve_price`).
+    InvalidPriceRange = 23,
+    /// The auction has reached a terminal phase and accepts no further calls.
+    AuctionClosed = 24,
+    /// `abort_auction` was called on an auction that still has a valid reveal.
+    AuctionNotAbortable = 25,
+    /// An arithmetic operation overflowed while scoring bids.
+    ArithmeticOverflow = 26,
+    /// Contract already initialized.
+    AlreadyInitialized = 27,
+    /// The contract is currently paused.
+    ContractPaused = 28,
+    /// The winning bidder cannot claim a refund on bond.
+    WinnerCannotClaimRefund = 29,
+    /// The refund has already been claimed.
+    RefundAlreadyClaimed = 30,
+    /// The claim window for bond refund has expired.
+    ClaimWindowExpired = 31,
+    /// Bond already refunded.
+    AlreadyRefunded = 32,
+    /// No payment asset (Stellar Asset Contract) has been configured.
+    AssetNotConfigured = 33,
+    /// The supplied asset or its decimals do not match the configured asset.
+    AssetMismatch = 34,
+    /// An amount is negative or not representable in the asset's decimals.
+    InvalidAmount = 35,
+    /// The escrow has already been released or refunded.
+    EscrowAlreadySettled = 36,
+    /// The auction already has the maximum number of bidders.
+    MaxBiddersReached = 37,
+    /// The requested audit range is invalid.
+    InvalidAuditRange = 38,
+    /// The referenced agent is not registered in the agent registry.
+    AgentNotFound = 39,
+    /// The referenced agent is frozen by the registry.
+    AgentFrozen = 40,
+    /// The registry rejected the agent for any other eligibility reason.
+    AgentNotEligible = 41,
+    /// The agent has been deregistered.
+    AgentDeregistered = 42,
+    /// The agent's bond is below the registry minimum.
+    InsufficientBond = 43,
 }

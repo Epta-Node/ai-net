@@ -4,15 +4,16 @@ import { createInstance } from 'i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 import i18n from 'i18next'
 import TopNav from './TopNav'
+import { NotificationProvider } from '../../context/NotificationContext'
 import { WalletProvider } from '../../context/WalletContext'
 import { i18nBaseOptions } from '../../i18n/options'
 
 const renderNav = (path = '/') =>
   render(
     <MemoryRouter initialEntries={[path]}>
-      <WalletProvider>
+      <NotificationProvider><WalletProvider>
         <TopNav onMenuClick={() => {}} onToggleSidebar={() => {}} sidebarCollapsed={false} isMobile={false} />
-      </WalletProvider>
+      </WalletProvider></NotificationProvider>
     </MemoryRouter>
   )
 

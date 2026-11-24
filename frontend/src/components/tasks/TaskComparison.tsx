@@ -21,19 +21,27 @@ import styles from './TaskComparison.module.css';
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const AGENT_COLORS: Record<string, string> = {
-  research: '#38bdf8',
-  risk: '#f59e0b',
-  coding: '#a78bfa',
-  design: '#f472b6',
-  report: '#34d399',
+  research: 'var(--agent-research)',
+  risk: 'var(--agent-risk)',
+  coding: 'var(--agent-coding)',
+  design: 'var(--agent-design)',
+  report: 'var(--agent-report)',
+};
+
+const AGENT_BORDERS: Record<string, string> = {
+  research: 'var(--agent-research-border)',
+  risk: 'var(--agent-risk-border)',
+  coding: 'var(--agent-coding-border)',
+  design: 'var(--agent-design-border)',
+  report: 'var(--agent-report-border)',
 };
 
 function statusColor(status: TaskResponse['status']): string {
   switch (status) {
-    case 'completed': return '#34d399';
-    case 'failed': return '#f87171';
-    case 'running': return '#818cf8';
-    default: return '#fbbf24';
+    case 'completed': return 'var(--status-success)';
+    case 'failed': return 'var(--status-danger-text)';
+    case 'running': return 'var(--accent-text-muted)';
+    default: return 'var(--status-warning)';
   }
 }
 
@@ -188,7 +196,7 @@ const ComparisonColumn: React.FC<ComparisonColumnProps> = ({
                   <span
                     key={t}
                     className={styles.agentPill}
-                    style={{ color: AGENT_COLORS[t] || '#94a3b8', borderColor: `${AGENT_COLORS[t] || '#94a3b8'}44` }}
+                    style={{ color: AGENT_COLORS[t] || 'var(--agent-default)', borderColor: AGENT_BORDERS[t] || 'var(--agent-default-border)' }}
                   >
                     {t}
                   </span>
@@ -209,7 +217,7 @@ const ComparisonColumn: React.FC<ComparisonColumnProps> = ({
               const agentKey = ['research', 'risk', 'coding', 'design', 'report'].find((k) =>
                 agentBase.includes(k)
               );
-              const agentColor = agentKey ? AGENT_COLORS[agentKey] : '#94a3b8';
+              const agentColor = agentKey ? AGENT_COLORS[agentKey] : 'var(--agent-default)';
 
               // Find corresponding node in other task for diff
               const otherNode = otherTask.dag?.[i];

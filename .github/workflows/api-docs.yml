@@ -1,0 +1,164 @@
+name: API Reference Docs
+
+# Generates a static Redoc HTML site from the live OpenAPI spec and uploads
+# it as a GitHub Actions artifact on every backend change.
+# A separate markdown link-check step catches dead anchors in docs/.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - ".github/workflows/api-docs.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - ".github/workflows/api-docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: api-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  generate-api-reference:
+    name: Generate API reference site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build backend (generates OpenAPI spec)
+        run: npm run build
+
+      - name: Export OpenAPI spec to YAML
+        run: |
+          node -e "
+            const app = require('./dist/src/api/docs/openapi');
+            const yaml = require('js-yaml');
+            const fs   = require('fs');
+            const spec = app.generateOpenApiSpec ? app.generateOpenApiSpec() : app.default;
+            fs.mkdirSync('dist/openapi', { recursive: true });
+            fs.writeFileSync('dist/openapi/openapi.yaml', yaml.dump(spec));
+            fs.writeFileSync('dist/openapi/openapi.json', JSON.stringify(spec, null, 2));
+            console.log('OpenAPI spec exported.');
+          " 2>/dev/null || \
+          node -e "
+            const fs = require('fs');
+            // Fallback: look for a pre-built spec file
+            const candidates = [
+              'src/api/openapi/openapi.yaml',
+              'src/api/openapi/openapi.json',
+              'dist/openapi.yaml',
+              'dist/openapi.json',
+            ];
+            let found = false;
+            for (const c of candidates) {
+              if (fs.existsSync(c)) {
+                fs.mkdirSync('dist/openapi', { recursive: true });
+                fs.copyFileSync(c, 'dist/openapi/' + c.split('/').pop());
+                console.log('Copied', c, 'to dist/openapi/');
+                found = true;
+                break;
+              }
+            }
+            if (!found) { console.error('No OpenAPI spec found'); process.exit(1); }
+          "
+
+      - name: Install Redoc CLI
+        run: npm install --no-save @redocly/cli@1.25.15
+
+      - name: Generate Redoc static site
+        run: |
+          mkdir -p ../docs/api-reference
+          npx @redocly/cli build-docs dist/openapi/openapi.yaml \
+            --output ../docs/api-reference/index.html \
+            --title "ai-net API Reference" 2>/dev/null || \
+          npx @redocly/cli build-docs dist/openapi/openapi.json \
+            --output ../docs/api-reference/index.html \
+            --title "ai-net API Reference"
+
+      - name: Upload API reference artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-reference-${{ github.sha }}
+          path: docs/api-reference/
+          if-no-files-found: error
+          retention-days: 30
+
+  markdown-link-check:
+    name: Markdown link check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Install markdown-link-check
+        run: npm install --no-save markdown-link-check@3.12.2
+
+      - name: Write link-check config
+        run: |
+          cat > .mlc-config.json << 'EOF'
+          {
+            "ignorePatterns": [
+              { "pattern": "^https?://localhost" },
+              { "pattern": "^https?://127\\.0\\.0\\.1" },
+              { "pattern": "^https?://0\\.0\\.0\\.0" },
+              { "pattern": "^mailto:" }
+            ],
+            "retryOn429": true,
+            "retryCount": 2,
+            "fallbackRetryDelay": "5s",
+            "aliveStatusCodes": [200, 206]
+          }
+          EOF
+
+      - name: Check links in docs/
+        run: |
+          find docs -name "*.md" -print0 \
+            | xargs -0 -I{} sh -c \
+              'npx markdown-link-check --config .mlc-config.json --quiet "{}" || echo "FAILED: {}"' \
+            | tee link-check-report.txt
+          if grep -q "^FAILED:" link-check-report.txt; then
+            echo ""
+            echo "❌ Dead links found — see report above."
+            grep "^FAILED:" link-check-report.txt
+            exit 1
+          fi
+          echo "✅ All markdown links are alive."
+
+      - name: Upload link-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-check-report-${{ github.run_id }}
+          path: link-check-report.txt
+          if-no-files-found: warn
+          retention-days: 7
