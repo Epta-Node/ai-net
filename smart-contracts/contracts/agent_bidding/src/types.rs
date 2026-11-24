@@ -36,6 +36,7 @@
 //! | `reveal_bid`      | `bid_rvld`            | `BidRevealedEvent`                  |
 //! | `reveal_bids`     | `bids_rvld`           | `BidsRevealedEvent`                 |
 //! | `award_contract`  | `cntrct_aw`           | `ContractAwardedEvent`              |
+//! | `award_contract`  | `bid_accpt`           | `BidAccepted`                       |
 //! | `abort_auction`   | `aborted`             | `AuctionAbortedEvent`               |
 
 use soroban_sdk::{contracttype, Address, BytesN, String, Symbol};
@@ -343,6 +344,18 @@ pub struct ContractAwardedEvent {
     pub refunded_bidders: u32,
     /// Number of bidders who never revealed and forfeited their bond.
     pub forfeited_bidders: u32,
+}
+
+/// Emitted when the winning bid is accepted in `award_contract`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BidAccepted {
+    /// Auction (task) whose bid was accepted.
+    pub auction_id: Symbol,
+    /// Winning agent whose bid was accepted.
+    pub agent_id: Address,
+    /// Accepted bid amount in stroops (= winning price / escrow amount).
+    pub bid_amount: i128,
 }
 
 /// Emitted when `abort_auction` cancels an auction that drew no valid reveal.
