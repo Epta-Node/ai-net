@@ -9,13 +9,13 @@ export const MOCK_WALLET_PUBKEY = 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A
 export const MOCK_TASK_ID = 'visual-task-fixture';
 
 /**
- * `ThemeProvider` reads `theme-mode` from `localStorage` on first render, so
+ * `ThemeProvider` reads `ainet.theme` from `localStorage` on first render, so
  * this must run before the app's first script executes (`addInitScript`),
  * not after `page.goto()`.
  */
 export async function setTheme(page: Page, mode: ThemeMode): Promise<void> {
   await page.addInitScript((value) => {
-    window.localStorage.setItem('theme-mode', value);
+    window.localStorage.setItem('ainet.theme', value);
   }, mode);
 }
 

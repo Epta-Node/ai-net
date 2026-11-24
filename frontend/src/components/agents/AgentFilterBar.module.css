@@ -31,6 +31,13 @@
   letter-spacing: 0;
 }
 
+.filterError {
+  min-height: 1em;
+  margin: 0;
+  color: var(--status-danger-text);
+  font-size: 0.78rem;
+}
+
 .muted {
   color: var(--text-secondary);
   font-size: 0.85rem;
@@ -76,7 +83,7 @@
 .capChipActive:hover {
   background: var(--accent-surface-strong);
   border-color: var(--primary);
-  color: #C7D2FE;
+  color: #c7d2fe;
 }
 
 .capChipActive:active {

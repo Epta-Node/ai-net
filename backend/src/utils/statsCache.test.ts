@@ -14,7 +14,19 @@ describe('StatsCache', () => {
           totalXLMTransacted: 0,
           uptimePercent: 100,
           tasksLast24h: [],
-          xlmLast24h: []
+          xlmLast24h: [],
+          tasksLast7d: [],
+          xlmLast7d: [],
+          cost: {
+            tasks: 0,
+            calls: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            costUsd: 0,
+            overBudgetTasks: 0,
+            costLast7d: []
+          }
         };
       }
     });
@@ -40,7 +52,19 @@ describe('StatsCache', () => {
           totalXLMTransacted: 0,
           uptimePercent: 100,
           tasksLast24h: [],
-          xlmLast24h: []
+          xlmLast24h: [],
+          tasksLast7d: [],
+          xlmLast7d: [],
+          cost: {
+            tasks: 0,
+            calls: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            costUsd: 0,
+            overBudgetTasks: 0,
+            costLast7d: []
+          }
         };
       }
     });

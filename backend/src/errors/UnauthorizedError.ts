@@ -1,8 +1,12 @@
-import { AppError } from "./AppError";
+import { AppError, type AppErrorDetails } from "./AppError";
 
 export class UnauthorizedError extends AppError {
-  constructor(message = "Unauthorized") {
-    super(message, 401, "UNAUTHORIZED");
+  constructor(
+    message = "Unauthorized",
+    details?: AppErrorDetails,
+    correlationId?: string,
+  ) {
+    super(message, 401, "UNAUTHORIZED", details, correlationId);
     this.name = "UnauthorizedError";
   }
 }

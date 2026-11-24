@@ -65,6 +65,14 @@ pub const MAX_PHASE_DURATION_SECS: u64 = 30 * 24 * 60 * 60;
 /// ledger close times, so it would function as a censorship tool.
 pub const MIN_PHASE_DURATION_SECS: u64 = 60;
 
+/// A bid submitted in the final five minutes extends the bidding window.
+pub const ANTI_SNIPE_WINDOW_SECS: u64 = 5 * 60;
+
+/// Extension applied by an eligible late bid. The reveal window moves with
+/// the bidding deadline so late bidders do not reduce the time available to
+/// reveal a commitment.
+pub const ANTI_SNIPE_EXTENSION_SECS: u64 = 5 * 60;
+
 /// Maximum allowed reputation score (percentage scale).
 pub const MAX_REPUTATION: u32 = 100;
 
@@ -246,17 +254,14 @@ pub struct Escrow {
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
-<<<<<<< HEAD
     /// Contract admin address.
     Admin,
     /// Whether the contract is paused.
     Paused,
-=======
-    /// Admin address allowed to upgrade this contract.
-    Admin,
     /// Current semantic contract version.
     Version,
->>>>>>> 2df3e3b3a809dfb3562e65cb0d42cb71b77b6d25
+    /// Optional emergency pause administrator (may pause, never unpause).
+    PauseAdmin,
     /// Stores the root [`Auction`] record for a task.
     Auction(Symbol),
     /// Stores a single [`SealedBid`] for a given (task, bidder) pair.
@@ -267,6 +272,14 @@ pub enum DataKey {
     Winner(Symbol),
     /// Stores the [`Escrow`] record for a task after `award_contract`.
     Escrow(Symbol),
+    /// Stellar Asset Contract address used for bonds, budgets and escrow.
+    PaymentAsset,
+    /// Decimals of the configured payment asset.
+    AssetDecimals,
+    /// Agent Registry contract used for eligibility checks (optional).
+    AgentRegistry,
+    /// Security bond staked by an agent (see `set_agent_bond` / `slash_agent_bond`).
+    AgentBond(Address),
 }
 
 // ─── Event Payloads ──────────────────────────────────────────────────────────
@@ -355,3 +368,55 @@ pub struct RefundClaimedEvent {
 }
 
 pub type BondRefundClaimedEvent = RefundClaimedEvent;
+
+/// Emitted when escrowed funds are transferred out, either to the winning
+/// agent (`release_escrow`) or back to the creator (`refund_escrow`).
+/// `amount` is the number of asset units actually transferred.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowSettledEvent {
+    pub task_id: Symbol,
+    pub recipient: Address,
+    pub amount: i128,
+}
+
+// ─── Bond lifecycle events (issue #486) ─────────────────────────────────────
+
+/// Data payload for `("bidding", "bond_dep")`.
+///
+/// Published by `submit_bid` after the sealed bid (with its locked bond) has
+/// been persisted, so indexers can track locked bond value per auction and
+/// bidder without replaying auction configs.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BondDeposited {
+    /// Auction the bond was locked in.
+    pub task_id: Symbol,
+    /// Bidder whose bond was locked.
+    pub bidder: Address,
+    /// Bond locked, in stroops (always the auction's required bond).
+    pub amount_stroops: i128,
+    /// 1-based position of this bid within the auction.
+    pub bid_index: u32,
+    /// Ledger timestamp at which the bond was locked.
+    pub deposited_at: u64,
+}
+
+/// Data payload for `("bidding", "bond_slsh")`.
+///
+/// Published by `award_contract` for every non-revealing bidder whose bond is
+/// forfeited. `remaining_stroops` is always `0` here (a forfeit zeroes the
+/// recoverable bond), but the field mirrors the registry's `BondSlashed` shape
+/// so indexers can reuse one handler.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BondSlashed {
+    /// Auction the forfeited bond belonged to.
+    pub task_id: Symbol,
+    /// Bidder whose bond was slashed.
+    pub bidder: Address,
+    /// Amount deducted, in stroops (= the full locked bond).
+    pub penalty_stroops: i128,
+    /// Bond remaining after the slash (0 for a full forfeit).
+    pub remaining_stroops: i128,
+}

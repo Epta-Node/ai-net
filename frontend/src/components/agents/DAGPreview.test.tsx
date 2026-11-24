@@ -23,14 +23,17 @@ import { DAGPreview } from "./DAGPreview";
 type MockNode = {
   id: string;
   type?: string;
-  data: Record<string, unknown>;
+  data: Record<string, string | number | boolean | undefined>;
   selected?: boolean;
+  position?: { x: number; y: number };
 };
 
-type MockEdge = { source: string; target: string };
+type MockEdge = { source: string; target: string; label?: string };
 
 let lastOnNodeClick: ((e: React.MouseEvent, node: MockNode) => void) | undefined;
 let lastOnPaneClick: (() => void) | undefined;
+let capturedNodes: MockNode[] = [];
+let capturedEdges: MockEdge[] = [];
 
 vi.mock("reactflow", () => {
   const Controls = ({ "data-testid": testId }: { "data-testid"?: string }) => (
@@ -58,6 +61,8 @@ vi.mock("reactflow", () => {
   }) => {
     lastOnNodeClick = onNodeClick;
     lastOnPaneClick = onPaneClick;
+    capturedNodes = nodes;
+    capturedEdges = edges;
 
     return (
       <div data-testid="dag-flow">
@@ -66,6 +71,7 @@ vi.mock("reactflow", () => {
             key={node.id}
             data-testid={`dag-node-${node.id}`}
             data-selected={String(node.selected ?? false)}
+            data-status={String(node.data.status ?? "none")}
             aria-selected={node.selected ?? false}
             aria-label={`${String(node.data.label ?? node.id)} node`}
             onClick={(e) => onNodeClick?.(e, node)}
@@ -73,6 +79,9 @@ vi.mock("reactflow", () => {
             <span data-testid={`dag-node-label-${node.id}`}>{String(node.data.label ?? "")}</span>
             {node.data.capability && (
               <span data-testid={`dag-node-cap-${node.id}`}>{String(node.data.capability)}</span>
+            )}
+            {node.data.status && (
+              <span data-testid={`dag-node-status-${node.id}`}>{String(node.data.status)}</span>
             )}
             {/* Tooltip rendered when selected */}
             {node.selected && (
@@ -91,6 +100,7 @@ vi.mock("reactflow", () => {
         {edges.map((edge) => (
           <div key={`${edge.source}-${edge.target}`} data-testid="dag-edge">
             {edge.source} → {edge.target}
+            {edge.label && <span data-testid="dag-edge-label">{edge.label}</span>}
           </div>
         ))}
         {children}
@@ -98,7 +108,11 @@ vi.mock("reactflow", () => {
     );
   };
 
-  const useReactFlow = () => ({ fitView: vi.fn() });
+  const useReactFlow = () => ({
+    fitView: vi.fn(),
+    getNodes: () => capturedNodes,
+    getEdges: () => capturedEdges,
+  });
   const ReactFlowProvider = ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   );
@@ -336,5 +350,208 @@ describe("DAGPreview — single-node graph", () => {
     );
     expect(screen.getByText("Solo Agent")).toBeInTheDocument();
     expect(screen.queryAllByTestId("dag-edge")).toHaveLength(0);
+  });
+});
+
+describe("DAGPreview — execution status colors", () => {
+  const STATUS_NODES = [
+    { id: "n1", label: "Pending Agent", status: "pending" },
+    { id: "n2", label: "Running Agent", status: "running" },
+    { id: "n3", label: "Done Agent", status: "completed" },
+    { id: "n4", label: "Broken Agent", status: "failed" },
+  ];
+
+  it("reflects pending / running / completed / failed states on nodes", () => {
+    render(<DAGPreview dagPreview={{ nodes: STATUS_NODES, edges: [] }} />);
+    expect(screen.getByTestId("dag-node-n1")).toHaveAttribute("data-status", "pending");
+    expect(screen.getByTestId("dag-node-n2")).toHaveAttribute("data-status", "running");
+    expect(screen.getByTestId("dag-node-n3")).toHaveAttribute("data-status", "completed");
+    expect(screen.getByTestId("dag-node-n4")).toHaveAttribute("data-status", "failed");
+    expect(screen.getByTestId("dag-node-status-n2").textContent).toBe("running");
+    expect(screen.getByTestId("dag-node-status-n4").textContent).toBe("failed");
+  });
+
+  it("normalises 'complete' to 'completed'", () => {
+    render(
+      <DAGPreview
+        dagPreview={{ nodes: [{ id: "n1", label: "A", status: "complete" }], edges: [] }}
+      />,
+    );
+    expect(screen.getByTestId("dag-node-n1")).toHaveAttribute("data-status", "completed");
+  });
+
+  it("applies liveStatuses over static node status without unmounting nodes", () => {
+    const nodes = [
+      { id: "research", label: "Research Agent" },
+      { id: "risk", label: "Risk Agent" },
+    ];
+    const edges = [{ source: "research", target: "risk" }];
+    const { rerender } = render(
+      <DAGPreview
+        dagPreview={{ nodes, edges }}
+        liveStatuses={{ research: "pending", risk: "pending" }}
+      />,
+    );
+    expect(screen.getByTestId("dag-node-research")).toHaveAttribute("data-status", "pending");
+
+    // WebSocket tick: statuses change, topology identical — nodes stay mounted.
+    rerender(
+      <DAGPreview
+        dagPreview={{ nodes, edges }}
+        liveStatuses={{ research: "completed", risk: "running" }}
+      />,
+    );
+    expect(screen.getByTestId("dag-node-research")).toHaveAttribute("data-status", "completed");
+    expect(screen.getByTestId("dag-node-risk")).toHaveAttribute("data-status", "running");
+    // Canvas + controls survive the update (viewport not reset).
+    expect(screen.getByTestId("dag-flow")).toBeInTheDocument();
+    expect(screen.getByTestId("dag-controls")).toBeInTheDocument();
+  });
+});
+
+describe("DAGPreview — edge data-flow labels", () => {
+  it("renders edge labels when supplied", () => {
+    render(
+      <DAGPreview
+        dagPreview={{
+          nodes: THREE_NODES,
+          edges: [
+            { source: "research", target: "risk", label: "findings → assess" },
+            { source: "risk", target: "report" },
+          ],
+        }}
+      />,
+    );
+    const labels = screen.getAllByTestId("dag-edge-label");
+    expect(labels).toHaveLength(1);
+    expect(labels[0].textContent).toBe("findings → assess");
+  });
+
+  it("renders arrows without labels for plain edges (clean fallback)", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    expect(screen.getAllByTestId("dag-edge")).toHaveLength(2);
+    expect(screen.queryByTestId("dag-edge-label")).not.toBeInTheDocument();
+  });
+});
+
+describe("DAGPreview — PNG export", () => {
+  it("renders the export button", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    expect(screen.getByTestId("dag-export-btn")).toBeInTheDocument();
+  });
+
+  it("export button has an accessible label", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    expect(screen.getByTestId("dag-export-btn")).toHaveAttribute("aria-label");
+  });
+
+  it("clicking export does not throw (canvas unavailable in jsdom is a no-op)", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    act(() => {
+      expect(() => fireEvent.click(screen.getByTestId("dag-export-btn"))).not.toThrow();
+    });
+  });
+});
+
+describe("DAGPreview — controlled selection (side panel wiring)", () => {
+  it("marks the controlled selected node with aria-selected=true", () => {
+    render(
+      <DAGPreview
+        dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }}
+        selectedNodeId="risk"
+        onNodeSelect={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("dag-node-risk")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("dag-node-research")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("forwards node clicks to onNodeSelect instead of internal state", () => {
+    const onSelect = vi.fn();
+    render(
+      <DAGPreview
+        dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }}
+        selectedNodeId={null}
+        onNodeSelect={onSelect}
+      />,
+    );
+    act(() => {
+      fireEvent.click(screen.getByTestId("dag-node-research"));
+    });
+    expect(onSelect).toHaveBeenCalledWith("research");
+  });
+
+  it("clicking the selected node requests deselection (null)", () => {
+    const onSelect = vi.fn();
+    render(
+      <DAGPreview
+        dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }}
+        selectedNodeId="research"
+        onNodeSelect={onSelect}
+      />,
+    );
+    act(() => {
+      fireEvent.click(screen.getByTestId("dag-node-research"));
+    });
+    expect(onSelect).toHaveBeenCalledWith(null);
+  });
+});
+
+describe("NodeDetailPanel — fallbacks and details", () => {
+  it("renders fallbacks when timing / retries / error are undefined", async () => {
+    const { NodeDetailPanel } = await import("./NodeDetailPanel");
+    render(
+      <NodeDetailPanel
+        node={{ id: "node_1", label: "Research", agentName: "research", status: "running" }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("node-detail-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("node-detail-status").textContent).toBe("running");
+    expect(screen.getByTestId("node-detail-started").textContent).toBe("—");
+    expect(screen.getByTestId("node-detail-finished").textContent).toBe("—");
+    expect(screen.getByTestId("node-detail-duration").textContent).toBe("—");
+    expect(screen.getByTestId("node-detail-retries").textContent).toBe("—");
+    expect(screen.getByTestId("node-detail-error-empty")).toBeInTheDocument();
+  });
+
+  it("renders timing, retry count and error details when present", async () => {
+    const { NodeDetailPanel } = await import("./NodeDetailPanel");
+    render(
+      <NodeDetailPanel
+        node={{
+          id: "node_9",
+          label: "Risk",
+          agentName: "risk",
+          status: "failed",
+          timing: { startedAt: "10:00", finishedAt: "10:02", durationMs: 120000 },
+          retries: 2,
+          error: "Budget exceeded",
+        }}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("node-detail-duration").textContent).toContain("120");
+    expect(screen.getByTestId("node-detail-retries").textContent).toBe("2");
+    expect(screen.getByTestId("node-detail-error").textContent).toBe("Budget exceeded");
+  });
+
+  it("renders nothing when node is null", async () => {
+    const { NodeDetailPanel } = await import("./NodeDetailPanel");
+    const { container } = render(<NodeDetailPanel node={null} onClose={() => {}} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("close button fires onClose", async () => {
+    const { NodeDetailPanel } = await import("./NodeDetailPanel");
+    const onClose = vi.fn();
+    render(
+      <NodeDetailPanel
+        node={{ id: "n1", label: "A", status: "pending" }}
+        onClose={onClose}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("node-detail-close"));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

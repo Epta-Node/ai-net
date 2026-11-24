@@ -148,8 +148,8 @@ export function migrateAgentStoreV1toV2(agents: AgentRecord[]): AgentRecordV2[] 
     ...agent,
     v2Metadata: {
       latencyP99Ms: 150,
-      isVerified: agent.reputationScore >= 80,
-      tier: agent.reputationScore >= 90 ? "enterprise" : agent.reputationScore >= 75 ? "premium" : "standard",
+      isVerified: (agent.reputationScore ?? 1) >= 80,
+      tier: (agent.reputationScore ?? 1) >= 90 ? "enterprise" : (agent.reputationScore ?? 1) >= 75 ? "premium" : "standard",
     },
   }));
 }
@@ -180,24 +180,30 @@ describe("Contract Upgrade & Migration Verification Suite (#394)", () => {
     const fixtureAgents: AgentRecord[] = [
       {
         id: "agent-research-01",
-        capabilities: ["research" as Capability],
+        name: "Research Agent 01",
+        capability: "research" as Capability,
         endpoint: "https://agent1.example.com",
         priceXLM: 0.5,
         reputationScore: 95,
+        stellarAddress: "",
       },
       {
         id: "agent-coding-01",
-        capabilities: ["coding" as Capability],
+        name: "Coding Agent 01",
+        capability: "coding" as Capability,
         endpoint: "https://agent2.example.com",
         priceXLM: 1.2,
         reputationScore: 88,
+        stellarAddress: "",
       },
       {
         id: "agent-risk-01",
-        capabilities: ["risk" as Capability],
+        name: "Risk Agent 01",
+        capability: "risk" as Capability,
         endpoint: "https://agent3.example.com",
         priceXLM: 0.8,
         reputationScore: 91,
+        stellarAddress: "",
       },
     ];
 
@@ -215,7 +221,7 @@ describe("Contract Upgrade & Migration Verification Suite (#394)", () => {
 
     const compositeRes = lookupAgentsComposite({ capability: "research" as Capability });
     expect(compositeRes).toHaveLength(1);
-    expect(compositeRes[0].agentId).toBe("agent-research-01");
+    expect(compositeRes[0].agent.id).toBe("agent-research-01");
   });
 
   it("Executes upgrade to v2 with migration hooks and asserts state equivalence", () => {
@@ -228,17 +234,21 @@ describe("Contract Upgrade & Migration Verification Suite (#394)", () => {
     const initialAgents: AgentRecord[] = [
       {
         id: "agent-research-01",
-        capabilities: ["research" as Capability],
+        name: "Research Agent 01",
+        capability: "research" as Capability,
         endpoint: "https://agent1.example.com",
         priceXLM: 0.5,
         reputationScore: 95,
+        stellarAddress: "",
       },
       {
         id: "agent-coding-01",
-        capabilities: ["coding" as Capability],
+        name: "Coding Agent 01",
+        capability: "coding" as Capability,
         endpoint: "https://agent2.example.com",
         priceXLM: 1.2,
         reputationScore: 88,
+        stellarAddress: "",
       },
     ];
 
@@ -284,7 +294,7 @@ describe("Contract Upgrade & Migration Verification Suite (#394)", () => {
       expect(v2Agent?.endpoint).toBe(v1Agent.endpoint);
       expect(v2Agent?.priceXLM).toBe(v1Agent.priceXLM);
       expect(v2Agent?.reputationScore).toBe(v1Agent.reputationScore);
-      expect(v2Agent?.capabilities).toEqual(v1Agent.capabilities);
+      expect(v2Agent?.capability).toEqual(v1Agent.capability);
       // Verify new v2 metadata initialized
       expect(v2Agent?.v2Metadata).toBeDefined();
       expect(v2Agent?.v2Metadata?.latencyP99Ms).toBe(150);

@@ -1,0 +1,117 @@
+.viewer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  border: 1px solid var(--white-alpha-10, var(--border-subtle));
+  border-radius: var(--radius-lg, 8px);
+  background: var(--surface-black, #0b0f16);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--white-alpha-10, var(--border-subtle));
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Tabs sit on a hairline background, so invert them on hover to signal
+     "this is the active row" without a second indicator element. */
+  padding: 2px;
+  border-radius: var(--radius-sm, 6px);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.tab {
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary, #8a93a3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.tab:hover:not([aria-selected='true']) {
+  color: var(--text-primary, #f5f7fa);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab[aria-selected='true'] {
+  color: #fff;
+  background: var(--primary, #6366f1);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary, #cbd5e1);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--white-alpha-10, rgba(255, 255, 255, 0.12));
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 1px;
+}
+
+.action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  padding: 24px;
+  text-align: center;
+  font-size: 0.8125rem;
+  font-style: italic;
+  color: var(--text-secondary, #8a93a3);
+}

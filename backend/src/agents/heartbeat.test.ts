@@ -3,7 +3,7 @@
  *
  * Uses jest fake timers + global.fetch spy to avoid real network calls.
  */
-import { HeartbeatClient } from "./heartbeat";
+import { HeartbeatClient } from './heartbeat';
 
 beforeEach(() => {
   jest.useFakeTimers();
@@ -14,17 +14,25 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
+/**
+ * Drain the microtask queue deeply enough for the extra async hop added by
+ * fetchWithTimeout (issue #742) before response handling runs.
+ */
+async function flushAsync(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await Promise.resolve();
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("HeartbeatClient — start / stop", () => {
-  it("sends an immediate heartbeat on start()", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+describe('HeartbeatClient — start / stop', () => {
+  it('sends an immediate heartbeat on start()', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
@@ -32,21 +40,19 @@ describe("HeartbeatClient — start / stop", () => {
     // Flush the async send()
     await Promise.resolve();
     expect(fetchSpy).toHaveBeenCalledTimes(1);
-    expect(fetchSpy).toHaveBeenCalledWith(
-      "http://localhost:3001/api/agents/test-agent/heartbeat",
-      { method: "POST" }
-    );
+    expect(fetchSpy).toHaveBeenCalledWith('http://localhost:3001/api/agents/test-agent/heartbeat', {
+      method: 'POST',
+      signal: expect.any(AbortSignal),
+    });
     client.stop();
   });
 
-  it("sends heartbeats on each interval tick", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+  it('sends heartbeats on each interval tick', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
@@ -59,14 +65,12 @@ describe("HeartbeatClient — start / stop", () => {
     client.stop();
   });
 
-  it("calling start() twice does not create duplicate intervals", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+  it('calling start() twice does not create duplicate intervals', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
@@ -80,14 +84,12 @@ describe("HeartbeatClient — start / stop", () => {
     client.stop();
   });
 
-  it("stops sending after stop()", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+  it('stops sending after stop()', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
@@ -102,23 +104,23 @@ describe("HeartbeatClient — start / stop", () => {
     expect(fetchSpy.mock.calls.length).toBe(countAfterStop);
   });
 
-  it("calling stop() without start() does not throw", () => {
+  it('calling stop() without start() does not throw', () => {
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
     expect(() => client.stop()).not.toThrow();
   });
 });
 
-describe("HeartbeatClient — send error handling", () => {
-  it("does not throw when fetch rejects", async () => {
-    jest.spyOn(global, "fetch" as any).mockRejectedValue(new Error("ECONNREFUSED"));
+describe('HeartbeatClient — send error handling', () => {
+  it('does not throw when fetch rejects', async () => {
+    jest.spyOn(global, 'fetch' as any).mockRejectedValue(new Error('ECONNREFUSED'));
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
@@ -128,95 +130,86 @@ describe("HeartbeatClient — send error handling", () => {
     client.stop();
   });
 
-  it("warns when server responds with non-ok status", async () => {
-    jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: false, status: 500 } as Response);
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+  it('warns when server responds with non-ok status', async () => {
+    jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: false, status: 500 } as Response);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
     client.start();
-    await Promise.resolve();
+    await flushAsync();
     expect(warnSpy).toHaveBeenCalled();
     client.stop();
     warnSpy.mockRestore();
   });
 
-  it("URL-encodes agentId in the heartbeat endpoint", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+  it('URL-encodes agentId in the heartbeat endpoint', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "agent/with/slashes",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'agent/with/slashes',
       intervalMs: 1_000,
     });
 
     client.start();
     await Promise.resolve();
     expect(fetchSpy).toHaveBeenCalledWith(
-      expect.stringContaining("agent%2Fwith%2Fslashes"),
+      expect.stringContaining('agent%2Fwith%2Fslashes'),
       expect.any(Object)
     );
     client.stop();
   });
 
-  it("strips trailing slash from apiBaseUrl", async () => {
-    const fetchSpy = jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: true } as Response);
+  it('strips trailing slash from apiBaseUrl', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: true } as Response);
 
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001/",
-      agentId: "test-agent",
+      apiBaseUrl: 'http://localhost:3001/',
+      agentId: 'test-agent',
       intervalMs: 1_000,
     });
 
     client.start();
     await Promise.resolve();
     expect(fetchSpy).toHaveBeenCalledWith(
-      "http://localhost:3001/api/agents/test-agent/heartbeat",
+      'http://localhost:3001/api/agents/test-agent/heartbeat',
       expect.any(Object)
     );
     client.stop();
   });
 
-  it("tracks consecutive failures and calls onFailureThresholdReached callback when threshold reached", async () => {
-    jest
-      .spyOn(global, "fetch" as any)
-      .mockResolvedValue({ ok: false, status: 503 } as Response);
+  it('tracks consecutive failures and calls onFailureThresholdReached callback when threshold reached', async () => {
+    jest.spyOn(global, 'fetch' as any).mockResolvedValue({ ok: false, status: 503 } as Response);
 
     const onThreshold = jest.fn();
     const client = new HeartbeatClient({
-      apiBaseUrl: "http://localhost:3001",
-      agentId: "failing-agent",
+      apiBaseUrl: 'http://localhost:3001',
+      agentId: 'failing-agent',
       intervalMs: 1_000,
       failureThreshold: 3,
       onFailureThresholdReached: onThreshold,
     });
 
     client.start();
-    await Promise.resolve(); // 1st failure
+    await flushAsync(); // 1st failure
     expect(client.getConsecutiveFailures()).toBe(1);
     expect(onThreshold).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(1_000);
-    await Promise.resolve(); // 2nd failure
+    await flushAsync(); // 2nd failure
     expect(client.getConsecutiveFailures()).toBe(2);
     expect(onThreshold).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(1_000);
-    await Promise.resolve(); // 3rd failure
+    await flushAsync(); // 3rd failure
     expect(client.getConsecutiveFailures()).toBe(3);
     expect(onThreshold).toHaveBeenCalledWith(3);
 
     client.stop();
   });
 });
-

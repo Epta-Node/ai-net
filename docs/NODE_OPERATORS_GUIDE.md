@@ -20,6 +20,7 @@ Welcome to the **ai-net Node Operators Guide**. This comprehensive guide provide
 10. [Downtime Handling & Graceful Shutdown](#10-downtime-handling--graceful-shutdown)
 11. [Backup & Disaster Recovery](#11-backup--disaster-recovery)
 12. [Troubleshooting & Common Errors](#12-troubleshooting--common-errors)
+13. [Incident Runbooks](#13-incident-runbooks)
 
 ---
 
@@ -151,6 +152,10 @@ STELLAR_COORDINATOR_SECRET=SBXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 # ── Venice AI Inference ───────────────────────────────────────────────────────
 VENICE_API_KEY=your_venice_api_key_here
+# Circuit breaker: consecutive failures → open, cooldown → half-open, probe → closed.
+VENICE_CIRCUIT_FAILURE_THRESHOLD=3
+VENICE_CIRCUIT_COOLDOWN_MS=60000
+VENICE_CIRCUIT_PROBE_COUNT=1
 
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL=postgresql://ainet_user:SecurePassword123@localhost:5432/ainet_db
@@ -160,13 +165,29 @@ MAX_PROMPT_LENGTH=10000
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=100
 DAILY_TASK_LIMIT_PER_WALLET=500
+TRUST_PROXY=none
 
 # ── Health & Cleanup ──────────────────────────────────────────────────────────
 HEARTBEAT_INTERVAL_MS=300000
 HEARTBEAT_STALE_THRESHOLD_MINUTES=5
 AGENT_OFFLINE_DELETE_HOURS=24
 GRACEFUL_SHUTDOWN_TIMEOUT=30
+
+# ── Payment Drift Reconciliation ──────────────────────────────────────────────
+# On-chain/off-chain payment drift is detected and remediated every 60 s.
+RECONCILIATION_INTERVAL_MS=60000
+# Kill switch: false = detect and report only, never write to `payments`.
+RECONCILIATION_REMEDIATION_ENABLED=true
+# A still-locked escrow on a failed/cancelled task is refunded after this long.
+RECONCILIATION_ESCROW_EXPIRY_MS=86400000
+# Optional alert webhook for drift reports.
+RECONCILIATION_WEBHOOK_URL=
 ```
+
+`TRUST_PROXY` defaults to `none`, so client addresses come from the socket and
+forwarded headers are ignored. Set it to a trusted proxy hop count or trusted
+IP/CIDR ranges only when the backend is reachable exclusively through those
+proxies.
 
 ---
 
@@ -290,7 +311,8 @@ services:
     ports:
       - "3001:3001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/api/v1/health"]
+      # Liveness only — never probes upstreams. Gate traffic on /health/deep.
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health/live"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -372,26 +394,17 @@ sudo systemctl status ainet-node
 
 Verify that your node is running properly and connected to Stellar:
 
-### 1. Check HTTP Health Endpoint
+### 1. Check HTTP Health Endpoints
+Liveness (cheap, never probes dependencies):
 ```bash
-curl -i http://localhost:3001/api/v1/health
+curl -i http://localhost:3001/health/live
 ```
-**Expected Response:**
-```json
-{
-  "status": "ok",
-  "version": "1.0.0",
-  "stellar": {
-    "network": "testnet",
-    "connected": true,
-    "latestLedger": 123456
-  },
-  "database": {
-    "status": "connected"
-  },
-  "uptime": 120
-}
+
+Dependency health — Venice breaker state, Horizon, a database write check and queue depth:
+```bash
+curl -i http://localhost:3001/health/deep
 ```
+**Expected:** `200 OK` with `"status": "ok"` and every entry under `dependencies` reporting `"status": "ok"`. A `503` means a critical dependency (`venice`, `horizon` or `database`) is failing — the `failing` array names it and each entry's `detail` says why. A `200` with `"status": "degraded"` means the node is serving but something needs attention (e.g. a backlogged queue or a `HALF_OPEN` breaker). See [API Reference → `GET /health/deep`](API_REFERENCE.md#get-healthdeep) for the full shape.
 
 ### 2. Verify Agent Heartbeat
 ```bash
@@ -424,6 +437,26 @@ The node exposes Prometheus-compatible metrics at `GET /metrics`:
 - `ainet_escrow_settlements_total`: Number of on-chain escrow settlements.
 - `ainet_stellar_rpc_latency_seconds`: Latency of Stellar Horizon / Soroban RPC calls.
 - `ainet_active_agents`: Current count of active registered agents.
+
+### Health Probes
+
+| Endpoint | Use for | Behaviour |
+| :--- | :--- | :--- |
+| `GET /health/live` | Docker `HEALTHCHECK`, Kubernetes `livenessProbe` | Process-only; always `200` while the process is up. |
+| `GET /health/deep` | Kubernetes `readinessProbe`, load-balancer checks, alerting | `503` when Venice (incl. an `OPEN` circuit breaker), Horizon or the database write check fails; `200` + `status: "degraded"` for non-critical issues such as queue depth ≥ `HEALTH_QUEUE_DEPTH_WARN`. |
+
+Don't point a liveness probe at `/health/deep`: an upstream outage would restart healthy pods without fixing anything.
+
+```yaml
+livenessProbe:
+  httpGet: { path: /health/live, port: 3000 }
+  periodSeconds: 10
+readinessProbe:
+  httpGet: { path: /health/deep, port: 3000 }
+  periodSeconds: 15
+  timeoutSeconds: 6   # > HEALTH_PROBE_TIMEOUT_MS
+  failureThreshold: 2
+```
 
 ### Example Prometheus Scrape Config
 
@@ -520,14 +553,66 @@ sudo systemctl start ainet-node
 * **Resolution**: Switch `STELLAR_HORIZON_URL` to a dedicated RPC provider (e.g. Blockdaemon, NowNodes) or run your own Horizon instance.
 
 ### 4. `circuit_breaker_open` (Venice AI Inference)
-* **Symptom**: Agent tasks fail immediately with `CircuitBreakerOpenError`.
-* **Cause**: Consecutive upstream timeouts or 5xx errors from Venice AI inference API.
-* **Resolution**: Verify `VENICE_API_KEY` validity. The circuit breaker automatically resets after a 60-second cooldown once upstream connectivity recovers.
+* **Symptom**: Agent tasks fail immediately with `CircuitOpenError` — no HTTP request reaches Venice AI.
+* **Cause**: `VENICE_CIRCUIT_FAILURE_THRESHOLD` consecutive upstream timeouts or 5xx errors from the Venice AI inference API tripped the breaker.
+* **Resolution**: Verify `VENICE_API_KEY` validity and upstream reachability. The breaker is fully automatic — after `VENICE_CIRCUIT_COOLDOWN_MS` (60 s) it enters `HALF_OPEN` and admits `VENICE_CIRCUIT_PROBE_COUNT` probe requests. One successful probe closes it; one failed probe re-opens it and restarts the cooldown. No operator action is required.
+* **Observability**:
+  - State gauge: `ainet_venice_circuit_breaker_state` (`0` = closed, `1` = open, `2` = half-open).
+  - JSON: `VeniceClient.getCircuitMetrics()` → `{ state, failures, successes, lastFailureAt, lastSuccessAt }`.
+  - HTTP: `GET /health/deep` → `dependencies.venice.breaker` (state aggregated across every agent's client) and `dependencies.venice.lastSuccessAt`; the endpoint answers `503` while the breaker is `OPEN`.
+  - Transitions (`opened` / `half_opened` / `closed`) are emitted on the breaker's event bus and mirrored to the log as `venice circuit transition`.
+  - While the circuit is open, cached responses are still served when `enableCacheFallback` is on (default), so a Venice outage degrades quality rather than failing every task.
+* **Tuning**: raise `VENICE_CIRCUIT_FAILURE_THRESHOLD` for a noisy upstream, or lengthen `VENICE_CIRCUIT_COOLDOWN_MS` to probe less aggressively.
 
-### 5. `Stale Agent / Heartbeat Timeout`
+### 5. `payment_drift` (Reconciliation)
+* **Symptom**: `reconcile_drift_detected_total` climbs, or the admin API reports drift awaiting review.
+* **Cause**: The local `payments` table and the Stellar chain disagree — a crash between submitting a release and writing it to the DB, a release transaction that Horizon has not indexed, or an escrow left locked on a task that failed.
+* **Detection**: The service runs every `RECONCILIATION_INTERVAL_MS` (default 60 s) and on demand via `POST /api/admin/reconciliation/run` (or `POST /api/reconciliation/run`).
+* **Automatic remediation** (only the unambiguous cases):
+  | `driftType` | Meaning | Action |
+  |---|---|---|
+  | `orphaned_locked` | DB `locked`, no claimable balance on-chain | record → `orphaned` |
+  | `missing_release_tx` | DB `released`, Horizon has no release tx | back-fill the real on-chain claim hash |
+  | `release_unconfirmed` | DB `released`, balance still claimable | re-submit the release |
+  | `expired_escrow` | Task failed/cancelled, escrow still locked past `RECONCILIATION_ESCROW_EXPIRY_MS` | refund the escrow |
+* **Manual remediation**: `missing_local` and `amount_mismatch` are always parked for a human. List and resolve them with:
+  ```bash
+  curl -H "X-Admin-API-Key: $ADMIN_API_KEY" \
+    "$BASE/api/reconciliation/drift"
+  curl -X POST -H "X-Admin-API-Key: $ADMIN_API_KEY" -H 'content-type: application/json' \
+    -d '{"status":"refunded","txHash":"<hash>","by":"ops"}' \
+    "$BASE/api/reconciliation/drift/task_123:node_risk/resolve"
+  ```
+* **Observability**: `GET /api/reconciliation/metrics` returns the counters plus a Prometheus rendering (`reconcile_drift_detected_total{type=...}`, `reconcile_remediated_total{type=...}`, `reconcile_remediation_failed_total{type=...}`, `reconcile_runs_total`). Every drift and every remediation is also published as a `ReconciliationEvent` (see `docs/EVENTS.md` §3.9).
+* **Kill switch**: set `RECONCILIATION_REMEDIATION_ENABLED=false` to keep detection and reporting while disabling every write to the payments table.
+* **Safety**: remediation is idempotent — `orphaned`/`refund` writes are compare-and-set on the source status, and a Stellar claimable balance can only be claimed once, so a re-run can never double-refund or double-release.
+
+### 6. `Stale Agent / Heartbeat Timeout`
 * **Symptom**: Agent marked `offline` in database and excluded from discovery.
 * **Cause**: Agent worker process crashed or network latency prevented sending heartbeats within `HEARTBEAT_STALE_THRESHOLD_MINUTES`.
 * **Resolution**: Check agent worker logs (`npm run logs` or `journalctl -u ainet-node`). Restart the agent worker daemon to re-register its availability.
+
+---
+
+## 13. Distributed Tracing & OpenTelemetry Export (Issue #856)
+
+The backend keeps an in-memory trace store (see `docs/HEALTH_REFERENCE.md` for the `GET /health/traces/:correlationId` query) and propagates a W3C `traceparent` header end-to-end: the request-id middleware parses incoming `traceparent`, the frontend attaches one per session, the coordinator stamps one on outgoing work, and Venice API calls carry the active context as a `traceparent` request header. Escrow transactions (`lock` and `release`) additionally embed the W3C trace id in the Stellar memo (truncated to the 28-byte memo limit) so an on-chain claim can be tied back to the request that produced it.
+
+**Configuration**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OTEL_SAMPLING_RATE` | `1` | Fraction of spans stored in the queryable trace store, `0`–`1`. Error spans (`status=failed`) are **always** recorded regardless of rate, so lowering the rate never hides failures. |
+| `OTEL_EXPORTER_ENDPOINT` | unset | When set, every ended span is exported as OTLP/HTTP JSON to `${OTEL_EXPORTER_ENDPOINT}/v1/traces`. Export is fire-and-forget; failures are logged never raised. |
+
+**Running with the collector**
+
+```bash
+docker compose --profile monitoring up -d otel-collector
+OTEL_EXPORTER_ENDPOINT=http://otel-collector:4318 docker compose up -d backend
+```
+
+The bundled collector (Jaeger all-in-one with OTLP enabled) exposes OTLP/gRPC on `4317`, OTLP/HTTP on `4318`, and the Jaeger UI on `http://localhost:16686` — search by the `correlationId`/trace id shown in API responses.
 
 ---
 
@@ -536,3 +621,21 @@ sudo systemctl start ainet-node
 - **Repository**: [GitHub Epta-Node/ai-net](https://github.com/Epta-Node/ai-net)
 - **Issues**: Report bugs or feature requests on the GitHub Issue Tracker.
 - **Stellar Developer Discord**: Join `#soroban` and `#ecosystem` channels for protocol support.
+
+---
+
+## 13. Incident Runbooks
+
+Step-by-step resolution procedures for the five most common production incidents are maintained in a dedicated appendix:
+
+**[docs/operations/runbooks.md](operations/runbooks.md)**
+
+Runbooks covered:
+
+1. Agent goes offline mid-task
+2. Payment reconciliation drift
+3. Stellar transaction stuck in pending
+4. Venice AI — all keys cooling down
+5. Disk space warning — archive directory full
+
+Each runbook follows the format: **Symptoms → Diagnosis commands → Resolution steps → Verification**.

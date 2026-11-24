@@ -140,8 +140,10 @@ export function getAuthDb(dbPath?: string): Database.Database {
   return _authDb;
 }
 
-export function closeAuthDb(): void {
-  _authDb?.close();
+export async function closeAuthDb(): Promise<void> {
+  const db = _authDb;
+  if (!db) return;
+  db.close();
   _authDb = null;
 }
 

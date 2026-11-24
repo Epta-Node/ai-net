@@ -8,7 +8,7 @@ use soroban_sdk::{contractimpl, symbol_short, Address, BytesN, Env, String, Symb
 use upgrade_manager::{
     strutil::{starts_with, str_eq},
     upgradeable::events::*,
-    version_utils, MigrationMetadata, UpgradeStatus, Upgradeable, UpgradeableError,
+    swap_wasm, stored_wasm_hash, version_utils, MigrationMetadata, UpgradeStatus, Upgradeable, UpgradeableError,
     VersionCompatibility,
 };
 
@@ -42,12 +42,10 @@ impl Upgradeable for AgentRegistryContract {
             .unwrap_or_else(|| String::from_str(&env, CURRENT_VERSION))
     }
 
+    /// Hash recorded by the last successful Wasm swap. The all-zero hash
+    /// means no swap has been recorded since deployment.
     fn get_wasm_hash(env: Env) -> BytesN<32> {
-        // In a real implementation, this would retrieve the actual WASM hash
-        // For now, return a placeholder
-        let mut hash_bytes = [0u8; 32];
-        hash_bytes[0] = 1; // Version identifier
-        BytesN::from_array(&env, &hash_bytes)
+        stored_wasm_hash(&env).unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]))
     }
 
     fn is_upgradeable(_env: Env) -> bool {
@@ -310,9 +308,7 @@ impl AgentRegistryContract {
         let admin = require_admin(&env)?;
         let old_version = Self::contract_version(env.clone());
 
-        #[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+        swap_wasm(&env, &new_wasm_hash).map_err(|_| Error::SwapUnavailable)?;
         env.storage()
             .instance()
             .set(&DataKey::Agent(Symbol::new(&env, "version")), &new_version);
@@ -353,9 +349,7 @@ impl AgentRegistryContract {
         .map_err(|_| Error::NotAdmin)?; // Convert upgrade error to contract error
 
         // Update the contract WASM
-        #[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
-        env.deployer()
-            .update_current_contract_wasm(new_wasm_hash.clone());
+        swap_wasm(&env, &new_wasm_hash).map_err(|_| Error::SwapUnavailable)?;
 
         // Execute post-upgrade hook
         let old_version = String::from_str(&env, CURRENT_VERSION);
@@ -395,7 +389,7 @@ impl AgentRegistryContract {
     /// Force emergency rollback (admin only, within rollback window)
     pub fn emergency_rollback(
         env: Env,
-        _rollback_wasm_hash: BytesN<32>,
+        rollback_wasm_hash: BytesN<32>,
         rollback_version: String,
     ) -> Result<(), Error> {
         let admin = require_admin(&env)?;
@@ -406,9 +400,7 @@ impl AgentRegistryContract {
         }
 
         // Perform the rollback
-        #[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
-        env.deployer()
-            .update_current_contract_wasm(rollback_wasm_hash);
+        swap_wasm(&env, &rollback_wasm_hash).map_err(|_| Error::SwapUnavailable)?;
 
         // Update version info
         env.storage().instance().set(

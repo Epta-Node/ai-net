@@ -160,7 +160,7 @@ fn a_slash_below_the_threshold_is_not_flagged() {
     let agent_id = register(&env, &client, "agent_a", &owner);
 
     // The registration bond is 10 XLM, well under the 100 XLM threshold.
-    client.slash_bond(&agent_id, &1_000_000);
+    client.slash_bond_amount(&agent_id, &1_000_000);
 
     let entry = client.get_audit_log(&None, &1).entries.get(0).unwrap();
     assert_eq!(entry.operation, symbol_short!("slashbond"));
@@ -184,7 +184,7 @@ fn a_high_value_slash_is_flagged_and_reported() {
         bond_amount: DEFAULT_HIGH_VALUE_THRESHOLD * 2,
     });
 
-    client.slash_bond(&agent_id, &DEFAULT_HIGH_VALUE_THRESHOLD);
+    client.slash_bond_amount(&agent_id, &DEFAULT_HIGH_VALUE_THRESHOLD);
 
     // Read the events before any further call replaces the buffer.
     let flagged = anomalies(&env);

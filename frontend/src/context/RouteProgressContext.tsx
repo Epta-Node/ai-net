@@ -8,7 +8,7 @@
  * The bar value is intentionally a *percentage* (0–100) so callers never have
  * to think about timing; the component handles the visual easing internally.
  */
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useEffect, useCallback, useContext, useRef, useState } from 'react';
 
 interface RouteProgressContextValue {
   /** 0–100, or -1 when hidden */
@@ -97,10 +97,19 @@ export const RouteProgressProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 600);
   }, [clearTimers]);
 
-  // Expose to module-level helpers used by api.ts
-  _start = start;
-  _done = done;
-  _error = error;
+  // Register before requests resume, and discard timers/references on unmount.
+  useEffect(() => {
+    _start = start;
+    _done = done;
+    _error = error;
+    if (inflightCount > 0) start();
+    return () => {
+      clearTimers();
+      _start = null;
+      _done = null;
+      _error = null;
+    };
+  }, [start, done, error, clearTimers]);
 
   return (
     <RouteProgressContext.Provider value={{ value, isError, start, done, error }}>

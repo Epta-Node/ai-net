@@ -12,8 +12,31 @@ import { WS_CLOSE } from '../../types/stream';
 import { createLogger } from '../../utils/logger';
 import { runWithTraceContext } from '../../services/traceContext';
 import { getConfig } from '../../config';
+import {
+  NonceStore,
+  verifyWalletSignature,
+  WALLET_NONCE_TTL_MS,
+} from '../../services/auth/walletChallenge';
+import { TaskStreamHub } from './taskStreamHub';
 
-const STREAM_PATH = /^\/tasks\/([^/?]+)\/stream(?:\?.*)?$/;
+type TrustProxyFn = (address: string, hop: number) => boolean;
+type ProxyAddr = (req: IncomingMessage, trust: TrustProxyFn) => string;
+
+// Express depends on proxy-addr but does not expose its request resolver.
+// eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+const proxyaddr = require('proxy-addr') as ProxyAddr;
+
+const STREAM_PATH = /^\/(?:api\/)?tasks\/([^/?]+)\/stream(?:\?.*)?$/;
+
+/**
+ * Build the canonical advertised WebSocket stream URL for a task.
+ * Both `/tasks/:id/stream` and `/api/tasks/:id/stream` are accepted by the
+ * upgrade handler (see STREAM_PATH above), but the API always advertises the
+ * `/api/tasks/:id/stream` form so it is consistent with every other REST link.
+ */
+export function taskStreamUrl(taskId: string): string {
+  return `/api/tasks/${taskId}/stream`;
+}
 
 const logger = createLogger({ module: 'ws-stream' });
 
@@ -30,7 +53,7 @@ const logger = createLogger({ module: 'ws-stream' });
  * Clients use `event.type === 'task_completed'` / `event.seq` as a resume
  * cursor, so this mapping must be stable.
  */
-function toWireEvent(event: StoredEvent, traceId?: string): Record<string, unknown> {
+export function toWireEvent(event: StoredEvent, traceId?: string): Record<string, unknown> {
   const snakeType = event.type
     // PascalCase → snake_case: "NodeStarted" → "node_started"
     .replace(/([A-Z])/g, (_match, _p1, offset: number) =>
@@ -104,10 +127,10 @@ export function getStreamConnectionCount(): number {
   return total;
 }
 
-function getClientIp(req: IncomingMessage): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') return forwarded.split(',')[0].trim();
-  return req.socket.remoteAddress ?? 'unknown';
+export function getClientIp(req: IncomingMessage, trustProxy?: TrustProxyFn): string {
+  const remoteAddress = req.socket.remoteAddress ?? 'unknown';
+  if (!trustProxy || !req.headers['x-forwarded-for']) return remoteAddress;
+  return proxyaddr(req, trustProxy) || remoteAddress;
 }
 
 function trackConnection(ip: string): boolean {
@@ -166,8 +189,18 @@ export interface TaskStreamOptions {
 export interface TaskStreamDeps extends TaskStreamOptions {
   httpServer: HttpServer;
   eventStore: EventStore;
+  trustProxy?: TrustProxyFn;
   eventBus?: typeof defaultEventBus;
   getTask?: (taskId: string) => Task | undefined;
+  /** Shared nonce store (defaults to a per-server store with the standard TTL). */
+  nonceStore?: NonceStore;
+  /** Nonce TTL override, mainly for tests. */
+  nonceTtlMs?: number;
+  /**
+   * Fan-out hub to read through. Pass the one the SSE endpoint uses so both
+   * transports share a single bus subscription and bounded read per task.
+   */
+  streamHub?: TaskStreamHub;
 }
 
 /**
@@ -182,8 +215,9 @@ export interface TaskStreamDeps extends TaskStreamOptions {
  *
  *       ### Handshake & Authentication:
  *       1. Connect to `ws://<host>/tasks/:id/stream` (optionally appending `?lastEventId=<seq>` for cursor resumption).
- *       2. Send JSON auth payload within 10 seconds: `{"walletPublicKey": "G..."}`.
- *       3. Server verifies ownership. If wallet does not own task, connection closes with close code `4003` (Forbidden).
+ *       2. Server immediately sends `{ "type": "auth_challenge", "nonce": "<uuid>" }` — a single-use, expiring nonce.
+ *       3. Within 10 seconds send JSON auth payload: `{ "walletPublicKey": "G...", "nonce": "<server nonce>", "signature": "<base64 Ed25519 signature of nonce>" }`.
+ *       4. Server verifies the signature with the same challenge/verify flow as the agents endpoints. A correct public key without a valid signature is rejected. If wallet does not own task, connection closes with close code `4003` (Forbidden). Replayed or expired nonces are rejected.
  *
  *       ### Events Received:
  *       - `node_started`: Node execution began with assigned agent.
@@ -223,12 +257,17 @@ export interface TaskStreamDeps extends TaskStreamOptions {
  * Attach the live DAG-execution stream to an HTTP server.
  *
  * Exposes ws://<host>/tasks/:id/stream. Each connection:
- *   1. must send `{ walletPublicKey }` as its first message (auth handshake);
- *   2. is validated against the task owner — non-owners get a 403 close frame;
- *   3. receives a chronological replay of past events from the store — all of
+ *   1. receives a server-issued, single-use, expiring `auth_challenge` nonce;
+ *   2. must send `{ walletPublicKey, nonce, signature }` as its first message
+ *      (auth handshake), where `signature` is the base64 Ed25519 signature of
+ *      `nonce` made with the wallet's Stellar secret key;
+ *   3. is validated against the task owner AND the signature via the shared
+ *      `verifyWalletSignature` challenge flow — non-owners, invalid
+ *      signatures, and replayed/expired nonces get a 403 close frame;
+ *   4. receives a chronological replay of past events from the store — all of
  *      them by default, or only those with seq > N when the handshake URL
  *      carries an optional `?lastEventId=N` cursor;
- *   4. then streams live events as the Coordinator emits them.
+ *   5. then streams live events as the Coordinator emits them.
  *
  * Every event sent to the client carries a per-task monotonic `seq`, so the
  * client can persist the last seq it saw and resume from it on reconnect.
@@ -249,13 +288,21 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
     eventStore,
     eventBus = defaultEventBus,
     getTask = defaultGetTask,
+    trustProxy,
     heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS,
     pongTimeoutMs = DEFAULT_PONG_TIMEOUT_MS,
     authTimeoutMs = DEFAULT_AUTH_TIMEOUT_MS,
     inactivityTimeoutMs = DEFAULT_INACTIVITY_TIMEOUT_MS,
+    nonceStore = new NonceStore(deps.nonceTtlMs ?? WALLET_NONCE_TTL_MS),
   } = deps;
 
   const maxMessagesPerMinute = getConfig().WS_MAX_MESSAGES_PER_MINUTE;
+
+  // One EventBus subscription and one bounded read per task, shared by every
+  // client watching that task (#655). Clients used to each subscribe and each
+  // re-query the store per tick, which made reads scale with the subscriber
+  // count and tripped MaxListenersExceededWarning past 100 clients.
+  const streamHub = deps.streamHub ?? new TaskStreamHub({ store: eventStore, bus: eventBus });
 
   const wss = new WebSocketServer({ noServer: true });
   activeStreamServers.add(wss);
@@ -268,7 +315,7 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
     }
 
     // ── Connection rate limit ────────────────────────────────────────────
-    const clientIp = getClientIp(req);
+    const clientIp = getClientIp(req, trustProxy);
     if (!trackConnection(clientIp)) {
       logger.warn({ clientIp }, 'connection rate limit exceeded');
       socket.write(
@@ -308,10 +355,11 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
     const traceId = extractTraceId(_req) || randomUUID();
 
     let authed = false;
-    // Cursor for the next flush: events with seq > lastSentSeq are replayed.
-    // With ?lastEventId=N we resume after seq N; without it we fall back to -1
-    // so the full history (seq 0 → latest) is replayed — backward compatible.
-    let lastSentSeq = lastEventId ?? -1;
+    // Resume cursor for this connection. With ?lastEventId=N we resume after seq
+    // N; without it we fall back to -1 so the full history (seq 0 → latest) is
+    // replayed — backward compatible. The hub advances its own per-subscriber
+    // cursor from here on, so this value is only the starting point.
+    const initialCursor = lastEventId ?? -1;
     let unsubLive: (() => void) | undefined;
     let heartbeat: NodeJS.Timeout | undefined;
     let pongTimer: NodeJS.Timeout | undefined;
@@ -355,17 +403,16 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       }
     };
 
-    // Stream every persisted event newer than the last one we sent. Driven by
-    // both the initial replay and each live emit, so ordering is canonical
-    // (store seq) and no event is ever sent twice.
-    const flush = (): void => {
-      const events = eventStore.listByTaskSince(taskId, lastSentSeq);
-      for (const event of events) {
-        // Normalise to the wire format (snake_case type, seq cursor) before
-        // sending so clients see the same shape regardless of internal storage.
-        send(toWireEvent(event, traceId));
-        lastSentSeq = event.taskSeq;
-      }
+    // Single-use challenge for THIS connection. The client must sign it
+    // within `authTimeoutMs`; consume() burns it so replays are rejected.
+    const expectedNonce = nonceStore.issue();
+
+    // Events are delivered by the shared hub, which reads the store once per
+    // tick for all clients on this task. This callback only normalises to the
+    // wire format (snake_case type, seq cursor) — each connection has its own
+    // traceId, so formatting stays per-connection even though the read does not.
+    const deliver = (event: StoredEvent): void => {
+      send(toWireEvent(event, traceId));
     };
 
     const cleanup = (): void => {
@@ -390,7 +437,25 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       }, heartbeatIntervalMs);
     };
 
-    const completeAuth = (walletPublicKey: string): void => {
+    const completeAuth = (walletPublicKey: string, nonce: string, signature: string): void => {
+      // The nonce must be the single-use challenge issued for THIS connection.
+      // consume() burns it, so a replayed signature is rejected even when the
+      // public key is correct.
+      if (nonce !== expectedNonce) {
+        ws.close(WS_CLOSE.FORBIDDEN, 'Forbidden: nonce does not match this connection');
+        return;
+      }
+      const outcome = nonceStore.consume(nonce);
+      if (outcome !== 'valid') {
+        ws.close(WS_CLOSE.FORBIDDEN, `Forbidden: nonce ${outcome}`);
+        return;
+      }
+      // Same challenge/verify flow as the agents endpoints: possession of the
+      // public key proves nothing — only a valid Ed25519 signature does.
+      if (!verifyWalletSignature(walletPublicKey, nonce, signature)) {
+        ws.close(WS_CLOSE.FORBIDDEN, 'Forbidden: invalid signature');
+        return;
+      }
       if (walletPublicKey !== task.walletPublicKey) {
         ws.close(WS_CLOSE.FORBIDDEN, 'Forbidden: wallet does not own task');
         return;
@@ -400,12 +465,12 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       resetInactivityTimer();
 
       // Subscribe before the initial replay so any event emitted during replay
-      // is captured; flush() dedupes via lastSentSeq, so order is preserved
-      // and nothing is delivered twice.
-      // The subscribe/flush run inside the WS trace context so any logging
+      // is captured; the hub tracks this client's cursor independently, so order
+      // is preserved and nothing is delivered twice.
+      // The subscribe/replay run inside the WS trace context so any logging
       // during delivery carries the same traceId.
-      unsubLive = eventBus.subscribe(taskId, () => flush());
-      flush();
+      unsubLive = streamHub.subscribe(taskId, { lastEventId: initialCursor }, deliver);
+      streamHub.flush(taskId);
       startHeartbeat();
 
       runWithTraceContext(
@@ -434,12 +499,19 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
       }
 
       if (!authed) {
-        const walletPublicKey = (msg as { walletPublicKey?: unknown })?.walletPublicKey;
-        if (typeof walletPublicKey !== 'string' || walletPublicKey === '') {
-          ws.close(WS_CLOSE.BAD_REQUEST, 'First message must be { walletPublicKey }');
+        const frame = msg as { walletPublicKey?: unknown; nonce?: unknown; signature?: unknown };
+        const walletPublicKey = frame?.walletPublicKey;
+        const nonce = frame?.nonce;
+        const signature = frame?.signature;
+        if (
+          typeof walletPublicKey !== 'string' || walletPublicKey === '' ||
+          typeof nonce !== 'string' || nonce === '' ||
+          typeof signature !== 'string' || signature === ''
+        ) {
+          ws.close(WS_CLOSE.BAD_REQUEST, 'First message must be { walletPublicKey, nonce, signature }');
           return;
         }
-        completeAuth(walletPublicKey);
+        completeAuth(walletPublicKey, nonce, signature);
         return;
       }
 
@@ -449,6 +521,11 @@ export function attachTaskStream(deps: TaskStreamDeps): () => void {
         pongTimer = undefined;
       }
     });
+
+    // Issue the single-use auth challenge AFTER handlers are attached so the
+    // client cannot race the server. The client must sign `expectedNonce`
+    // within `authTimeoutMs`.
+    send({ type: 'auth_challenge', nonce: expectedNonce });
 
     ws.on('close', cleanup);
     ws.on('error', cleanup);

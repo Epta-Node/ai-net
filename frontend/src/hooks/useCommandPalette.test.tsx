@@ -72,4 +72,28 @@ describe('useCommandPalette', () => {
       'navigation,navigation,navigation,navigation,settings,settings'
     );
   });
+
+  test('provides shortcut metadata for navigation and settings commands', () => {
+    const HarnessWithShortcuts: React.FC = () => {
+      const { commands } = useCommandPalette();
+      return (
+        <span data-testid="shortcuts">
+          {commands.map((c) => `${c.id}:${c.shortcut || ''}`).join(',')}
+        </span>
+      );
+    };
+
+    render(
+      <MemoryRouter>
+        <WalletProvider>
+          <ThemeProvider>
+            <HarnessWithShortcuts />
+          </ThemeProvider>
+        </WalletProvider>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByTestId('shortcuts')).toHaveTextContent('dashboard:G D');
+    expect(screen.getByTestId('shortcuts')).toHaveTextContent('toggle-theme:T');
+  });
 });

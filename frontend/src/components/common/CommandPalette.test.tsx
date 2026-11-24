@@ -143,6 +143,49 @@ describe('CommandPalette', () => {
     );
   });
 
+  test('Home and End keys jump to first and last items', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.keyDown(input, { key: 'End' });
+    expect(input).toHaveAttribute(
+      'aria-activedescendant',
+      `command-palette-option-${commands.length - 1}`
+    );
+
+    fireEvent.keyDown(input, { key: 'Home' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-0');
+  });
+
+  test('PageDown and PageUp jump by pages', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    fireEvent.keyDown(input, { key: 'PageDown' });
+    expect(input).toHaveAttribute(
+      'aria-activedescendant',
+      `command-palette-option-${Math.min(commands.length - 1, 5)}`
+    );
+
+    fireEvent.keyDown(input, { key: 'PageUp' });
+    expect(input).toHaveAttribute('aria-activedescendant', 'command-palette-option-0');
+  });
+
+  test('applies visual highlight and aria-selected to the active item', () => {
+    render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);
+    const input = screen.getByRole('combobox');
+
+    const firstOption = screen.getByRole('option', { name: 'Go to Dashboard' });
+    expect(firstOption).toHaveAttribute('aria-selected', 'true');
+    expect(firstOption.className).toMatch(/selected/);
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const secondOption = screen.getByRole('option', { name: 'New Task' });
+    expect(secondOption).toHaveAttribute('aria-selected', 'true');
+    expect(secondOption.className).toMatch(/selected/);
+    expect(firstOption).toHaveAttribute('aria-selected', 'false');
+  });
+
   test('Enter executes the selected command and closes the palette', () => {
     const dashboardAction = commands[0].action;
     render(<CommandPalette isOpen={true} onClose={mockOnClose} commands={commands} />);

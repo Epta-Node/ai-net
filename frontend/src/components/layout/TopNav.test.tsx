@@ -2,6 +2,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, test, expect, beforeEach, vi } from 'vitest'
 import TopNav from './TopNav'
+import { NotificationProvider } from '../../context/NotificationContext'
 import { WalletProvider } from '../../context/WalletContext'
 import { ThemeProvider } from '../../context/ThemeContext'
 
@@ -25,25 +26,25 @@ describe('TopNav Theme Toggle', () => {
   test('cycles theme and persists selection to localStorage', async () => {
     render(
       <MemoryRouter>
-        <WalletProvider>
+        <NotificationProvider><WalletProvider>
           <ThemeProvider>
             <TopNav onMenuClick={vi.fn()} onToggleSidebar={vi.fn()} sidebarCollapsed={false} isMobile={false} />
           </ThemeProvider>
-        </WalletProvider>
+        </WalletProvider></NotificationProvider>
       </MemoryRouter>
     )
 
     const toggle = screen.getByRole('switch')
     // default is system
-    expect(localStorage.getItem('theme-mode')).toBe('system')
+    expect(localStorage.getItem('ainet.theme')).toBe('system')
 
     await act(async () => { fireEvent.click(toggle) })
-    expect(localStorage.getItem('theme-mode')).toBe('light')
+    expect(localStorage.getItem('ainet.theme')).toBe('light')
 
     await act(async () => { fireEvent.click(toggle) })
-    expect(localStorage.getItem('theme-mode')).toBe('dark')
+    expect(localStorage.getItem('ainet.theme')).toBe('dark')
 
     await act(async () => { fireEvent.click(toggle) })
-    expect(localStorage.getItem('theme-mode')).toBe('system')
+    expect(localStorage.getItem('ainet.theme')).toBe('system')
   })
 })

@@ -2,7 +2,21 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import type { AppNotification, NewNotificationInput, NotificationContextValue } from '../types/notification';
 
 export const NOTIFICATIONS_STORAGE_KEY = 'ai_net_notifications';
-const MAX_NOTIFICATIONS = 50;
+export const MAX_NOTIFICATIONS = 100;
+export const NOTIFICATION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Drops notifications older than 7 days and keeps the newest 100. Entries
+ * without a readable timestamp are kept rather than silently lost.
+ */
+export function pruneNotifications(list: AppNotification[], now = Date.now()): AppNotification[] {
+  return list
+    .filter((n) => {
+      const time = Date.parse(n.timestamp);
+      return Number.isNaN(time) || now - time <= NOTIFICATION_MAX_AGE_MS;
+    })
+    .slice(0, MAX_NOTIFICATIONS);
+}
 
 export const NotificationContext = createContext<NotificationContextValue | null>(null);
 
@@ -12,11 +26,13 @@ function loadInitialNotifications(): AppNotification[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed.map((item: any) => ({
-        ...item,
-        message: item.message || item.description || '',
-        description: item.description || item.message || '',
-      }));
+      return pruneNotifications(
+        parsed.map((item: any) => ({
+          ...item,
+          message: item.message || item.description || '',
+          description: item.description || item.message || '',
+        }))
+      );
     }
   } catch (err) {
     console.error('Failed to parse notifications from localStorage:', err);

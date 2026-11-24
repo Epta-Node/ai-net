@@ -28,9 +28,11 @@
 //! | `resolve_errors`    | `error_resolved`   | `error_id`, `resolution` — one event per resolved error  |
 //! | `pause`             | `paused`           | `()`                                                     |
 //! | `unpause`           | `unpaused`         | `()`                                                     |
-//! | `freeze_agent`      | `freeze`           | `agent_id`                                               |
-//! | `unfreeze_agent`    | `unfreeze`         | `agent_id`                                               |
-//! | `update_pricing`    | `price_upd`        | `(agent_id, new_price)`                                  |
+//! | `freeze_agent`    | `freeze`           | `agent_id`                                               |
+//! | `unfreeze_agent`  | `unfreeze`         | `agent_id`                                               |
+//! | `update_pricing`  | `price_upd`        | `(agent_id, new_price)`                                  |
+//! | `update_reputation` / `batch_update_reputation` | `rep_upd` | `agent_id`, `score`, `updated_at`            |
+//! | `get_reputation` (epochs elapsed) | `rep_dec` | `agent_id`, `old_score`, `new_score`, `epochs` |
 
 use crate::{AnomalyKind, TargetChain};
 use soroban_sdk::{contracttype, Address, BytesN, String, Symbol, Vec};
@@ -307,7 +309,7 @@ pub struct BondLocked {
 
 /// Data payload for `(registry, bond_slsh)`.
 ///
-/// Published by `slash_bond` when an admin penalises an agent's bond.
+/// Published when an admin or verified dispute ruling penalises an agent's bond.
 /// Both the penalty applied and the resulting remaining balance are included
 /// so indexers don't need to recompute the residual from prior state.
 #[contracttype]
@@ -319,6 +321,47 @@ pub struct BondSlashed {
     pub penalty_stroops: i128,
     /// Remaining bond balance after the slash (≥ 0).
     pub remaining_stroops: i128,
+    /// Policy or dispute reason supplied by the administrator.
+    pub reason: String,
+}
+
+/// Data payload for `(registry, bond_dep)`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondDeposited {
+    pub agent_id: Symbol,
+    pub owner: Address,
+    pub amount_stroops: i128,
+    pub total_stroops: i128,
+}
+
+/// Data payload for `(registry, bond_init)`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondReturnInitiated {
+    pub agent_id: Symbol,
+    pub owner: Address,
+    pub amount_stroops: i128,
+    pub expiry_ledger: u32,
+}
+
+/// Data payload for `(registry, bond_clm)`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondClaimed {
+    pub agent_id: Symbol,
+    pub owner: Address,
+    pub amount_stroops: i128,
+}
+
+/// Data payload for `(registry, bond_rwd)`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct BondRewarded {
+    pub agent_id: Symbol,
+    pub amount_stroops: i128,
+    pub total_stroops: i128,
+    pub admin: Address,
 }
 
 /// Data payload for `(registry, bond_ret)`.
@@ -513,6 +556,42 @@ pub struct BridgeProofRevokedEvent {
     pub revoked_by: Address,
 }
 
+// ─── Agent capability versioning events (issue #243) ─────────────────────────
+
+/// Data payload for `(registry, ver_pub)`.
+///
+/// Published by `register_agent_version` when a new version is successfully
+/// stored. Off-chain indexers can maintain a full version history per agent
+/// without polling contract storage.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentVersionPublishedEvent {
+    /// Agent that published the new version.
+    pub agent_id: Symbol,
+    /// Owner who authorised the version registration.
+    pub owner: Address,
+    /// The version that was just published.
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+/// Data payload for `(registry, ver_sup)`.
+///
+/// Published by `register_agent_version` for the *previous* latest version
+/// once it is superseded. Indexers can use this to mark stale versions in
+/// their caches.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentVersionSupersededEvent {
+    /// Agent whose previous version was superseded.
+    pub agent_id: Symbol,
+    /// The version that was superseded.
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
 // ─── Security audit trail events (issue #261) ────────────────────────────────
 
 /// Emitted for every privileged operation recorded in the audit log.
@@ -533,6 +612,40 @@ pub struct AuditLogEntryEvent {
     pub high_value: bool,
 }
 
+// ─── On-chain reputation events (issue #244) ─────────────────────────────────
+
+/// Data payload for `(registry, rep_upd)`.
+///
+/// Published by `update_reputation` and once per committed item of
+/// `batch_update_reputation`. `score` is fixed-point (`1_000_000` == 100%).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReputationUpdated {
+    /// Agent that was scored.
+    pub agent_id: Symbol,
+    /// New score in fixed-point.
+    pub score: u64,
+    /// Ledger timestamp the score was written.
+    pub updated_at: u64,
+}
+
+/// Data payload for `(registry, rep_dec)`.
+///
+/// Published by `get_reputation` when whole epochs elapsed since
+/// `last_updated` and lazy decay was applied on read.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReputationDecayed {
+    /// Agent whose score decayed.
+    pub agent_id: Symbol,
+    /// Score before decay.
+    pub old_score: u64,
+    /// Score after decay.
+    pub new_score: u64,
+    /// Whole epochs elapsed.
+    pub epochs: u64,
+}
+
 /// Emitted when an operation trips one of the anomaly checks.
 ///
 /// topic: `("registry", "anomaly")`
@@ -548,4 +661,154 @@ pub struct AnomalyDetectedEvent {
     /// Observed value: the operation count for a rate anomaly, the amount in
     /// stroops for a high-value one, and zero for a first-seen caller.
     pub observed: i128,
+}
+
+// ─── Agent freeze/resume events (issue #486) ─────────────────────────────────
+
+/// Data payload for `("registry", "frz_upd")`.
+///
+/// Published by `freeze_agent` / `unfreeze_agent` after the frozen flag has
+/// been written, so indexers can maintain a full freeze/resume history with
+/// the acting admin without reconstructing it from two separate topics.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentFrozen {
+    /// The agent whose frozen flag changed.
+    pub agent_id: Symbol,
+    /// `true` after `freeze_agent`, `false` after `unfreeze_agent`.
+    pub frozen: bool,
+    /// Admin that performed the change.
+    pub admin: Address,
+    /// Ledger sequence at which the flag was written.
+    pub frozen_at_ledger: u64,
+}
+
+/// Alias so callers can name the resume half of the pair explicitly.
+///
+/// topic: `("registry", "frz_upd")` (same payload shape as [`AgentFrozen`]).
+pub type AgentResumed = AgentFrozen;
+
+/// Data payload for `("registry", "msig_set")`.
+///
+/// Published by `set_multisig_config` after the configuration is committed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultisigConfigSetEvent {
+    /// Addresses that make up the multi-sig admin set.
+    pub admins: Vec<Address>,
+    /// Number of approvals required to execute a proposal.
+    pub threshold: u32,
+    /// Timelock delay in seconds applied to proposal execution.
+    pub timelock_delay: u64,
+}
+
+/// Data payload for `("registry", "minbond")`.
+///
+/// Published by `set_min_bond` after the new minimum is committed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MinBondSetEvent {
+    /// Admin that performed the change.
+    pub admin: Address,
+    /// New minimum bond in stroops.
+    pub amount_stroops: i128,
+}
+
+/// Data payload for `("registry", "errttl")`.
+///
+/// Published by `set_error_ttl` after the new retention is committed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ErrorTtlSetEvent {
+    /// Admin that performed the change.
+    pub admin: Address,
+    /// New error retention, in ledger sequences.
+    pub ttl_ledgers: u64,
+}
+
+/// Data payload for `("registry", "errcln")`.
+///
+/// Published by `cleanup_expired_errors` when at least one entry was removed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ErrorsCleanedEvent {
+    /// Number of entries removed by this pass.
+    pub removed: u32,
+}
+
+/// Data payload for `("registry", "gas_cfg")`.
+///
+/// Published by `set_gas_config` after the new configuration is committed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GasConfigSetEvent {
+    /// Admin that performed the change.
+    pub admin: Address,
+    /// Fixed per-transaction overhead, in CPU instructions.
+    pub tx_overhead: u64,
+    /// Cost of a single agent registration.
+    pub register_agent: u64,
+    /// Cost of a single error resolution.
+    pub resolve_error: u64,
+}
+
+/// Data payload for `("registry", "store_cfg")`.
+///
+/// Published by `set_storage_config` after the new limits are committed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct StorageConfigSetEvent {
+    /// Admin that performed the change.
+    pub admin: Address,
+    /// Global agent limit (0 = unlimited).
+    pub max_agents: u32,
+    /// Per-capability agent limit (0 = unlimited).
+    pub max_per_capability: u32,
+}
+
+/// Data payload for `("registry", "gcfg_set")`.
+///
+/// Published by the `SetGasConfig` arm of `execute_operation`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct GasConfigUpdatedEvent {
+    /// Proposal that carried the change.
+    pub proposal_id: u64,
+    /// Fixed per-transaction overhead, in CPU instructions.
+    pub tx_overhead: u64,
+    /// Cost of a single agent registration.
+    pub register_agent: u64,
+    /// Cost of a single error resolution.
+    pub resolve_error: u64,
+}
+
+/// Data payload for `("registry", "msig_upd")`.
+///
+/// Published by the `SetMultisigConfig` arm of `execute_operation`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct MultisigConfigUpdatedEvent {
+    /// Proposal that carried the change.
+    pub proposal_id: u64,
+    /// Addresses that make up the new multi-sig admin set.
+    pub admins: Vec<Address>,
+    /// Number of approvals required to execute a proposal.
+    pub threshold: u32,
+    /// Timelock delay in seconds applied to proposal execution.
+    pub timelock_delay: u64,
+}
+
+/// Data payload for `(registry, agent_updated)`.
+///
+/// Published after an agent owner's pricing update succeeds.  The owner and
+/// capability are retained so indexers can apply the update without another
+/// storage read.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentUpdatedEvent {
+    pub agent_id: Symbol,
+    pub owner: Address,
+    pub capability: Symbol,
+    pub old_price_stroops: i128,
+    pub new_price_stroops: i128,
 }

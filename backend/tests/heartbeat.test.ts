@@ -2,7 +2,7 @@ import express from "express";
 import request from "supertest";
 import Database from "better-sqlite3";
 import { createAgentsRouter } from "../src/api/routes/agents";
-import { AgentRecord, createAgentDb } from "../src/db/agents";
+import { AgentRecord, createAgentDb, ensureAgentTable } from "../src/db/agents";
 import { createHeartbeatService } from "../src/services/heartbeat";
 import { errorHandler } from "../src/api/middleware/errorHandler";
 
@@ -19,18 +19,7 @@ const testAgent: AgentRecord = {
 
 function createTestApp(initialAgents: AgentRecord[] = []) {
   const rawDb = new Database(":memory:");
-  rawDb.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id               TEXT PRIMARY KEY,
-      capabilities     TEXT NOT NULL,
-      pricingXLM       REAL NOT NULL,
-      endpoint         TEXT NOT NULL,
-      stellarPublicKey TEXT NOT NULL,
-      reputationScore  REAL NOT NULL DEFAULT 0,
-      lastSeenAt       TEXT NOT NULL,
-      status           TEXT NOT NULL DEFAULT 'offline'
-    )
-  `);
+  ensureAgentTable(rawDb);
   const db = createAgentDb(rawDb);
   for (const agent of initialAgents) {
     db.upsert(agent);

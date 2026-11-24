@@ -138,3 +138,51 @@ still emitted first.
 - **Do not rely on the log alone for long-horizon forensics.** Entries expire
   with their TTL; mirror `("registry", "audit")` events off-chain if you need
   history beyond the retention window.
+
+## Storage budgets (AGENTS.md §1)
+
+Every write path owns a bounded set of ledger entries. A refactor that quietly
+adds a per-agent, per-bid or per-task entry is a rent regression that no
+functional test catches, so the hot paths are pinned by assertions in the
+contract test suites.
+
+The shared helper lives in [`test-utils/src/storage.rs`](../test-utils/src/storage.rs)
+and is available to tests as `contract_test_utils::assert_storage_within`. It
+snapshots the contract's instance, persistent and temporary entries before and
+after one operation and fails when the **growth** exceeds a documented ceiling.
+Bytes are the XDR-encoded key + value payload; ledger-entry metadata and rent
+are excluded, so the number is stable across machines.
+
+### Enforced ceilings
+
+| Operation | Entries | Bytes | What is written |
+|---|---:|---:|---|
+| `agent_registry::register_agent` | 6 | 900 | agent record, capability index, bond record, ordinal index, two instance counters |
+| `agent_registry::register_agents(2)` | 9 | 1,600 | per-agent record/bond/ordinal, shared capability index, counters |
+| `agent_bidding::create_auction` | 3 | 900 | auction record, bidder list, phase index |
+| `agent_bidding::submit_bid` | 1 | 500 | sealed bid record + bidder list append |
+| `agent_bidding::reveal_bid` | 0 | 32 | overwrite of the existing bid record |
+| `agent_marketplace::list_service` | 2 | 500 | listing record + capability index |
+| `agent_marketplace::book_agent` | 2 | 600 | booking record + booking index |
+| `agent_marketplace::complete_booking` | 1 | 200 | booking status update |
+| `task_store::store_task_metadata` | 5 | 1,100 | task record, history, version counter, creator index |
+| `task_store::update_task_status` | 0 | 200 | in-place record + history append |
+| `task_store::create_task` | 5 | 1,100 | lifecycle record, history, creator index |
+| `dispute_resolution::file_dispute` | 3 | 1,200 | dispute record, juror snapshot, task index |
+| `dispute_resolution::submit_evidence` | 1 | 300 | evidence record + dispute counter |
+| all read paths under test | 0 | 0 | reads must be storage-neutral |
+
+Ceilings are maxima, not targets. Tighten one when an implementation gets
+smaller. Raise one only when the new entry is justified here and in the PR
+description; the assertion message points back to this section.
+
+### Running and updating
+
+```bash
+cd smart-contracts
+cargo test -p agent_registry -p agent-bidding -p agent-marketplace \
+  -p task-store -p dispute-resolution --test storage_budget
+```
+
+The assertions are part of the normal `cargo test` run, so CI fails on an
+unexplained ceiling breach without any extra workflow step.

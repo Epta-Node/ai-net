@@ -4,6 +4,7 @@ import { createHash } from "crypto";
 import { deflateSync, inflateSync } from "zlib";
 import axios from "axios";
 import { discoverAgents } from "../registry/registry";
+import { TaskStatus } from "../task_store/task_store";
 
 export interface DAGNode {
   id: string;
@@ -14,12 +15,10 @@ export interface DAGNode {
   result?: unknown;
 }
 
-export enum TaskStatus {
-  Pending = 0,
-  Running = 1,
-  Completed = 2,
-  Failed = 3,
-}
+// `TaskStatus` is defined once, by the task_store SDK, and re-exported here for
+// convenience. Defining a second copy would let the two drift apart and produce
+// status values the contract rejects.
+export { TaskStatus };
 
 export interface OnChainTaskMetadata {
   taskId: Uint8Array;

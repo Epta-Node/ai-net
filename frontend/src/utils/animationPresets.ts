@@ -4,6 +4,13 @@
  * Import from here instead of defining inline variants — keeps motion values
  * consistent across components and makes global timing tweaks a one-line change.
  *
+ * Reduced motion (#721): all presets are wrapped by `MotionProvider`
+ * (`MotionConfig reducedMotion="user"` in `App.tsx`), so framer-motion
+ * automatically freezes them when the OS requests reduced motion. For
+ * JS-driven effects outside `motion.*` (counters, typing), use
+ * `useMotionSafe()` from `components/common/MotionProvider` and skip the
+ * animation when it returns true.
+ *
  * Usage:
  *   import { fadeUp, stagger, listItem } from '../../utils/animationPresets'
  *   <motion.div variants={fadeUp} initial="hidden" animate="visible" />
@@ -115,4 +122,13 @@ export function cardEntrance(index: number): Variants {
       transition: { duration: 0.4, delay: index * 0.08, ease: 'easeOut' },
     },
   }
+}
+
+/**
+ * Instant (no-motion) variant for reduced-motion users (#721).
+ * Renders the `visible` state immediately with no transition.
+ */
+export const noMotion: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0 } },
 }

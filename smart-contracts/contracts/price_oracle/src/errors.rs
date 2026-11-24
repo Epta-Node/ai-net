@@ -20,4 +20,8 @@ pub enum Error {
     InvalidPrice = 6,
     /// The submitted timestamp is in the future or otherwise invalid.
     InvalidTimestamp = 7,
+    /// Contract is currently paused.
+    ContractPaused = 8,
+    /// The max_price_age value is zero or invalid.
+    InvalidMaxPriceAge = 9,
 }

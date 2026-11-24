@@ -9,6 +9,7 @@ import { formatDate } from '../../utils/format'
 import { ExportButton } from './ExportButton'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { SkeletonTable } from '../common/Skeleton'
+import EmptyState from '../common/EmptyState'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 

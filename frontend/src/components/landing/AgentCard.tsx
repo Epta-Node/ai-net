@@ -38,11 +38,11 @@ function formatHeartbeatAge(lastHeartbeat?: number): string {
 
 function CapabilityBadges({ capabilities }: { capabilities: string[] }) {
   const badgeColors: Record<string, string> = {
-    research: 'bg-[#60A5FA]/15 text-[#60A5FA] border-[#60A5FA]/30',
-    risk: 'bg-[#FBBF24]/15 text-[#FBBF24] border-[#FBBF24]/30',
-    coding: 'bg-[#34D399]/15 text-[#34D399] border-[#34D399]/30',
-    design: 'bg-[#C084FC]/15 text-[#C084FC] border-[#C084FC]/30',
-    report: 'bg-[#F87171]/15 text-[#F87171] border-[#F87171]/30',
+    research: 'bg-[var(--agent-research-surface)] text-[var(--agent-research)] border-[var(--agent-research-border)]',
+    risk: 'bg-[var(--agent-risk-surface)] text-[var(--agent-risk)] border-[var(--agent-risk-border)]',
+    coding: 'bg-[var(--agent-coding-surface)] text-[var(--agent-coding)] border-[var(--agent-coding-border)]',
+    design: 'bg-[var(--agent-design-surface)] text-[var(--agent-design)] border-[var(--agent-design-border)]',
+    report: 'bg-[var(--agent-report-surface)] text-[var(--agent-report)] border-[var(--agent-report-border)]',
   }
 
   return (
@@ -68,7 +68,7 @@ function ReputationStars({ rating }: { rating: number }) {
         <Star
           key={i}
           size={10}
-          className={i < stars ? 'text-[#FBBF24] fill-[#FBBF24]' : 'text-text-secondary/30'}
+          className={i < stars ? 'text-[var(--status-warning)] fill-[var(--status-warning)]' : 'text-text-secondary/30'}
         />
       ))}
     </div>
@@ -121,7 +121,7 @@ const AgentCard: React.FC<AgentCardProps> = ({ agent, index }) => {
           <div
             className={`w-2.5 h-2.5 rounded-full relative ${
               isOnline
-                ? 'bg-accent-green shadow-[0_0_8px_rgba(52,211,153,0.6)]'
+                ? 'bg-[var(--status-success)] shadow-[var(--glow-success)]'
                 : 'bg-text-secondary/40'
             }`}
           >

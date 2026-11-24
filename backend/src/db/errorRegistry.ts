@@ -104,8 +104,10 @@ export function getErrorDb(dbPath?: string): Database.Database {
   return _db;
 }
 
-export function closeErrorDb(): void {
-  _db?.close();
+export async function closeErrorDb(): Promise<void> {
+  const db = _db;
+  if (!db) return;
+  db.close();
   _db = null;
 }
 

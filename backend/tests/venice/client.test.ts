@@ -1,6 +1,6 @@
 import { VeniceClient } from '../../src/services/venice/client';
-import { CircuitBreaker } from '../../src/venice/circuitBreaker';
-import { CircuitOpenError, TokenBudgetExceededError } from '../../src/venice/errors';
+import { CircuitBreaker } from '../../src/services/venice/circuitBreaker';
+import { CircuitOpenError, TokenBudgetExceededError } from '../../src/services/venice/errors';
 
 const mockFetch = jest.fn();
 (global as any).fetch = mockFetch;

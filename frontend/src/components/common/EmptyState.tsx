@@ -1,5 +1,5 @@
-import React, { useContext } from 'react';
-import { useNavigate, UNSAFE_NavigationContext } from 'react-router-dom';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import styles from './EmptyState.module.css';
 
 export interface EmptyStateAction {
@@ -32,7 +32,6 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   className = '',
   'data-testid': dataTestId = 'empty-state',
 }) => {
-  const navigationContext = useContext(UNSAFE_NavigationContext);
   const navigate = useNavigate();
 
   const handleActionClick = (action: EmptyStateAction, e: React.MouseEvent) => {

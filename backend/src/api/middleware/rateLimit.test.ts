@@ -7,6 +7,9 @@
  *  - Rolling window: older timestamps expire and new requests are accepted
  *  - Distinct limits across public / authed / admin groups
  *  - createPublicLimiter / createAuthedLimiter / createAdminLimiter respect env vars
+ *  - Exact header values under the limit, at the limit and on 429 for every group
+ *  - Most-restrictive headers win when limiters are stacked
+ *  - agentAuthFailureGuard advertises its budget on 429
  */
 
 import { createServer } from "http";
@@ -17,6 +20,10 @@ import {
   createPublicLimiter,
   createAuthedLimiter,
   createAdminLimiter,
+  agentAuthFailureGuard,
+  recordAuthFailure,
+  resetAuthFailures,
+  type RateLimiter,
 } from "./rateLimit";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -231,5 +238,162 @@ describe("group limits are distinct from each other", () => {
 
     expect(pubRes.headers["x-ratelimit-limit"]).toBe("120");
     expect(admRes.headers["x-ratelimit-limit"]).toBe("20");
+  });
+});
+
+// ── Exact header values per group (under / at / over the limit) ──────────────
+
+describe.each<[string, string, string, () => RateLimiter]>([
+  ["public", "RATE_LIMIT_PUBLIC_MAX_REQUESTS", "RATE_LIMIT_PUBLIC_WINDOW_MS", createPublicLimiter],
+  ["authed", "RATE_LIMIT_AUTHED_MAX_REQUESTS", "RATE_LIMIT_AUTHED_WINDOW_MS", createAuthedLimiter],
+  ["admin", "RATE_LIMIT_ADMIN_MAX_REQUESTS", "RATE_LIMIT_ADMIN_WINDOW_MS", createAdminLimiter],
+])("%s limiter headers", (_name, maxEnv, windowEnv, factory) => {
+  const LIMIT = 3;
+  const WINDOW_MS = 30_000;
+  const T0 = 1_800_000_000_000; // fixed clock, whole seconds
+  let now = T0;
+  let app: express.Express;
+
+  beforeEach(() => {
+    process.env[maxEnv] = String(LIMIT);
+    process.env[windowEnv] = String(WINDOW_MS);
+    now = T0;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    app = express();
+    app.use(factory().middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+  });
+
+  afterEach(() => {
+    delete process.env[maxEnv];
+    delete process.env[windowEnv];
+    jest.restoreAllMocks();
+  });
+
+  it("reports the remaining budget and reset while under the limit", async () => {
+    const res = await request(app).get("/ping");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe(String(LIMIT));
+    expect(res.headers["x-ratelimit-remaining"]).toBe(String(LIMIT - 1));
+    expect(res.headers["x-ratelimit-reset"]).toBe(String((T0 + WINDOW_MS) / 1000));
+    expect(res.headers["retry-after"]).toBeUndefined();
+  });
+
+  it("reports zero remaining on the last allowed request", async () => {
+    for (let i = 0; i < LIMIT - 1; i++) await request(app).get("/ping");
+    now = T0 + 5_000;
+    const res = await request(app).get("/ping");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    // Reset tracks the oldest request in the window, not the latest.
+    expect(res.headers["x-ratelimit-reset"]).toBe(String((T0 + WINDOW_MS) / 1000));
+    expect(res.headers["retry-after"]).toBeUndefined();
+  });
+
+  it("returns 429 with Retry-After counting down to the reset", async () => {
+    for (let i = 0; i < LIMIT; i++) await request(app).get("/ping");
+    now = T0 + 12_000;
+    const res = await request(app).get("/ping");
+
+    expect(res.status).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe(String(LIMIT));
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    expect(res.headers["x-ratelimit-reset"]).toBe(String((T0 + WINDOW_MS) / 1000));
+    expect(res.headers["retry-after"]).toBe(String((WINDOW_MS - 12_000) / 1000));
+  });
+
+  it("rounds a fractional Retry-After up so clients never retry early", async () => {
+    for (let i = 0; i < LIMIT; i++) await request(app).get("/ping");
+    now = T0 + 12_500;
+    const res = await request(app).get("/ping");
+
+    expect(res.status).toBe(429);
+    expect(res.headers["retry-after"]).toBe("18");
+  });
+});
+
+// ── Stacked limiters ─────────────────────────────────────────────────────────
+
+describe("stacked limiters", () => {
+  function buildStacked(first: number, second: number) {
+    const app = express();
+    app.use(createRateLimiter({ maxRequests: first }).middleware);
+    app.use(createRateLimiter({ maxRequests: second }).middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+    return app;
+  }
+
+  it("keeps the earlier limiter's headers when it is more restrictive", async () => {
+    const res = await request(buildStacked(2, 100)).get("/ping");
+
+    expect(res.headers["x-ratelimit-limit"]).toBe("2");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("1");
+  });
+
+  it("lets the later limiter overwrite when it is more restrictive", async () => {
+    const res = await request(buildStacked(100, 2)).get("/ping");
+
+    expect(res.headers["x-ratelimit-limit"]).toBe("2");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("1");
+  });
+
+  it("reports the blocking limiter on 429", async () => {
+    const app = buildStacked(100, 1);
+    await request(app).get("/ping");
+    const res = await request(app).get("/ping");
+
+    expect(res.status).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("1");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    expect(res.headers["retry-after"]).toBeDefined();
+  });
+});
+
+// ── Ownership-proof failure guard ────────────────────────────────────────────
+
+describe("agentAuthFailureGuard headers", () => {
+  const T0 = 1_800_000_000_000;
+  let now = T0;
+
+  beforeEach(() => {
+    process.env.AGENT_AUTH_FAILURE_LIMIT_MAX = "2";
+    process.env.AGENT_AUTH_FAILURE_LIMIT_WINDOW_MS = "60000";
+    now = T0;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    resetAuthFailures();
+  });
+
+  afterEach(() => {
+    delete process.env.AGENT_AUTH_FAILURE_LIMIT_MAX;
+    delete process.env.AGENT_AUTH_FAILURE_LIMIT_WINDOW_MS;
+    jest.restoreAllMocks();
+    resetAuthFailures();
+  });
+
+  function buildGuarded() {
+    const app = express();
+    // Pin req.ip so failures can be recorded against a known identifier.
+    app.set("trust proxy", true);
+    app.use(agentAuthFailureGuard);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+    return app;
+  }
+
+  it("emits budget headers and a Retry-After derived from the oldest failure", async () => {
+    const ip = "203.0.113.7";
+    recordAuthFailure(ip);
+    now = T0 + 1_000;
+    recordAuthFailure(ip);
+    now = T0 + 20_000;
+
+    const res = await request(buildGuarded()).get("/ping").set("X-Forwarded-For", ip);
+
+    expect(res.status).toBe(429);
+    expect(res.headers["x-ratelimit-limit"]).toBe("2");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    expect(res.headers["x-ratelimit-reset"]).toBe(String((T0 + 60_000) / 1000));
+    expect(res.headers["retry-after"]).toBe("40");
   });
 });

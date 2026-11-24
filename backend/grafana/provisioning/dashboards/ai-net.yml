@@ -1,0 +1,16 @@
+# Grafana dashboard provisioning (Issue #853).
+# Loads backend/grafana/ai-net-dashboard.json (mounted into the grafana
+# container at /var/lib/grafana/dashboards) and keeps it in sync on redeploys.
+apiVersion: 1
+
+providers:
+  - name: ai-net
+    orgId: 1
+    folder: AI-Net
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

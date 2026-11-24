@@ -1,19 +1,70 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Check, Copy, Download } from 'lucide-react';
 import { CodingResult } from '../../types/agent';
 import { getCodeDetails } from '../../utils/agentUtils';
-import CopyButton from '../common/CopyButton';
+import { copyToClipboard, downloadTextFile } from '../../utils/download';
 
 interface Props {
   result: CodingResult | null | undefined;
   searchQuery?: string;
 }
 
-const CodingRenderer: React.FC<Props> = ({ result }) => {
+const buttonStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '5px',
+  padding: '5px 10px',
+  fontSize: '0.75rem',
+  fontWeight: 600,
+  color: 'var(--text-secondary, #cbd5e1)',
+  background: 'rgba(255, 255, 255, 0.05)',
+  border: '1px solid var(--white-alpha-10, rgba(255, 255, 255, 0.12))',
+  borderRadius: '6px',
+  cursor: 'pointer',
+  transition: 'all 0.2s ease',
+};
+
+const buttonHoverStyle: React.CSSProperties = { ...buttonStyle, background: 'rgba(255,255,255,0.1)' };
+
+const CodingRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
   const details = getCodeDetails(result);
+
+  const handleCopy = useCallback(async () => {
+    if (!details?.code) return;
+    const ok = await copyToClipboard(details.code);
+    if (!ok) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [details?.code]);
+
+  // Extension follows the detected language so the saved file opens in the
+  // right tool (a .ts download should not be a bare .txt).
+  const handleDownload = useCallback(() => {
+    if (!details?.code) return;
+    const languageExt: Record<string, string> = {
+      typescript: 'ts',
+      javascript: 'js',
+      tsx: 'tsx',
+      jsx: 'jsx',
+      python: 'py',
+      rust: 'rs',
+      go: 'go',
+      solidity: 'sol',
+      json: 'json',
+      bash: 'sh',
+      sql: 'sql',
+      yaml: 'yml',
+    };
+    const ext = languageExt[(details.language ?? '').toLowerCase()] ?? 'txt';
+    const stamp = new Date().toISOString().replace(/\.\d{3}Z$/, '').replace(/:/g, '-');
+    const filename = `agent-code-${details.language || 'output'}-${stamp}.${ext}`;
+    downloadTextFile(details.code, filename, 'text/plain;charset=utf-8');
+  }, [details]);
 
   if (!details || !details.code) {
     return (
@@ -48,32 +99,16 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
           fontStyle: 'italic',
         }}
       >
-        No code matching search filter "{searchQuery}".
+        {t('agent.output.noMatch', { query: searchQuery })}
       </div>
     );
   }
-
-  const containerStyle: React.CSSProperties = {
-    position: 'relative',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid rgba(255, 255, 255, 0.1)',
-    backgroundColor: '#1e1e1e',
-  };
-
-  const headerStyle: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '8px 16px',
-    backgroundColor: 'rgba(255, 255, 255, 0.04)',
-    borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-  };
 
   return (
     <div
       className="coding-container"
       id="coding-output"
+      data-testid="coding-output"
       style={{
         position: 'relative',
         borderRadius: '8px',
@@ -82,29 +117,50 @@ const CodingRenderer: React.FC<Props> = ({ result }) => {
         backgroundColor: 'var(--surface-black)',
       }}
     >
-      <button
-        onClick={handleCopy}
-        className="copy-btn"
-        id="btn-copy-code"
+      <div
         style={{
           position: 'absolute',
           top: '12px',
           right: '12px',
           zIndex: 10,
-          background: copied ? 'var(--success)' : 'var(--white-alpha-08)',
-          border: '1px solid var(--white-alpha-15)',
-          color: 'var(--text-inverse)',
-          padding: '6px 12px',
-          borderRadius: '6px',
-          cursor: 'pointer',
-          fontSize: '0.8rem',
-          fontWeight: 600,
-          transition: 'all 0.2s ease',
-          outline: 'none',
+          display: 'flex',
+          gap: '6px',
         }}
       >
-        {copied ? t('agent.coding.copied') : t('agent.coding.copyCode')}
-      </button>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="copy-btn"
+          id="btn-copy-code"
+          data-testid="btn-copy-code"
+          style={copied ? { ...buttonStyle, background: 'var(--success, #10b981)' } : buttonStyle}
+          onMouseEnter={(e) => {
+            if (!copied) e.currentTarget.style.background = 'rgba(255,255,255,0.1)';
+          }}
+          onMouseLeave={(e) => {
+            if (!copied) e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+          }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          <span>{copied ? t('agent.coding.copied') : t('agent.coding.copyCode')}</span>
+        </button>
+        <button
+          type="button"
+          onClick={handleDownload}
+          data-testid="btn-download-code"
+          style={buttonHoverStyle}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.14)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+          }}
+          title={t('a11y.downloadOutput')}
+        >
+          <Download size={12} />
+          <span>{t('agent.coding.downloadCode')}</span>
+        </button>
+      </div>
       <SyntaxHighlighter
         language={details.language}
         style={vscDarkPlus}

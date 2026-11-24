@@ -1,0 +1,113 @@
+name: Gas Baseline Enforcement
+
+# Enforces that no contract entrypoint exceeds its stored gas baseline by more
+# than the tolerance defined in gas-baselines.json (default 5 %).
+#
+# A separate "auto-update" path runs on pushes to main and commits fresh
+# baselines so the file never drifts far from reality.
+
+on:
+  pull_request:
+    paths:
+      - "smart-contracts/**"
+      - ".github/workflows/gas-baselines.yml"
+  push:
+    branches: [main]
+    paths:
+      - "smart-contracts/**"
+  workflow_dispatch:
+    inputs:
+      update_baselines:
+        description: "Commit updated gas baselines to the branch"
+        required: false
+        default: "false"
+        type: boolean
+
+concurrency:
+  group: gas-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # needed for the auto-update commit step
+  pull-requests: read
+
+jobs:
+  gas-check:
+    name: Gas baseline check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          # Full history so the auto-update commit can be pushed
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: smart-contracts
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: smart-contracts/package-lock.json
+
+      - name: Install JS dependencies
+        working-directory: smart-contracts
+        run: npm ci
+
+      - name: Run gas harness
+        working-directory: smart-contracts
+        run: |
+          cargo test --features gas-check 2>&1 | tee gas-report.txt || true
+
+      - name: Check gas baselines (PR enforcement)
+        if: github.event_name == 'pull_request'
+        working-directory: smart-contracts
+        run: node scripts/check-gas-baselines.mjs gas-report.txt
+
+      - name: Auto-update baselines (main / manual)
+        if: >
+          github.event_name == 'push' ||
+          (github.event_name == 'workflow_dispatch' &&
+           github.event.inputs.update_baselines == 'true')
+        working-directory: smart-contracts
+        run: node scripts/check-gas-baselines.mjs gas-report.txt --update
+
+      - name: Commit updated baselines
+        if: >
+          (github.event_name == 'push' ||
+           (github.event_name == 'workflow_dispatch' &&
+            github.event.inputs.update_baselines == 'true')) &&
+          github.ref == 'refs/heads/main'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet smart-contracts/gas-baselines.json; then
+            echo "gas-baselines.json unchanged — nothing to commit."
+          else
+            git add smart-contracts/gas-baselines.json
+            git commit -m "chore(contracts): auto-update gas baselines [skip ci]"
+            git push
+          fi
+
+      - name: Upload gas report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gas-report-${{ github.run_id }}
+          path: smart-contracts/gas-report.txt
+          if-no-files-found: warn
+          retention-days: 7

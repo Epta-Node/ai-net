@@ -3,13 +3,24 @@
 This document details the Soroban events emitted by the `task_store` smart
 contract. These events give off-chain indexers and the UI a consistent,
 versioned signal for every task lifecycle transition, without needing to
-poll `get_task_metadata`/`get_task_status`.
+poll `get_task`/`get_task_status`/`get_task_lifecycle_status`.
 
-## Event Topics
+## Event topics
 
-All task lifecycle events share the first topic (`task_meta`). The second
-topic indicates which lifecycle stage occurred: `created`, `updated`, or
-`finalized`.
+The first topic names the event family, the second names the stage within it.
+A task is created through exactly one of two entrypoints, and the family in the
+topic tells you which:
+
+| Topic 1 | Emitted by | Stages (topic 2) |
+|---|---|---|
+| `task_meta` | `store_task_metadata`, `update_task_status` (DAG tasks) | `created`, `updated`, `finalized` |
+| `task_life` | `create_task`, `update_status` (budget tasks) | `created`, `status` |
+| `task_str` | `set_coordinator` (admin) | `coord_set` |
+
+The two families are deliberately separate. A DAG task carries an execution
+graph and a pre-assigned agent list; a budget task carries only a creator, a
+prompt hash and a budget. An indexer can therefore pick the family it cares
+about without decoding the other.
 
 ## Versioning & Compatibility
 
@@ -26,25 +37,62 @@ Every payload carries a `version: u32` field (currently `1`, the
   is stable; a schema-breaking change bumps `version` in the payload, it
   does not introduce a new topic.
 
+## TaskStatus
+
+Statuses are encoded as a `u32` in every payload above. The discriminants are
+part of the public interface:
+
+| Status | Value | Terminal |
+|---|---|---|
+| `Created` | 0 | no |
+| `Queued` | 1 | no |
+| `Assigned` | 2 | no |
+| `Running` | 3 | no |
+| `Completed` | 4 | **yes** |
+| `Failed` | 5 | **yes** |
+| `Cancelled` | 6 | **yes** |
+
+The legal transitions are:
+
+| From | To |
+|---|---|
+| `Created` | `Queued`, `Assigned`, `Cancelled`, `Failed` |
+| `Queued` | `Assigned`, `Running`, `Cancelled`, `Failed` |
+| `Assigned` | `Running`, `Cancelled`, `Failed` |
+| `Running` | `Completed`, `Failed`, `Cancelled` |
+| any terminal status | *(none)* |
+
+Anything not in the table is rejected with `InvalidStatusTransition`, including
+moving backwards and leaving a terminal status. A task therefore cannot be
+resurrected once it has finished.
+
 ## Invariant: exactly one event per transition
 
-Every successful call to `store_task_metadata` emits exactly one `created`
-event. Every successful call to `update_task_status` emits exactly one
-event — `updated` for a non-terminal transition, or `finalized` for a
-transition into a terminal status — never both, and never zero. A call
-that is rejected (unauthorized agent, invalid transition, expired task)
-emits no lifecycle event at all, since it errors out before any state
-change or publish.
+Every successful creation emits exactly one event, and every successful status
+change emits exactly one event — never both, and never zero. A call that is
+rejected (unauthorized updater, invalid transition, expired task, paused
+contract) emits no lifecycle event at all, since it errors out before any state
+change or publish. This makes the event stream a complete record of state
+changes: a missing event means a failed transaction, and nothing else.
+
+## Recovering `tx_hash`
+
+A Soroban contract cannot read the hash of the transaction that invoked it, so
+no event and no history record carries one. Index the events by ledger
+position and join them against transaction results off-chain: since each
+accepted transition emits exactly one event, the join is unambiguous.
 
 ---
 
+## `task_meta` family — DAG tasks
+
 ### 1. Task Created
 
-Emitted once, when `store_task_metadata` succeeds.
+Emitted once, when `store_task_metadata` succeeds. The task starts at
+`Assigned`, because the creating transaction already names its agents.
 
-- **Topic 1**: `Symbol::new(env, "task_meta")`
-- **Topic 2**: `Symbol::new(env, "created")`
-- **Data (Structure)**: `TaskCreatedEvent`
+- **Topics**: `(task_meta, created)`
+- **Data**: `TaskCreatedEvent`
   ```rust
   pub struct TaskCreatedEvent {
       pub version: u32,
@@ -53,18 +101,17 @@ Emitted once, when `store_task_metadata` succeeds.
       pub assigned_agents: Vec<Address>,
       pub created_at: u64,
       pub expires_at: u64,
+      pub quoted_price_stroops: Option<i128>,
   }
   ```
 
 ### 2. Task Updated
 
-Emitted when `update_task_status` succeeds with a **non-terminal**
-transition. Today the only non-terminal transition is `Pending -> Running`;
-`Pending -> Failed` is terminal and emits `finalized` instead (see below).
+Emitted when `update_task_status` succeeds with a **non-terminal** transition,
+e.g. `Assigned -> Running`.
 
-- **Topic 1**: `Symbol::new(env, "task_meta")`
-- **Topic 2**: `Symbol::new(env, "updated")`
-- **Data (Structure)**: `TaskUpdatedEvent`
+- **Topics**: `(task_meta, updated)`
+- **Data**: `TaskUpdatedEvent`
   ```rust
   pub struct TaskUpdatedEvent {
       pub version: u32,
@@ -78,14 +125,12 @@ transition. Today the only non-terminal transition is `Pending -> Running`;
 
 ### 3. Task Finalized
 
-Emitted when `update_task_status` succeeds with a transition **into a
-terminal status** — `-> Completed` or `-> Failed`. `final_status` is
-always one of those two values; `old_status` records what it transitioned
-from.
+Emitted when `update_task_status` succeeds with a transition **into a terminal
+status** — `-> Completed`, `-> Failed` or `-> Cancelled`. `final_status` is
+always one of those three; `old_status` records what it transitioned from.
 
-- **Topic 1**: `Symbol::new(env, "task_meta")`
-- **Topic 2**: `Symbol::new(env, "finalized")`
-- **Data (Structure)**: `TaskFinalizedEvent`
+- **Topics**: `(task_meta, finalized)`
+- **Data**: `TaskFinalizedEvent`
   ```rust
   pub struct TaskFinalizedEvent {
       pub version: u32,
@@ -97,26 +142,112 @@ from.
   }
   ```
 
-## Status transition → event map
-
 | Transition | Event |
 |---|---|
 | (none) → `store_task_metadata` succeeds | `created` |
-| `Pending` → `Running` | `updated` |
-| `Running` → `Completed` | `finalized` |
-| `Pending` → `Failed` | `finalized` |
-| `Running` → `Failed` | `finalized` |
+| `Assigned` → `Running` | `updated` |
+| `Assigned` → `Cancelled` / `Failed` | `finalized` |
+| `Running` → `Completed` / `Failed` / `Cancelled` | `finalized` |
 | Any other transition (rejected — `InvalidStatusTransition`) | *(no event)* |
+
+## `task_life` family — budget tasks
+
+### 4. Budget Task Created
+
+Emitted once, when `create_task` succeeds. The task starts at `Created`.
+
+- **Topics**: `(task_life, created)`
+- **Data**: `LifecycleTaskCreatedEvent`
+  ```rust
+  pub struct LifecycleTaskCreatedEvent {
+      pub version: u32,
+      pub task_id: BytesN<32>,
+      pub creator: Address,
+      pub prompt_hash: BytesN<32>,
+      /// Budget committed by the creator, in stroops.
+      pub budget_xlm: i128,
+      pub created_at: u64,
+  }
+  ```
+
+### 5. Budget Task Status Changed
+
+Emitted for **every** accepted `update_status` transition. Note that this
+family does not split terminal from non-terminal: a terminal transition is
+distinguishable by `to_status.is_terminal()`, which keeps the event count at
+exactly one per transition without the caller having to know the state machine.
+
+- **Topics**: `(task_life, status)`
+- **Data**: `LifecycleStatusChangedEvent`
+  ```rust
+  pub struct LifecycleStatusChangedEvent {
+      pub version: u32,
+      pub task_id: BytesN<32>,
+      /// Version number of the history record this transition appended.
+      pub record_version: u32,
+      pub from_status: TaskStatus,
+      pub to_status: TaskStatus,
+      /// Creator for the creator-driven case, coordinator for the delegated one.
+      pub updater: Address,
+      pub updated_at: u64,
+  }
+  ```
+
+`record_version` matches the `version` field of the task record and the `seq`
+of the appended `TaskVersionRecord`, so an indexer can order the event stream
+and the on-chain history against each other and detect any gap.
+
+## `task_str` family — administration
+
+### 6. Coordinator Set
+
+Emitted when the admin calls `set_coordinator`. `coordinator: None` means the
+coordinator was cleared, which revokes its authority to move tasks.
+
+- **Topics**: `(task_str, coord_set)`
+- **Data**: `CoordinatorSetEvent`
+  ```rust
+  pub struct CoordinatorSetEvent {
+      pub coordinator: Option<Address>,
+  }
+  ```
+
+## The version history
+
+Both families append to one append-only history per task id, readable with
+`get_history(task_id)` or bundled with the record by `get_task(task_id)`:
+
+```rust
+pub struct TaskVersionRecord {
+    pub seq: u32,              // 1-based, one per accepted transition
+    pub status: TaskStatus,
+    pub timestamp: u64,
+    pub ledger_sequence: u32,
+    pub updater: Address,      // creator/submitter for seq 1, then the actor
+}
+```
+
+Because the history is keyed by task id alone, it serves tasks created through
+either entrypoint, and the DAG and budget records for one id keep separate
+storage slots so neither can overwrite the other.
 
 ## Reading events with the JS/TS SDK
 
-The contract's generated bindings (`smart-contracts/src/`) expose the
-event payload types once regenerated from the built Wasm. Off-chain code
-should filter by topic pair before decoding, e.g.:
+The TypeScript SDK (`smart-contracts/src/task_store/task_store.ts`) mirrors
+this schema and exports `TaskStatus`, `canTransition` and `isTerminalStatus` so
+off-chain code can validate a stream without re-deriving the state machine.
+Filter by topic pair before decoding, e.g.:
 
 ```ts
 if (topics[0] === "task_meta" && topics[1] === "finalized") {
   const event = scValToNative(data) as TaskFinalizedEvent;
   // event.version, event.final_status, ...
+}
+
+if (topics[0] === "task_life" && topics[1] === "status") {
+  const event = scValToNative(data) as LifecycleStatusChangedEvent;
+  if (isTerminalStatus(event.toStatus)) {
+    // the task is finished; no further status events will arrive
+  }
 }
 ```

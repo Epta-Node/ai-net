@@ -53,7 +53,7 @@ export function createStatsRouter(db: DbClient) {
    *             schema:
    *               $ref: '#/components/schemas/InternalServerError'
    */
-  router.get('/stats', async (req: Request, res: Response, next: NextFunction) => {
+  router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     try {
       const stats = await cache.get();
       return res.status(200).json(stats);

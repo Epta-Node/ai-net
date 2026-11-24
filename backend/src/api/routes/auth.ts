@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { getAuthService, AuthService } from "../../services/auth";
+import { getAuthService, setAuthService, AuthService } from "../../services/auth";
 import { sessionAuthMiddleware, optionalAuthMiddleware } from "../middleware/auth";
 import { ValidationError } from "../../errors/ValidationError";
 
@@ -23,6 +23,13 @@ export function createAuthRouter(authService?: AuthService): Router {
   const router = Router();
   const service = authService ?? getAuthService();
 
+  // The request guards in `middleware/auth` resolve the service through
+  // `getAuthService()`. Register the injected instance so the guards validate
+  // against the same secret and storage that minted the tokens.
+  if (authService) {
+    setAuthService(authService);
+  }
+
   /**
    * @openapi
    * /api/auth/token:
@@ -30,6 +37,7 @@ export function createAuthRouter(authService?: AuthService): Router {
    *     summary: Issue access and refresh token pair
    *     description: Establishes a new authenticated session family for a wallet & device.
    *     tags: [Auth]
+   *     security: []
    *     requestBody:
    *       required: true
    *       content:
@@ -84,6 +92,7 @@ export function createAuthRouter(authService?: AuthService): Router {
    *     summary: Rotate refresh token
    *     description: Exchanges an active refresh token for a new access/refresh pair. Replaying a consumed refresh token revokes the entire session family.
    *     tags: [Auth]
+   *     security: []
    *     requestBody:
    *       required: true
    *       content:

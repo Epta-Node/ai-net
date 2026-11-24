@@ -115,34 +115,7 @@
         }
       ]
     ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "set_sla",
-              "args": [
-                {
-                  "symbol": "sla_agent"
-                },
-                {
-                  "u32": 300
-                },
-                {
-                  "u32": 90
-                },
-                {
-                  "u32": 70
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ]
+    []
   ],
   "ledger": {
     "protocol_version": 22,
@@ -389,7 +362,7 @@
                         "symbol": "max_response_time"
                       },
                       "val": {
-                        "u32": 300
+                        "u32": 200
                       }
                     },
                     {
@@ -397,7 +370,7 @@
                         "symbol": "min_quality_score"
                       },
                       "val": {
-                        "u32": 70
+                        "u32": 80
                       }
                     },
                     {
@@ -405,7 +378,7 @@
                         "symbol": "min_uptime"
                       },
                       "val": {
-                        "u32": 90
+                        "u32": 95
                       }
                     },
                     {
@@ -613,39 +586,6 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
             "key": {
               "ledger_key_nonce": {
-                "nonce": 1033654523790656264
-              }
-            },
-            "durability": "temporary"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-                "key": {
-                  "ledger_key_nonce": {
-                    "nonce": 1033654523790656264
-                  }
-                },
-                "durability": "temporary",
-                "val": "void"
-              }
-            },
-            "ext": "v0"
-          },
-          6311999
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-            "key": {
-              "ledger_key_nonce": {
                 "nonce": 5541220902715666415
               }
             },
@@ -696,62 +636,5 @@
       ]
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "registry"
-              },
-              {
-                "symbol": "sla_set"
-              }
-            ],
-            "data": {
-              "map": [
-                {
-                  "key": {
-                    "symbol": "agent_id"
-                  },
-                  "val": {
-                    "symbol": "sla_agent"
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "max_response_time"
-                  },
-                  "val": {
-                    "u32": 300
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "min_quality_score"
-                  },
-                  "val": {
-                    "u32": 70
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "min_uptime"
-                  },
-                  "val": {
-                    "u32": 90
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }

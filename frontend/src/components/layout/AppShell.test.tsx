@@ -7,6 +7,7 @@ import i18n from 'i18next'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import { NAV_GROUPS, NAV_ITEMS } from './navigation'
+import { NotificationProvider } from '../../context/NotificationContext'
 import { WalletProvider } from '../../context/WalletContext'
 
 // jsdom has no layout engine, so framer-motion's animation props are stripped
@@ -42,11 +43,11 @@ vi.mock('framer-motion', async () => {
 const renderInShell = (initialPath = '/') =>
   render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <WalletProvider>
+      <NotificationProvider><WalletProvider>
         <AppShell>
           <div data-testid="page-content">Page Content</div>
         </AppShell>
-      </WalletProvider>
+      </WalletProvider></NotificationProvider>
     </MemoryRouter>
   )
 
@@ -118,14 +119,14 @@ describe('TopNav truncateKey', () => {
   const renderNav = (_publicKey: string | null) =>
     render(
       <MemoryRouter>
-        <WalletProvider>
+        <NotificationProvider><WalletProvider>
           <TopNav
             onMenuClick={vi.fn()}
             onToggleSidebar={vi.fn()}
             sidebarCollapsed={false}
             isMobile={false}
           />
-        </WalletProvider>
+        </WalletProvider></NotificationProvider>
       </MemoryRouter>
     )
 

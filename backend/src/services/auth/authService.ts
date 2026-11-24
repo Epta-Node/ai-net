@@ -529,3 +529,23 @@ export function getAuthService(): AuthService {
   }
   return _authService;
 }
+
+/**
+ * Install `service` as the process-wide auth service.
+ *
+ * Callers that construct their own {@link AuthService} (tests, or any embedding
+ * that supplies custom secrets or storage) must register it here, because the
+ * request guards in `api/middleware/auth` resolve the service through
+ * {@link getAuthService} rather than closing over the router's instance. Without
+ * this, an injected service mints tokens with its own secret while the guards
+ * verify against the default singleton's secret, and every authenticated
+ * request is rejected.
+ */
+export function setAuthService(service: AuthService): void {
+  _authService = service;
+}
+
+/** Drop the installed service so the next {@link getAuthService} rebuilds the default. */
+export function resetAuthService(): void {
+  _authService = null;
+}

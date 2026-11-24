@@ -30,20 +30,15 @@ import { createHash } from 'crypto';
 import { getCacheClient } from './index';
 import { recordInvalidation, markStale } from './metrics';
 import { createLogger } from '../utils/logger';
+import { getConfig } from '../config';
 
 const logger = createLogger({ module: 'registry-cache' });
 
-// ---------------------------------------------------------------------------
-// Deployment-keyed prefix
-// ---------------------------------------------------------------------------
-
 /**
  * Returns the deployment-specific cache key prefix.
- * Reads `REGISTRY_CACHE_KEY_PREFIX` at call-time so tests can override it via
- * `process.env` without restarting the module.
  */
 export function getRegistryCachePrefix(): string {
-  return process.env.REGISTRY_CACHE_KEY_PREFIX ?? 'registry';
+  return getConfig().REGISTRY_CACHE_KEY_PREFIX;
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Terminal, Clock, CheckCircle2, XCircle, ChevronDown, ChevronRight, Copy, Check, Loader2 } from 'lucide-react';
 import type { DAGNode } from '../../types/api';
+import { AgentOutputViewer } from '../agents/AgentOutputViewer';
 
 interface TaskDetailTimelineProps {
   nodes: DAGNode[];
@@ -138,10 +139,16 @@ export const TaskDetailTimeline: React.FC<TaskDetailTimelineProps> = ({ nodes, o
                 {isExpanded && (
                   <div className="mt-3 border-t border-slate-700/50 pt-3">
                     {hasOutput ? (
-                      <div className="bg-[#0b0f19] p-3 rounded-lg border border-slate-800">
-                        <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap break-words">
-                          {outputs[node.nodeId]}
-                        </pre>
+                      // The card's own onClick toggles collapse, so the viewer's
+                      // tab/copy/download controls must not bubble into it.
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="bg-[#0b0f19] p-3 rounded-lg border border-slate-800"
+                      >
+                        <AgentOutputViewer
+                          output={outputs[node.nodeId]}
+                          filenameBase={`agent-output-${node.nodeId}`}
+                        />
                       </div>
                     ) : (
                       <div className="flex items-center gap-2 text-xs text-slate-500 italic p-2">

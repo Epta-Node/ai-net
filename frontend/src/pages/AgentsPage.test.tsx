@@ -4,10 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import AgentsPage from './AgentsPage'
 import type { AgentRecord } from '../types/api'
 
-const { getAgents } = vi.hoisted(() => ({ getAgents: vi.fn() }))
+const { getAgents, getPagination } = vi.hoisted(() => ({ getAgents: vi.fn(), getPagination: vi.fn() }))
 
 vi.mock('../services/api', () => ({
-  getAgents,
+  getAgentsPage: async (cursor?: string) => ({
+    items: await getAgents(cursor),
+    pagination: getPagination(cursor),
+  }),
 }))
 
 const AGENTS: AgentRecord[] = [
@@ -54,6 +57,8 @@ function renderPage(initialEntries = ['/agents']) {
 }
 
 beforeEach(() => {
+  getPagination.mockReset()
+  getPagination.mockReturnValue({ limit: 100, nextCursor: null, hasNextPage: false })
   getAgents.mockReset()
   getAgents.mockResolvedValue(AGENTS)
 })
@@ -218,3 +223,111 @@ describe('AgentsPage - auto-refresh', () => {
     expect(getAgents).toHaveBeenCalledTimes(2)
   })
 })
+
+
+describe('AgentsPage - cursor navigation', () => {
+  it('replaces the current page and allows returning to the first page', async () => {
+    getPagination.mockImplementation((cursor?: string) => ({
+      limit: 100, nextCursor: cursor ? null : 'second-page', hasNextPage: !cursor,
+    }))
+    getAgents.mockImplementation(async (cursor?: string) => cursor ? [AGENTS[2]] : [AGENTS[0]])
+    renderPage()
+    await screen.findByTestId('agent-row-agent-research-001')
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    await screen.findByTestId('agent-row-agent-audit-003')
+    expect(screen.queryByTestId('agent-row-agent-research-001')).not.toBeInTheDocument()
+    expect(getAgents).toHaveBeenLastCalledWith('second-page')
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'First page' }))
+    await screen.findByTestId('agent-row-agent-research-001')
+    expect(getAgents).toHaveBeenLastCalledWith(undefined)
+    expect(screen.getByRole('button', { name: 'First page' })).toBeDisabled()
+  })
+})
+
+describe('AgentsPage - search, capability tags, sort and empty state (#823)', () => {
+  it('filters agents by fuzzy search and highlights matched characters in agent cards', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderPage()
+    await screen.findByTestId('agent-row-agent-research-001')
+
+    const searchInput = screen.getByTestId('agent-search-input')
+    fireEvent.change(searchInput, { target: { value: 'smart' } })
+
+    // Advance 300ms debounce
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350)
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-row-agent-research-001')).not.toBeInTheDocument()
+      expect(screen.getByTestId('agent-row-agent-coding-002')).toBeInTheDocument()
+    })
+
+    // Check card with highlight mark element
+    const card = screen.getByTestId('agent-card-agent-coding-002')
+    expect(card.querySelector('mark')).toBeInTheDocument()
+
+    vi.useRealTimers()
+  })
+
+  it('filters agents by capability tag filter pills (OR logic)', async () => {
+    renderPage()
+    await screen.findByTestId('agent-row-agent-research-001')
+
+    const auditPill = screen.getByTestId('filter-capability-audit')
+    fireEvent.click(auditPill)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-row-agent-research-001')).not.toBeInTheDocument()
+      expect(screen.queryByTestId('agent-row-agent-coding-002')).not.toBeInTheDocument()
+      expect(screen.getByTestId('agent-row-agent-audit-003')).toBeInTheDocument()
+    })
+  })
+
+  it('changes sort order immediately without refetching from the API', async () => {
+    renderPage()
+    await screen.findByTestId('agent-row-agent-research-001')
+    const initialCallCount = getAgents.mock.calls.length
+
+    const sortSelect = screen.getByTestId('agent-sort-select')
+    fireEvent.change(sortSelect, { target: { value: 'price_asc' } })
+
+    // No additional fetch should occur
+    expect(getAgents.mock.calls.length).toBe(initialCallCount)
+    // Check URL updated
+    expect(screen.getByTestId('location-search').textContent).toContain('sortBy=price_asc')
+  })
+
+  it('renders empty state echoing query with a clear filters button when no agents match', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderPage()
+    await screen.findByTestId('agent-row-agent-research-001')
+
+    const searchInput = screen.getByTestId('agent-search-input')
+    fireEvent.change(searchInput, { target: { value: 'blockchain auditing' } })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350)
+    })
+
+    const emptyBox = await screen.findByTestId('agents-empty')
+    expect(emptyBox).toHaveTextContent("No agents match 'blockchain auditing'")
+
+    const clearBtn = screen.getByTestId('clear-filters-btn')
+    expect(clearBtn).toBeInTheDocument()
+
+    // Clicking clear filters resets search
+    fireEvent.click(clearBtn)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(350)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-row-agent-research-001')).toBeInTheDocument()
+    })
+
+    vi.useRealTimers()
+  })
+})
+

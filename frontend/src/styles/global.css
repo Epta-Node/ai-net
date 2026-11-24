@@ -79,6 +79,14 @@ html, body {
   .fade-in {
     animation: none;
   }
+
+  /* Status dots/spinners using Tailwind animate utilities must also freeze
+     (#719, #721): they are live indicators, not skeletons, but motion is
+     non-essential for users who request reduced motion. */
+  .animate-pulse,
+  .animate-spin {
+    animation: none !important;
+  }
 }
 
 .glass-panel {

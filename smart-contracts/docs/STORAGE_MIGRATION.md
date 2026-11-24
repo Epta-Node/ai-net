@@ -8,6 +8,19 @@ Soroban contracts store data in a key-value store where keys are defined by the 
 
 The ai-net upgrade mechanism provides safe migration tools including pre-upgrade validation, migration hooks, and rollback capabilities to handle storage layout changes.
 
+## Operator dry-run
+
+Migration plans can be compared before authorization with:
+
+```bash
+npm run migration:dry-run -- --current storage-layout.json --target migration-plan.json \
+  --output migration-summary.json
+```
+
+Dry-run is the default and never changes the current layout. The JSON artifact
+contains `added`, `removed`, `rewritten`, `estimatedLedgerEntryDelta`, and
+`irreversibleSteps`. Only an explicitly reviewed run should use `--apply`.
+
 ## Upgrade Mechanism Integration
 
 ### Migration Hooks
@@ -26,6 +39,35 @@ Use the `get_migration_plan` function to plan storage migrations:
 let migration_plan = contract.get_migration_plan("2.0.0")?;
 // Returns: required checks, transformations, validations, estimated items
 ```
+
+### Who actually migrates data
+
+The `upgrade-manager` contract does **not** transform or validate another
+contract's records — it has no access to that contract's storage. Its role in
+`execute_upgrade` is limited to:
+
+1. Swapping the Wasm hash and recording the new `ContractVersion` under
+   `DataKey::Version(<tag>)`, indexed in the bounded `DataKey::VersionIndex`
+   (at most `MAX_VERSION_HISTORY` = 100 entries). `get_version_history`
+   returns every indexed version, newest first.
+2. Emitting `(upgrade, complete)` with a `MigrationCompleteEvent` carrying the
+   **actual** applied `version`, the `data_transformations` and
+   `post_migration_validations` from the plan as _delegated_ steps, and the
+   plan's `estimated_items` (an estimate, never a count).
+
+The data transformations and post-migration validations listed in a
+`MigrationPlan` are executed by the upgraded contract's own
+`Upgradeable::post_upgrade_hook` (for example `agent_registry`'s
+`execute_migration_step` / `validate_post_migration_state`). The
+upgrade-manager no longer ships simulated migration steps that returned
+hard-coded item counts, nor a post-migration validation that always
+succeeded, nor per-step `gas_used` figures (the `MigrationProgressEvent`
+was removed). `validate_proposal` still returns the formula-based
+`estimate_migration_gas` value, which is an estimate and is labelled as such.
+
+`get_current_version` returns `Option`, and every internal storage read
+returns `Result` (`UpgradeError::NotInitialized` when no current version is
+recorded) — the crate contains no `.unwrap()` outside tests.
 
 ## Storage Layout Compatibility
 
@@ -91,17 +133,17 @@ impl MigrationContract {
         let current_version: u32 = env.storage().instance()
             .get(&DataKey::MigrationVersion)
             .unwrap_or(0);
-            
+
         if current_version >= migration_version {
             return Ok(()); // Already migrated
         }
-        
+
         match migration_version {
             1 => migrate_v0_to_v1(&env)?,
             2 => migrate_v1_to_v2(&env)?,
             _ => return Err(Error::UnsupportedMigrationVersion),
         }
-        
+
         // Update migration version
         env.storage().instance().set(&DataKey::MigrationVersion, &migration_version);
         Ok(())
@@ -111,15 +153,15 @@ impl MigrationContract {
 fn migrate_v0_to_v1(env: &Env) -> Result<(), Error> {
     // Example: Convert old AgentRecord format to new format
     let old_records = get_all_old_agent_records(env);
-    
+
     for old_record in old_records {
         let new_record = convert_record_format(old_record);
         env.storage().persistent().set(&DataKey::AgentRecord(new_record.id.clone()), &new_record);
-        
+
         // Remove old format data if necessary
         env.storage().persistent().remove(&DataKey::OldAgentRecord(new_record.id));
     }
-    
+
     Ok(())
 }
 ```
@@ -134,11 +176,11 @@ Use versioned storage keys to maintain backward compatibility:
 pub enum DataKey {
     // V1 keys (deprecated but still readable)
     AgentRecordV1(Symbol),
-    
+
     // V2 keys (current version)
     AgentRecordV2(Symbol),
     AgentStatsV2(Symbol),
-    
+
     // Metadata
     StorageVersion,
 }
@@ -150,12 +192,12 @@ impl AgentRegistryContract {
         if let Some(record) = env.storage().persistent().get(&DataKey::AgentRecordV2(agent_id.clone())) {
             return Some(record);
         }
-        
+
         // Fall back to V1 format and convert
         if let Some(old_record): Option<AgentRecordV1> = env.storage().persistent().get(&DataKey::AgentRecordV1(agent_id)) {
             return Some(convert_v1_to_v2(old_record));
         }
-        
+
         None
     }
 }
@@ -166,24 +208,26 @@ impl AgentRegistryContract {
 Before performing a storage-incompatible upgrade:
 
 1. **Analyze Storage Changes**
+
    ```bash
    # Compare storage keys between versions
    git diff HEAD~1 contracts/*/src/lib.rs | grep -A 10 -B 10 "DataKey"
    ```
 
 2. **Test Migration Locally**
+
    ```bash
    # Deploy old version
    ./scripts/deploy.sh -n testnet
-   
+
    # Add test data
    soroban contract invoke --id CXXX... --source $STELLAR_SECRET_KEY \
      --rpc-url https://soroban-testnet.stellar.org \
      -- register_agent --record '{"id":"test","capability":"research","price":100}'
-   
+
    # Upgrade to new version
    ./scripts/upgrade.sh -n testnet
-   
+
    # Verify data integrity
    soroban contract invoke --id CXXX... --source $STELLAR_SECRET_KEY \
      --rpc-url https://soroban-testnet.stellar.org \
@@ -191,21 +235,22 @@ Before performing a storage-incompatible upgrade:
    ```
 
 3. **Create Backup Script**
+
    ```bash
    #!/bin/bash
    # backup-contract-state.sh
-   
+
    CONTRACT_ID="$1"
    BACKUP_FILE="backup-$(date +%Y%m%d-%H%M%S).json"
-   
+
    echo "Backing up contract state for $CONTRACT_ID..."
-   
+
    # Export all agent records (example)
    soroban contract invoke --id "$CONTRACT_ID" \
      --source "$STELLAR_SECRET_KEY" \
      --rpc-url "$STELLAR_RPC_URL" \
      -- export_all_data > "$BACKUP_FILE"
-   
+
    echo "Backup saved to $BACKUP_FILE"
    ```
 
@@ -213,18 +258,21 @@ Before performing a storage-incompatible upgrade:
    Create a migration plan document:
    ```markdown
    # Migration Plan: Agent Registry v1.2.0
-   
+
    ## Changes
+
    - Added AgentStats storage key
    - Modified AgentRecord struct to include performance_score field
-   
+
    ## Migration Steps
+
    1. Deploy new contract version
    2. Call migrate_storage(2) function
    3. Verify all existing agents are accessible
    4. Test new functionality
-   
+
    ## Rollback Plan
+
    - Keep old contract Wasm hash: abc123...
    - Rollback command: soroban contract upgrade --contract-id CXXX --wasm-hash abc123...
    ```
@@ -234,6 +282,7 @@ Before performing a storage-incompatible upgrade:
 ### Agent Registry Contract
 
 Current storage keys (as of v0.1.0):
+
 ```rust
 pub enum DataKey {
     AgentRecord(Symbol),    // Maps agent_id -> AgentRecord
@@ -242,6 +291,7 @@ pub enum DataKey {
 ```
 
 Safe additions for future versions:
+
 - `AgentStats(Symbol)` - Performance metrics
 - `AgentMetadata(Symbol)` - Extended metadata
 - `SystemConfig` - Global configuration
@@ -249,6 +299,7 @@ Safe additions for future versions:
 ### Error Resolver Contract
 
 The error resolver contract stores:
+
 ```rust
 // Currently no persistent storage - all data is embedded in Wasm
 // Future versions can safely add any storage keys
@@ -262,19 +313,19 @@ The error resolver contract stores:
 #[cfg(test)]
 mod migration_tests {
     use super::*;
-    
+
     #[test]
     fn test_v1_to_v2_migration() {
         let env = Env::default();
         let contract_id = env.register_contract(None, AgentRegistryContract);
         let client = AgentRegistryContractClient::new(&env, &contract_id);
-        
+
         // Setup v1 data
         setup_v1_test_data(&env);
-        
+
         // Perform migration
         client.migrate_storage(&2);
-        
+
         // Verify v2 data accessibility
         let agents = client.lookup_agents(&symbol_short!("research"));
         assert_eq!(agents.len(), 2);
@@ -349,6 +400,7 @@ soroban contract upgrade \
 If data is corrupted:
 
 1. **From Backup**
+
    ```bash
    # Restore from backup (custom implementation needed)
    soroban contract invoke --id "$CONTRACT_ID" \

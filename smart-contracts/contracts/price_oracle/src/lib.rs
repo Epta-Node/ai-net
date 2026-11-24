@@ -44,7 +44,9 @@ mod errors;
 mod types;
 
 pub use errors::Error;
-pub use types::{DataKey, MaxAgeUpdatedEvent, PriceEntry, PriceResult, PriceUpdatedEvent};
+pub use types::{
+    AdminChangedEvent, DataKey, MaxAgeUpdatedEvent, PriceEntry, PriceResult, PriceUpdatedEvent,
+};
 
 use soroban_sdk::{contract, contractimpl, symbol_short, Address, Env, Symbol};
 
@@ -67,6 +69,18 @@ fn read_admin(env: &Env) -> Result<Address, Error> {
 fn require_admin(env: &Env) -> Result<(), Error> {
     let admin = read_admin(env)?;
     admin.require_auth();
+    Ok(())
+}
+
+fn require_not_paused(env: &Env) -> Result<(), Error> {
+    let paused: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::Paused)
+        .unwrap_or(false);
+    if paused {
+        return Err(Error::ContractPaused);
+    }
     Ok(())
 }
 
@@ -105,10 +119,55 @@ impl PriceOracleContract {
         };
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::MaxPriceAge, &age);
+        env.storage().instance().set(&DataKey::Paused, &false);
         Ok(())
     }
 
     // ── Admin operations ──────────────────────────────────────────────────────
+
+    /// Transfer admin rights to a new address. Requires authorization from both current and new admin.
+    pub fn set_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        let old_admin = read_admin(&env)?;
+        old_admin.require_auth();
+        new_admin.require_auth();
+        env.storage().instance().set(&DataKey::Admin, &new_admin);
+
+        env.events().publish(
+            (symbol_short!("oracle"), symbol_short!("adm_chng")),
+            AdminChangedEvent {
+                old_admin,
+                new_admin,
+            },
+        );
+        Ok(())
+    }
+
+    /// Pause the contract. Only admin can call this.
+    pub fn pause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((symbol_short!("oracle"), symbol_short!("paused")), ());
+        Ok(())
+    }
+
+    /// Unpause the contract. Only admin can call this.
+    pub fn unpause(env: Env) -> Result<(), Error> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((symbol_short!("oracle"), symbol_short!("unpaused")), ());
+        Ok(())
+    }
+
+    /// Return whether contract is paused.
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 
     /// Push a new price observation for `pair`.
     ///
@@ -122,6 +181,7 @@ impl PriceOracleContract {
     /// * `timestamp` – Off-chain observation time (Unix seconds, must be ≤
     ///                 `env.ledger().timestamp()`).
     pub fn submit_price(env: Env, pair: Symbol, price: i128, timestamp: u64) -> Result<(), Error> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
 
         if price <= 0 {
@@ -157,9 +217,10 @@ impl PriceOracleContract {
     ///
     /// * `new_max_age` – New tolerance in seconds (must be > 0).
     pub fn set_max_price_age(env: Env, new_max_age: u64) -> Result<(), Error> {
+        require_not_paused(&env)?;
         require_admin(&env)?;
         if new_max_age == 0 {
-            return Err(Error::InvalidTimestamp); // reuse; a zero age is nonsensical
+            return Err(Error::InvalidMaxPriceAge);
         }
         let old_max_age = read_max_age(&env);
         env.storage()
@@ -187,6 +248,7 @@ impl PriceOracleContract {
     ///
     /// Callers **must not** silently ignore `Error::PriceStale`.
     pub fn get_price(env: Env, pair: Symbol) -> Result<PriceResult, Error> {
+        require_not_paused(&env)?;
         let key = DataKey::Price(pair.clone());
         let entry: PriceEntry = env
             .storage()
@@ -208,8 +270,9 @@ impl PriceOracleContract {
     }
 
     /// Return the currently configured staleness tolerance in seconds.
-    pub fn get_max_age(env: Env) -> u64 {
-        read_max_age(&env)
+    pub fn get_max_age(env: Env) -> Result<u64, Error> {
+        require_not_paused(&env)?;
+        Ok(read_max_age(&env))
     }
 
     /// Return the admin address.  Useful for on-chain permission checks.
@@ -263,6 +326,30 @@ mod test {
 
     fn submit(f: &Fixture, price: i128, ts: u64) {
         f.client.submit_price(&f.pair, &price, &ts);
+    }
+
+    /// Every mutating entrypoint must reject while paused. Add new mutating
+    /// functions here so a missing pause guard fails this test.
+    #[test]
+    fn paused_state_rejects_all_mutating_entrypoints() {
+        let f = fixture();
+        init(&f);
+        let a = Address::generate(&f.env);
+        f.client.pause();
+
+        let paused = Err(Ok(Error::ContractPaused));
+        assert_eq!(f.client.try_set_admin(&a), paused);
+        assert_eq!(
+            f.client
+                .try_submit_price(&f.pair, &1_000_000i128, &1_700_000_000u64),
+            paused
+        );
+        assert_eq!(f.client.try_set_max_price_age(&60u64), paused);
+
+        f.client.unpause();
+        f.client.set_max_price_age(&60u64);
+        submit(&f, 1_000_000, 1_700_000_000);
+        f.client.set_admin(&a);
     }
 
     // ── Initialisation ────────────────────────────────────────────────────────
@@ -443,7 +530,7 @@ mod test {
         init(&f);
         assert_eq!(
             f.client.try_set_max_price_age(&0u64),
-            Err(Ok(Error::InvalidTimestamp))
+            Err(Ok(Error::InvalidMaxPriceAge))
         );
     }
 
@@ -462,4 +549,30 @@ mod test {
         assert_eq!(f.client.get_price(&f.pair).price, 10_000_000);
         assert_eq!(f.client.get_price(&pair_b).price, 9_000_000);
     }
+
+    #[test]
+    fn negative_auth_tests() {
+        let f = fixture();
+        init(&f);
+        let intruder = Address::generate(&f.env);
+        f.env.mock_auths(&[]);
+        assert!(f.client.try_set_admin(&intruder).is_err());
+        assert!(f.client.try_pause().is_err());
+        assert!(f.client.try_unpause().is_err());
+    }
+    #[test]
+    fn stale_price_is_rejected_after_configured_max_age() {
+        let f = fixture();
+        init(&f);
+        submit(&f, 1_000_000, 1_700_000_000);
+
+        f.env.ledger().with_mut(|ledger| ledger.timestamp += 3_601);
+        assert_eq!(f.client.try_get_price(&f.pair), Err(Ok(Error::PriceStale)));
+
+        f.env.ledger().with_mut(|ledger| ledger.timestamp -= 2);
+        let result = f.client.get_price(&f.pair);
+        assert_eq!(result.price, 1_000_000);
+        assert_eq!(result.timestamp, 1_700_000_000);
+    }
+
 }

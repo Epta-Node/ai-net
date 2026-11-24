@@ -1,6 +1,8 @@
-import { loadConfig, resetConfigForTests } from "../src/config";
+import fs from "fs";
+import path from "path";
+import { loadConfig, resetConfigForTests, envSchema } from "../src/config";
 
-describe("config validation", () => {
+describe("config validation & schema parity", () => {
   afterEach(() => {
     resetConfigForTests();
   });
@@ -22,5 +24,12 @@ describe("config validation", () => {
     expect(message).toContain("PORT");
     expect(message).toContain("DATABASE_URL");
     expect(message).toContain("VENICE_API_KEY");
+  });
+
+  it("defaults trusted proxies to none and parses hop counts", () => {
+    expect(loadConfig({ NODE_ENV: "test" }).TRUST_PROXY).toBe(false);
+    expect(loadConfig({ NODE_ENV: "test", TRUST_PROXY: "2" }).TRUST_PROXY).toBe(
+      2,
+    );
   });
 });

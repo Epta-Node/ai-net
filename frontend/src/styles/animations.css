@@ -68,3 +68,12 @@
     animation-delay: 0.01ms !important;
   }
 }
+
+/* Spinner primitive (#819) */
+@keyframes ui-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [role='status'][data-size] { animation-duration: 2s !important; }
+}

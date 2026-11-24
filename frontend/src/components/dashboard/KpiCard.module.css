@@ -25,12 +25,8 @@
   min-height: 40px;
 }
 
-.skeleton {
-  height: 80px;
-  background: linear-gradient(90deg, var(--bg-surface-alt) 25%, var(--bg-surface) 50%, var(--bg-surface-alt) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
-  border-radius: var(--radius-sm);
+.loadingCard {
+  min-height: 80px;
 }
 
 @keyframes shimmer {

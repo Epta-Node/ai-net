@@ -542,8 +542,13 @@ describe("Auth Hardening — Tokens, Rotation, Revocation, and Audit (#367)", ()
       const next = jest.fn();
 
       authMiddleware(req, res, next);
-      expect(res.status).toHaveBeenCalledWith(401);
-      expect(next).not.toHaveBeenCalled();
+
+      // Rejections go to the error handler as structured errors, so the 401 is
+      // rendered through the canonical envelope rather than written here.
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({ statusCode: 401, code: "UNAUTHORIZED" }),
+      );
+      expect(res.status).not.toHaveBeenCalled();
     });
   });
 });

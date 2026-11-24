@@ -55,14 +55,33 @@ pub struct ErrorMappingEntry {
     pub fix_suggestion: String,
 }
 
+/// Entry mapping a contract-specific `#[contracterror]` code to a fix suggestion.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractErrorEntry {
+    /// Crate name of the contract defining the code (e.g. `error-registry`).
+    pub contract: String,
+    /// Numeric `#[contracterror]` discriminant.
+    pub code: u32,
+    /// Variant name, used to detect renames drifting from the contract enum.
+    pub name: String,
+    pub fix_suggestion: String,
+}
+
+/// Suggestion returned by [`ErrorResolver::resolve_contract_error`] when the
+/// (contract, code) pair has no entry in the database.
+pub const UNKNOWN_CONTRACT_ERROR_FALLBACK: &str = "Unknown contract error code. Inspect the contract's #[contracterror] enum for this code and add a matching [[contract_errors]] entry to errors.toml.";
+
 #[derive(Debug, Deserialize)]
 struct TomlData {
     errors: Vec<ErrorMappingEntry>,
+    #[serde(default)]
+    contract_errors: Vec<ContractErrorEntry>,
 }
 
 /// Core resolver that maps (Category, Code) to actionable recommendations.
 pub struct ErrorResolver {
     mappings: HashMap<(ErrorCategory, String), String>,
+    contract_mappings: HashMap<(String, u32), ContractErrorEntry>,
 }
 
 impl Default for ErrorResolver {
@@ -85,7 +104,14 @@ impl ErrorResolver {
         for entry in data.errors {
             mappings.insert((entry.category, entry.error_code), entry.fix_suggestion);
         }
-        Ok(Self { mappings })
+        let mut contract_mappings = HashMap::new();
+        for entry in data.contract_errors {
+            contract_mappings.insert((entry.contract.clone(), entry.code), entry);
+        }
+        Ok(Self {
+            mappings,
+            contract_mappings,
+        })
     }
 
     /// Static fallback map if TOML parsing fails.
@@ -133,7 +159,10 @@ impl ErrorResolver {
             mappings.insert((cat, code.to_string()), suggestion.to_string());
         }
 
-        Self { mappings }
+        Self {
+            mappings,
+            contract_mappings: HashMap::new(),
+        }
     }
 
     /// Lookup a suggestion using category and error code enums.
@@ -151,6 +180,31 @@ impl ErrorResolver {
     /// Get a reference to the internal mappings map.
     pub fn all_mappings(&self) -> &HashMap<(ErrorCategory, String), String> {
         &self.mappings
+    }
+
+    /// Lookup the entry for a contract-specific error code.
+    pub fn lookup_contract_error(&self, contract: &str, code: u32) -> Option<&ContractErrorEntry> {
+        self.contract_mappings.get(&(contract.to_string(), code))
+    }
+
+    /// Resolve a contract-specific error code to a fix suggestion, returning
+    /// [`UNKNOWN_CONTRACT_ERROR_FALLBACK`] when no entry exists.
+    pub fn resolve_contract_error(&self, contract: &str, code: u32) -> &str {
+        self.lookup_contract_error(contract, code)
+            .map(|e| e.fix_suggestion.as_str())
+            .unwrap_or(UNKNOWN_CONTRACT_ERROR_FALLBACK)
+    }
+
+    /// All codes known for `contract`, sorted ascending.
+    pub fn contract_error_codes(&self, contract: &str) -> Vec<u32> {
+        let mut codes: Vec<u32> = self
+            .contract_mappings
+            .keys()
+            .filter(|(c, _)| c == contract)
+            .map(|(_, code)| *code)
+            .collect();
+        codes.sort_unstable();
+        codes
     }
 }
 

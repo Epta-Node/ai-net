@@ -1,116 +1,154 @@
-//! # Data Types for Dispute Resolution
+//! Contract data types for the multi-phase dispute process.
 
-use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Symbol, Vec};
 
-/// Dispute status lifecycle.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum DisputeStatus {
     Filed = 0,
-    EvidenceSubmission = 1,
+    EvidencePhase = 1,
     Voting = 2,
     Resolved = 3,
-    Appealed = 4,
+    AppealPending = 4,
 }
 
-/// Side a juror can vote for.
+/// The two non-neutral voting rulings.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum VoteSide {
-    Client = 0,
-    Agent = 1,
+    SupportFiler = 0,
+    SupportAgent = 1,
 }
 
-/// On-chain representation of a dispute.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum DisputeOutcome {
+    SupportFiler = 0,
+    SupportAgent = 1,
+    Tie = 2,
+}
+
+impl DisputeOutcome {
+    pub fn code(&self) -> u32 {
+        match self {
+            Self::SupportFiler => 0,
+            Self::SupportAgent => 1,
+            Self::Tie => 2,
+        }
+    }
+}
+
+/// Persistent record keyed by `task_id`, which is also the dispute ID.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Dispute {
-    /// Unique dispute identifier.
-    pub dispute_id: Symbol,
-    /// Client who filed the dispute.
+    pub task_id: Symbol,
     pub filer: Address,
-    /// Agent being disputed against.
-    pub agent_id: Symbol,
-    /// Current dispute status.
+    pub agent_id: Address,
+    pub registry_address: Address,
+    pub registry_agent_id: Symbol,
+    pub reason: String,
     pub status: DisputeStatus,
-    /// Timestamp when dispute was filed.
     pub filed_at: u64,
-    /// Deadline for evidence submission (filed_at + 3 days).
     pub evidence_deadline: u64,
-    /// Deadline for voting (evidence_deadline + 2 days).
     pub voting_deadline: u64,
-    /// Deadline for appeals (voting_deadline + 2 days).
-    pub appeal_deadline: u64,
-    /// Selected juror addresses.
-    pub jurors: Vec<Address>,
-    /// Whether dispute has been appealed.
-    pub appealed: bool,
-    /// Resolution outcome: 0 = client wins, 1 = agent wins.
+    /// Bounded snapshot of the registered voter pool at filing time.
+    pub voters: Vec<Address>,
+    /// 0 = support filer, 1 = support agent, 2 = tie / insufficient votes.
     pub resolution: Option<u32>,
-    /// Bond amount slashed or awarded.
-    pub bond_amount: i128,
+    pub appeal_deadline: Option<u64>,
+    pub appealed: bool,
+    pub filer_votes: u32,
+    pub agent_votes: u32,
+    pub bond_slashed: i128,
+    pub filer_refund: i128,
+    pub agent_payment: i128,
 }
 
-/// Evidence submitted to a dispute.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Evidence {
-    /// Dispute this evidence belongs to.
     pub dispute_id: Symbol,
-    /// Submitter address.
+    pub evidence_id: u32,
     pub submitter: Address,
-    /// IPFS hash of evidence document.
     pub evidence_hash: BytesN<32>,
-    /// Timestamp of submission.
     pub submitted_at: u64,
 }
 
-/// Juror vote record.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JurorVote {
-    /// Dispute being voted on.
+pub struct Vote {
     pub dispute_id: Symbol,
-    /// Juror who cast the vote.
-    pub juror: Address,
-    /// Side voted for.
-    pub side: VoteSide,
-    /// Timestamp of vote.
+    pub voter: Address,
+    pub ruling: VoteSide,
     pub voted_at: u64,
 }
 
-/// Event: DisputeFiled
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisputeFiledEvent {
     pub dispute_id: Symbol,
     pub filer: Address,
-    pub agent_id: Symbol,
+    pub agent_id: Address,
 }
 
-/// Event: EvidenceSubmitted
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct EvidenceSubmittedEvent {
     pub dispute_id: Symbol,
+    pub evidence_id: u32,
     pub submitter: Address,
+    /// IPFS hash of the submitted evidence document.
+    pub evidence_hash: BytesN<32>,
+    /// Ledger timestamp of the submission.
+    pub submitted_at: u64,
+    /// 0-based index of this evidence item within the dispute.
+    pub evidence_index: u32,
 }
 
-/// Event: DisputeResolved
+/// Event: JurorsSet (issue #486)
+///
+/// Emitted after the admin replaces the active juror pool.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct JurorsSetEvent {
+    /// The new active juror pool.
+    pub jurors: Vec<Address>,
+    /// Ledger timestamp at which the pool was written.
+    pub set_at: u64,
+}
+
+/// Event: VoteCast (issue #486)
+///
+/// Emitted after a juror's vote is persisted, so indexers can reconstruct
+/// per-dispute tallies without reading every `JurorVote` record.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct VoteCastEvent {
+    pub dispute_id: Symbol,
+    pub voter: Address,
+    pub ruling: VoteSide,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisputeResolvedEvent {
     pub dispute_id: Symbol,
-    pub resolution: u32,
-    pub bond_amount: i128,
+    pub outcome: DisputeOutcome,
+    pub filer_votes: u32,
+    pub agent_votes: u32,
+    pub filer_refund: i128,
+    pub agent_payment: i128,
+    pub bond_slashed: i128,
 }
 
-/// Event: DisputeAppealed
+/// Event: AdminChanged
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
-pub struct DisputeAppealedEvent {
-    pub dispute_id: Symbol,
-    pub appellant: Address,
+pub struct AdminChangedEvent {
+    pub old_admin: Address,
+    pub new_admin: Address,
 }

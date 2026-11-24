@@ -1,10 +1,15 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { getRateLimiter } from "../middleware/rateLimit";
+import { adminAuthMiddleware } from "../middleware/auth";
 import { RATE_LIMIT_RULES } from "../rateLimitRules";
 import { ValidationError, NotFoundError, AppError } from "../../errors";
 
 export function createRateLimitRouter(): Router {
   const router = Router();
+
+  // Exposes per-key token bucket state, so it fails closed behind the same
+  // admin credential as every other operational endpoint.
+  router.use(adminAuthMiddleware);
 
   /**
    * @openapi
@@ -13,6 +18,8 @@ export function createRateLimitRouter(): Router {
    *     summary: Get rate limit status for a key
    *     description: Admin endpoint to view current token bucket usage for a given key and endpoint prefix.
    *     tags: [Admin, RateLimit]
+   *     security:
+   *       - adminApiKey: []
    *     parameters:
    *       - in: query
    *         name: key
@@ -50,7 +57,7 @@ export function createRateLimitRouter(): Router {
       const status = await limiter.getStatus(key, rule);
 
       if (!status) {
-        throw new NotFoundError("Rate limit key", key, correlationId);
+        throw new NotFoundError("Rate limit key", key, undefined, correlationId);
       }
 
       res.json({

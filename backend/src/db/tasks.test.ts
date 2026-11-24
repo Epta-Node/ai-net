@@ -5,7 +5,10 @@
  * All tests use an in-memory SQLite database.
  */
 import Database from "better-sqlite3";
-import { createTaskDb } from "./tasks";
+import { mkdtempSync, rmSync } from "fs";
+import os from "os";
+import path from "path";
+import { closeTaskDb, createTaskDb, getTaskPool } from "./tasks";
 import type { Task } from "../types/task";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -23,12 +26,30 @@ function makeDb(): Database.Database {
       updatedAt       TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS task_events (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      taskId    TEXT    NOT NULL,
-      type      TEXT    NOT NULL,
-      nodeId    TEXT,
-      payload   TEXT,
-      timestamp TEXT    NOT NULL
+      global_seq  INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_seq    INTEGER NOT NULL,
+      version     INTEGER NOT NULL DEFAULT 1,
+      type        TEXT    NOT NULL,
+      task_id     TEXT    NOT NULL,
+      node_id     TEXT,
+      occurred_at TEXT    NOT NULL,
+      payload     TEXT,
+      UNIQUE (task_id, task_seq)
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_task_seq
+      ON task_events (task_id, task_seq ASC);
+    CREATE TABLE IF NOT EXISTS quality_scores (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      taskId       TEXT    NOT NULL,
+      nodeId       TEXT    NOT NULL,
+      agentId      TEXT,
+      agentType    TEXT    NOT NULL,
+      score        REAL    NOT NULL,
+      completeness REAL    NOT NULL,
+      relevance    REAL    NOT NULL,
+      format       REAL    NOT NULL,
+      needsReview  INTEGER DEFAULT 0,
+      timestamp    TEXT    NOT NULL
     );
   `);
   return db;
@@ -217,7 +238,7 @@ describe("createTaskDb — insertEvent / getEventHistory", () => {
     db.insertEvent({ taskId: "task_001", type: "node_started", nodeId: "n1", timestamp: ts });
     db.insertEvent({ taskId: "task_001", type: "node_completed", nodeId: "n1", timestamp: ts });
 
-    const events = db.getEventHistory("task_001");
+    const events = db.getEventHistory("task_001").items;
     expect(events).toHaveLength(2);
     expect(events[0].type).toBe("node_started");
     expect(events[1].type).toBe("node_completed");
@@ -230,14 +251,14 @@ describe("createTaskDb — insertEvent / getEventHistory", () => {
     const payload = { result: "done", score: 0.9 };
     db.insertEvent({ taskId: "task_001", type: "node_completed", nodeId: "n1", payload, timestamp: new Date().toISOString() });
 
-    const [event] = db.getEventHistory("task_001");
+    const [event] = db.getEventHistory("task_001").items;
     expect(event.payload).toEqual(payload);
   });
 
   it("returns empty array for a task with no events", () => {
     const db = createTaskDb(makeDb());
     db.insert(makeTask());
-    expect(db.getEventHistory("task_001")).toHaveLength(0);
+    expect(db.getEventHistory("task_001").items).toHaveLength(0);
   });
 
   it("handles null nodeId gracefully", () => {
@@ -245,7 +266,7 @@ describe("createTaskDb — insertEvent / getEventHistory", () => {
     db.insert(makeTask());
 
     db.insertEvent({ taskId: "task_001", type: "task_started", timestamp: new Date().toISOString() });
-    const events = db.getEventHistory("task_001");
+    const events = db.getEventHistory("task_001").items;
     expect(events[0].nodeId).toBeUndefined();
   });
 });
@@ -292,5 +313,28 @@ describe("createTaskDb — failRunningTasks", () => {
   it("is safe to call when no running tasks exist", () => {
     const db = createTaskDb(makeDb());
     expect(() => db.failRunningTasks()).not.toThrow();
+  });
+});
+
+describe("closeTaskDb", () => {
+  it("drains active reads and rejects pool recreation while closing", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "ai-net-task-pool-"));
+    const dbPath = path.join(directory, "tasks.db");
+    const pool = getTaskPool(dbPath);
+    let finishRead!: () => void;
+    const readPromise = pool.read(async () => {
+      await new Promise<void>((resolve) => { finishRead = resolve; });
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const closePromise = closeTaskDb();
+    expect(closePromise).toBeInstanceOf(Promise);
+    expect(() => getTaskPool(dbPath)).toThrow("Task database is closing");
+
+    finishRead();
+    await Promise.all([readPromise, closePromise]);
+    expect(getTaskPool(dbPath)).not.toBe(pool);
+    await closeTaskDb();
+    rmSync(directory, { recursive: true, force: true });
   });
 });

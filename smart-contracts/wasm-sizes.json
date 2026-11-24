@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "target": "wasm32v1-none",
+  "tolerance_percent": 5,
+  "contracts": {
+    "agent_registry": 227577,
+    "error-registry": 28823,
+    "agent-bidding": 77210,
+    "agent-marketplace": 45764,
+    "task-store": 52334,
+    "dispute-resolution": 49805,
+    "upgrade-manager": 55344
+  }
+}

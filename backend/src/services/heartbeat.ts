@@ -10,6 +10,17 @@ export interface HeartbeatServiceOptions {
   staleThresholdMinutes?: number;
   /** Hours threshold after which offline agents are permanently deleted (default: 24) */
   offlineThresholdHours?: number;
+  /**
+   * Run the stale→offline sweep (default: true).
+   *
+   * Set false when a watchdog owns liveness detection. The sweep flips status
+   * without recording *why* or alerting, and it does so on a shorter timer than
+   * the watchdog's grace period — so leaving both enabled means an agent can go
+   * offline here, never acquire a grace clock, and then linger unalerted until
+   * the 24h delete. That is precisely the "dead agents silently linger" failure
+   * the watchdog exists to remove.
+   */
+  enableMarkStale?: boolean;
   /** Custom AgentDb instance for testing */
   db?: AgentDb;
 }
@@ -23,6 +34,7 @@ export function createHeartbeatService(options: HeartbeatServiceOptions = {}): H
   const intervalMs = options.intervalMs ?? 300_000;
   const staleThresholdMinutes = options.staleThresholdMinutes ?? 5;
   const offlineThresholdHours = options.offlineThresholdHours ?? 24;
+  const enableMarkStale = options.enableMarkStale ?? true;
   let timer: NodeJS.Timeout | null = null;
 
   const getDb = () => options.db ?? createAgentDb(getAgentDb());
@@ -30,7 +42,9 @@ export function createHeartbeatService(options: HeartbeatServiceOptions = {}): H
   function runCleanup() {
     try {
       const db = getDb();
-      const markedOffline = db.markStaleAgents(staleThresholdMinutes);
+      const markedOffline = enableMarkStale ? db.markStaleAgents(staleThresholdMinutes) : 0;
+      // The deletion backstop stays on even when the watchdog owns detection:
+      // it is the guarantee that a row can never survive forever.
       const deleted = db.deleteOfflineAgents(offlineThresholdHours);
 
       if (markedOffline > 0 || deleted > 0) {

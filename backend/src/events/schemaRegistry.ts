@@ -49,6 +49,13 @@ const baseEventSchema = z.object({
   version: z.number().int().min(1),
   globalSeq: z.number().int().optional(),
   taskSeq: z.number().int().optional(),
+  meta: z
+    .object({
+      version: z.number().int().positive(),
+      contract: z.string().min(1),
+      ledgerTimestamp: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -84,9 +91,11 @@ const v1PaymentReleasedPayload = z.object({
 
 const v1TaskCompletedPayload = z.object({}).optional();
 
-const v1TaskFailedPayload = z.object({
-  error: z.string().optional(),
-}).optional();
+const v1TaskFailedPayload = z
+  .object({
+    error: z.string().optional(),
+  })
+  .optional();
 
 // ---------------------------------------------------------------------------
 // Version 2 payload schemas — new fields added behind version bump
@@ -128,15 +137,58 @@ const v2PaymentReleasedPayload = v1PaymentReleasedPayload.extend({
   ledgerSequence: z.number().int().positive().optional(),
 });
 
-const v2TaskCompletedPayload = z.object({
-  /** Total duration from task creation to completion in milliseconds. */
-  durationMs: z.number().int().nonnegative().optional(),
-}).optional();
+const v2TaskCompletedPayload = z
+  .object({
+    /** Total duration from task creation to completion in milliseconds. */
+    durationMs: z.number().int().nonnegative().optional(),
+  })
+  .optional();
 
 const v2TaskFailedPayload = z.object({
   error: z.string().optional(),
   /** The stage at which the task failed (e.g. 'dispatch', 'execution'). */
   failedStage: z.string().optional(),
+});
+
+/**
+ * `ReconciliationEvent` (issue #496) — the payload shape is identical in v1 and
+ * v2: it was introduced alongside schema v2 and every optional field defaults to
+ * absent rather than being back-filled.
+ */
+const reconciliationEventPayload = z.object({
+  runId: z.string().min(1),
+  kind: z.enum(['drift', 'remediation']),
+  driftType: z.enum([
+    'orphaned_locked',
+    'missing_release_tx',
+    'release_unconfirmed',
+    'expired_escrow',
+    'missing_local',
+    'amount_mismatch',
+  ]),
+  balanceId: z.string().min(1),
+  taskId: z.string().optional(),
+  nodeId: z.string().optional(),
+  severity: z.enum(['info', 'warning', 'critical']).optional(),
+  description: z.string(),
+  remediation: z
+    .object({
+      action: z.string(),
+      status: z.enum(['remediated', 'skipped', 'failed', 'manual_review']),
+      txHash: z.string().optional(),
+      reason: z.string().optional(),
+      at: z.string(),
+    })
+    .optional(),
+  previousStatus: z.string().optional(),
+  newStatus: z.string().optional(),
+});
+
+/** `agent.evicted` (#804). Identical in every schema version it is written under. */
+const agentEvictedPayload = z.object({
+  agentId: z.string().min(1),
+  reason: z.literal('heartbeat_timeout'),
+  lastSeenAt: z.string().nullable(),
 });
 
 // ---------------------------------------------------------------------------
@@ -157,6 +209,8 @@ const schemasByVersion: Record<number, EventPayloadSchemas> = {
     PaymentReleased: v1PaymentReleasedPayload,
     TaskCompleted: v1TaskCompletedPayload,
     TaskFailed: v1TaskFailedPayload,
+    ReconciliationEvent: reconciliationEventPayload,
+    'agent.evicted': agentEvictedPayload,
   },
   2: {
     TaskCreated: v2TaskCreatedPayload,
@@ -167,6 +221,8 @@ const schemasByVersion: Record<number, EventPayloadSchemas> = {
     PaymentReleased: v2PaymentReleasedPayload,
     TaskCompleted: v2TaskCompletedPayload,
     TaskFailed: v2TaskFailedPayload,
+    ReconciliationEvent: reconciliationEventPayload,
+    'agent.evicted': agentEvictedPayload,
   },
 };
 
@@ -187,28 +243,28 @@ export interface ValidationResult {
  */
 export function validateEvent(event: {
   type: string;
-  version: number;
+  version?: number;
   payload?: unknown;
   [key: string]: unknown;
 }): ValidationResult {
-  const { type, version } = event;
+  const version = event.version ?? 1;
+  const type = event.type;
 
   // Check that the version is known
   const versionSchemas = schemasByVersion[version];
   if (!versionSchemas) {
     return {
       valid: false,
-      errors: [`Unknown event version: ${version}. Known versions: ${Object.keys(schemasByVersion).join(', ')}`],
+      errors: [
+        `Unknown event version: ${version}. Known versions: ${Object.keys(schemasByVersion).join(', ')}`,
+      ],
     };
   }
 
-  // Check that the event type is known
+  // Check that the event type is known; un-modeled event types (e.g. system events) are allowed
   const payloadSchema = versionSchemas[type as EventType];
   if (!payloadSchema) {
-    return {
-      valid: false,
-      errors: [`Unknown event type: ${type}`],
-    };
+    return { valid: true, errors: [] };
   }
 
   // Validate the payload
@@ -218,7 +274,7 @@ export function validateEvent(event: {
   }
 
   const errors = result.error.issues.map(
-    (issue) => `${type}.payload.${issue.path.join('.')}: ${issue.message}`,
+    (issue) => `${type}.payload.${issue.path.join('.')}: ${issue.message}`
   );
 
   return { valid: false, errors };
@@ -236,12 +292,10 @@ export function validateEvent(event: {
  */
 export function migrateEvent<T extends { version: number; payload?: unknown; type?: string }>(
   event: T,
-  targetVersion: number,
+  targetVersion: number
 ): T {
   if (targetVersion < event.version) {
-    throw new Error(
-      `Cannot downgrade event from version ${event.version} to ${targetVersion}`,
-    );
+    throw new Error(`Cannot downgrade event from version ${event.version} to ${targetVersion}`);
   }
 
   if (targetVersion === event.version) {
@@ -255,7 +309,7 @@ export function migrateEvent<T extends { version: number; payload?: unknown; typ
 
   log.debug(
     { fromVersion: event.version, toVersion: targetVersion, type: event.type },
-    'event migrated to newer schema version',
+    'event migrated to newer schema version'
   );
 
   return migrated;
@@ -265,10 +319,7 @@ export function migrateEvent<T extends { version: number; payload?: unknown; typ
  * Get the Zod schema for a specific event type and version.
  * Returns undefined if the combination is not registered.
  */
-export function getSchema(
-  eventType: EventType,
-  version: number,
-): z.ZodType<any> | undefined {
+export function getSchema(eventType: EventType, version: number): z.ZodType<any> | undefined {
   return schemasByVersion[version]?.[eventType];
 }
 
@@ -276,7 +327,9 @@ export function getSchema(
  * Get all registered versions for an event type.
  */
 export function getRegisteredVersions(): number[] {
-  return Object.keys(schemasByVersion).map(Number).sort((a, b) => a - b);
+  return Object.keys(schemasByVersion)
+    .map(Number)
+    .sort((a, b) => a - b);
 }
 
 /**

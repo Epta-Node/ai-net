@@ -5,20 +5,24 @@ import { getTaskDb, createTaskDb } from "../../db/tasks";
 import { decompose } from "../../coordinator";
 import type { Task } from "../../types/task";
 import { executeDAG, type DispatchFn, type PaymentReleaseFn } from "../../coordinator/coordinator";
-import { createTask, getTask } from "../../coordinator/taskStore";
+import { createTask, getTask, abortTask } from "../../coordinator/taskStore";
 import { createLogger } from "../../utils/logger";
 import { validate } from "../middleware/validate";
 import { rateLimitMiddleware } from "../middleware/rateLimit";
 import { idempotencyMiddleware } from "../middleware/idempotency";
-import { ValidationError, NotFoundError, AppError, RateLimitError } from "../../errors";
+import { ValidationError, NotFoundError, AppError, ForbiddenError, ConflictError, UnauthorizedError } from "../../errors";
+import { assertDailyTaskQuota } from "../../services/quota/dailyQuota";
+import { walletQuotaCheck } from "../middleware/quotaCheck";
+import { getWalletQuotaStatus } from "../../services/quota/walletQuota";
 
 import { getGlobalJobQueue, type JobQueue, type JobPriority } from "../../queue";
+import { config } from "../../config";
 
 // ── Validation config ────────────────────────────────────────────────────────
 // Read at module load time so the value is stable for the lifetime of the
 // process. Tests that need a different value should set process.env before
 // importing (or use jest.resetModules() + re-require).
-const DAILY_TASK_LIMIT = Number(process.env.DAILY_TASK_LIMIT_PER_WALLET ?? 100);
+const DAILY_TASK_LIMIT = config.DAILY_TASK_LIMIT_PER_WALLET;
 
 // ── Schemas ──────────────────────────────────────────────────────────────────
 
@@ -130,7 +134,7 @@ export function createTasksRouter(
    *               $ref: '#/components/schemas/InternalServerError'
    */
   // POST /api/tasks — idempotent, rate-limited, then Zod-validated
-  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), (req: Request, res: Response, next: NextFunction): void => {
+  tasksRouter.post("/", idempotencyMiddleware, rateLimitMiddleware, validate(createTaskSchema), walletQuotaCheck, (req: Request, res: Response, next: NextFunction): void => {
     try {
       const { prompt, priority } = req.body as z.infer<typeof createTaskSchema>;
       // Body first, then the header (both spellings accepted), then "anonymous".
@@ -140,20 +144,11 @@ export function createTasksRouter(
         "anonymous";
 
       // ── Per-wallet daily quota ───────────────────────────────────────────────
-      const dailyTaskLimit = getConfig().DAILY_TASK_LIMIT_PER_WALLET;
-      if (dailyTaskLimit > 0 && walletPublicKey !== "anonymous") {
-        const db = createTaskDb(getTaskDb());
-        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        const { total } = db.list(walletPublicKey, 1, 1, { createdAfter: since });
-        if (total >= dailyTaskLimit) {
-          const correlationId = res.locals.correlationId as string | undefined;
-          throw new RateLimitError(
-            `Daily task limit reached (max ${dailyTaskLimit} per 24 hours)`,
-            { limit: dailyTaskLimit, window: "24h" },
-            correlationId,
-          );
-        }
-      }
+      // Throws a 429 RateLimitError and counts the rejection in the quota
+      // metrics when the wallet has spent its DAILY_TASK_LIMIT_PER_WALLET.
+      assertDailyTaskQuota(walletPublicKey, {
+        correlationId: res.locals.correlationId as string | undefined,
+      });
 
       const taskId = `task_${nanoid(12)}`;
       const dag = decompose(taskId, prompt);
@@ -292,6 +287,65 @@ export function createTasksRouter(
 
   /**
    * @openapi
+   * /api/tasks/quota:
+   *   get:
+   *     summary: Get the calling wallet's daily task quota
+   *     description: >
+   *       Returns the number of task submissions the wallet made in the trailing
+   *       24 hours against `MAX_DAILY_TASKS_PER_WALLET`, plus the UTC-midnight
+   *       reset time. Requires the `walletpublickey` header.
+   *     tags: [Tasks]
+   *     security:
+   *       - WalletAuth: []
+   *     responses:
+   *       200:
+   *         description: Current quota usage for the wallet
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   *               required: [used, limit, resetAt]
+   *               properties:
+   *                 used:
+   *                   type: integer
+   *                   example: 3
+   *                 limit:
+   *                   type: integer
+   *                   example: 50
+   *                 resetAt:
+   *                   type: string
+   *                   format: date-time
+   *       401:
+   *         description: Missing wallet identity
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/UnauthorizedError'
+   *       429:
+   *         description: Quota exhausted (see `Retry-After`)
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/RateLimitError'
+   */
+  tasksRouter.get("/quota", (req: Request, res: Response, next: NextFunction): void => {
+    try {
+      const wallet = (req.headers["walletpublickey"] as string | undefined)?.trim();
+      if (!wallet) {
+        throw new UnauthorizedError(
+          "walletpublickey header is required",
+          undefined,
+          res.locals.correlationId as string | undefined,
+        );
+      }
+      res.json(getWalletQuotaStatus(wallet));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  /**
+   * @openapi
    * /api/tasks/{id}:
    *   get:
    *     summary: Get task details by ID
@@ -370,8 +424,13 @@ export function createTasksRouter(
    * @openapi
    * /api/tasks/{id}:
    *   delete:
-   *     summary: Cancel a queued task
-   *     description: Cancels a queued task before execution begins. If the task is already running or completed, returns 409 Conflict.
+   *     summary: Cancel a task
+   *     description: >
+   *       Cancels a queued task immediately, or initiates async cancellation for
+   *       a running task. Returns 200 with `status: "cancelled"` for queued tasks
+   *       and `status: "cancelling"` for running tasks. A `task_cancelled`
+   *       WebSocket event is emitted within 1 second of aborting a running task.
+   *       Returns 409 for tasks that are already completed or failed.
    *     tags: [Tasks]
    *     security:
    *       - WalletAuth: []
@@ -383,14 +442,14 @@ export function createTasksRouter(
    *         example: "task_ab12cd34ef56"
    *     responses:
    *       200:
-   *         description: Task cancelled successfully
+   *         description: Task cancelled (or cancellation initiated)
    *         content:
    *           application/json:
    *             schema:
    *               type: object
    *               properties:
    *                 taskId: { type: string, example: "task_ab12cd34ef56" }
-   *                 status: { type: string, enum: [cancelled], example: "cancelled" }
+   *                 status: { type: string, enum: [cancelled, cancelling], example: "cancelled" }
    *       403:
    *         description: Not authorized to cancel this task
    *         content:
@@ -404,13 +463,13 @@ export function createTasksRouter(
    *             schema:
    *               $ref: '#/components/schemas/NotFoundError'
    *       409:
-   *         description: Cannot cancel task in current status (e.g. running or completed)
+   *         description: Cannot cancel task in current status (e.g. completed or failed)
    *         content:
    *           application/json:
    *             schema:
    *               $ref: '#/components/schemas/ErrorResponse'
    *             example:
-   *               error: "Cannot cancel task in 'running' status"
+   *               error: "Cannot cancel task in 'completed' status"
    */
   // DELETE /api/tasks/:id
   tasksRouter.delete("/:id", (req: Request, res: Response, next: NextFunction): void => {
@@ -427,16 +486,28 @@ export function createTasksRouter(
         throw new ForbiddenError("Not authorized to cancel this task", undefined, correlationId);
       }
 
-      if (task.status !== "queued") {
-        throw new ConflictError(
-          `Cannot cancel task in '${task.status}' status`,
-          { currentStatus: task.status },
-          correlationId,
-        );
+      if (task.status === "queued") {
+        // Simple case: not yet running — cancel synchronously.
+        db.updateStatus(req.params.id, "cancelled");
+        res.json({ taskId: req.params.id, status: "cancelled" });
+        return;
       }
 
-      db.updateStatus(req.params.id, "cancelled");
-      res.json({ taskId: req.params.id, status: "cancelled" });
+      if (task.status === "running") {
+        // In-flight case: signal the coordinator to abort, then return
+        // immediately.  The coordinator will finish cancellation asynchronously
+        // and emit a `task_cancelled` WS event.
+        abortTask(req.params.id);
+        db.updateStatus(req.params.id, "cancelled");
+        res.json({ taskId: req.params.id, status: "cancelling" });
+        return;
+      }
+
+      throw new ConflictError(
+        `Cannot cancel task in '${task.status}' status`,
+        { currentStatus: task.status },
+        correlationId,
+      );
     } catch (err) {
       next(err);
     }

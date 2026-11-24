@@ -11,8 +11,9 @@ use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger as _},
-    Address, BytesN, Env, FromVal, IntoVal, Map, String, Symbol,
+    Address, BytesN, Env, FromVal, IntoVal, Map, String, Symbol, TryIntoVal, Val, Vec,
 };
+use std::string::ToString;
 
 /// Creates a fresh in-memory test environment with the contract registered.
 fn setup() -> (Env, AgentRegistryContractClient<'static>) {
@@ -271,6 +272,18 @@ fn set_admin_changes_admin() {
     let new_admin = Address::generate(&env);
     client.set_admin(&new_admin);
     assert_eq!(client.get_admin(), Some(new_admin));
+}
+
+#[test]
+fn clear_multisig_config_negative_auth() {
+    let (env, client, admin) = setup_with_admin();
+    let admins = soroban_sdk::vec![&env, admin.clone()];
+    client.set_multisig_config(&admin, &admins, &1, &0);
+    assert!(client.get_multisig_config().is_some());
+
+    let intruder = Address::generate(&env);
+    env.mock_auths(&[]);
+    assert!(client.try_clear_multisig_config(&intruder).is_err());
 }
 
 #[test]
@@ -1146,7 +1159,7 @@ fn slash_bond_reduces_bond_amount() {
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "slashme", "research", owner));
 
-    client.slash_bond(&Symbol::new(&env, "slashme"), &10_000_000_i128);
+    client.slash_bond_amount(&Symbol::new(&env, "slashme"), &10_000_000_i128);
 
     let agents = client.lookup_agents(&Symbol::new(&env, "research"));
     let remaining = agents.get(0).unwrap().bond_amount;
@@ -1159,7 +1172,7 @@ fn slash_bond_floors_at_zero() {
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "floor_agent", "research", owner));
 
-    client.slash_bond(
+    client.slash_bond_amount(
         &Symbol::new(&env, "floor_agent"),
         &(DEFAULT_MIN_BOND_STROOPS + 999_i128),
     );
@@ -1174,11 +1187,11 @@ fn double_slash_does_not_go_negative() {
     let owner = Address::generate(&env);
     client.register_agent(&make_record(&env, "double_slash", "research", owner));
 
-    client.slash_bond(
+    client.slash_bond_amount(
         &Symbol::new(&env, "double_slash"),
         &(DEFAULT_MIN_BOND_STROOPS + 1_i128),
     );
-    client.slash_bond(&Symbol::new(&env, "double_slash"), &1_000_000_i128);
+    client.slash_bond_amount(&Symbol::new(&env, "double_slash"), &1_000_000_i128);
 
     let agents = client.lookup_agents(&Symbol::new(&env, "research"));
     assert_eq!(agents.get(0).unwrap().bond_amount, 0);
@@ -1188,7 +1201,7 @@ fn double_slash_does_not_go_negative() {
 fn slash_bond_on_missing_agent_returns_not_found() {
     let (_env, client, _admin) = setup_with_admin();
     assert_eq!(
-        client.try_slash_bond(&Symbol::new(&_env, "ghost"), &1_000_i128),
+        client.try_slash_bond_amount(&Symbol::new(&_env, "ghost"), &1_000_i128),
         Err(Ok(Error::NotFound))
     );
 }
@@ -1206,7 +1219,7 @@ fn slash_bond_requires_admin() {
     client.register_agent(&make_record(&env, "protected", "research", owner));
 
     env.mock_auths(&[]);
-    let result = client.try_slash_bond(&Symbol::new(&env, "protected"), &1_000_i128);
+    let result = client.try_slash_bond_amount(&Symbol::new(&env, "protected"), &1_000_i128);
     assert!(result.is_err());
 }
 
@@ -1710,6 +1723,61 @@ fn record_task_completion_success() {
 }
 
 #[test]
+fn authorized_task_outcome_updates_reputation_once_and_emits_event() {
+    let (env, client, admin) = setup_with_admin();
+    let reporter = Address::generate(&env);
+    let agent_id = Symbol::new(&env, "outcome_agent");
+    client.register_agent(&make_record(
+        &env,
+        "outcome_agent",
+        "coding",
+        Address::generate(&env),
+    ));
+    client.add_authorized_caller(&reporter);
+    let task_id = Symbol::new(&env, "task_once");
+    let previous_events = env.events().all().len();
+
+    client.record_task_outcome(&reporter, &agent_id, &true, &25_000i32, &task_id);
+    let rep = client.get_reputation(&agent_id);
+    assert_eq!(rep.score, 25_000);
+    assert!(env.events().all().len() > previous_events);
+    client.record_task_outcome(
+        &reporter,
+        &agent_id,
+        &false,
+        &-10_000i32,
+        &Symbol::new(&env, "task_failure"),
+    );
+    assert_eq!(
+        client.get_reputation(&agent_id).score,
+        rep.score - 10_000
+    );
+    assert!(client
+        .try_record_task_outcome(&reporter, &agent_id, &false, &-10_000i32, &task_id)
+        .is_err());
+    assert_eq!(client.get_reputation(&agent_id).score, rep.score);
+    assert_eq!(client.is_authorized_caller(&reporter), true);
+    client.remove_authorized_caller(&reporter);
+    assert_eq!(client.is_authorized_caller(&reporter), false);
+    let _ = admin;
+}
+
+#[test]
+fn task_outcome_rejects_unlisted_reporter() {
+    let (env, client, _) = setup_with_admin();
+    let reporter = Address::generate(&env);
+    assert!(client
+        .try_record_task_outcome(
+            &reporter,
+            &Symbol::new(&env, "agent"),
+            &true,
+            &1i32,
+            &Symbol::new(&env, "task")
+        )
+        .is_err());
+}
+
+#[test]
 fn record_task_completion_failure() {
     let (env, client) = setup();
     let agent_id = Symbol::new(&env, "agent1");
@@ -2151,6 +2219,58 @@ fn test_get_agents_batch_registered_pagination() {
     assert_eq!(page2.total_count, 4);
 }
 
+#[test]
+fn test_list_agents_pagination_and_total_count() {
+    let (env, client) = setup();
+    let owner = Address::generate(&env);
+
+    // Empty registry check
+    assert_eq!(client.get_total_agents(), 0);
+    let empty_page = client.list_agents(&None, &None);
+    assert_eq!(empty_page.agents.len(), 0);
+    assert_eq!(empty_page.next_cursor, None);
+    assert_eq!(empty_page.total_count, 0);
+
+    // Register 5 agents
+    for i in 1..=5 {
+        let name = match i {
+            1 => "pag_agent_1",
+            2 => "pag_agent_2",
+            3 => "pag_agent_3",
+            4 => "pag_agent_4",
+            _ => "pag_agent_5",
+        };
+        client.register_agent(&make_record(&env, name, "coding", owner.clone()));
+    }
+
+    // Verify total count function
+    assert_eq!(client.get_total_agents(), 5);
+
+    // Page 1: limit 2
+    let page1 = client.list_agents(&Some(0), &Some(2));
+    assert_eq!(page1.agents.len(), 2);
+    assert_eq!(page1.next_cursor, Some(2));
+    assert_eq!(page1.total_count, 5);
+
+    // Page 2: limit 2
+    let page2 = client.list_agents(&page1.next_cursor, &Some(2));
+    assert_eq!(page2.agents.len(), 2);
+    assert_eq!(page2.next_cursor, Some(4));
+    assert_eq!(page2.total_count, 5);
+
+    // Page 3: limit 2 (last item)
+    let page3 = client.list_agents(&page2.next_cursor, &Some(2));
+    assert_eq!(page3.agents.len(), 1);
+    assert_eq!(page3.next_cursor, None);
+    assert_eq!(page3.total_count, 5);
+
+    // Out of bounds cursor
+    let page_oob = client.list_agents(&Some(100), &Some(10));
+    assert_eq!(page_oob.agents.len(), 0);
+    assert_eq!(page_oob.next_cursor, None);
+    assert_eq!(page_oob.total_count, 5);
+}
+
 // ─── error_mapper tests ─────────────────────────────────────────────────────
 
 #[test]
@@ -2163,6 +2283,318 @@ fn error_mapper_returns_common_codes_for_reserved_range() {
         assert!(result.is_some(), "error_mapper({raw}) should return Some");
         assert_eq!(result.unwrap() as u32, raw);
     }
+}
+
+// ── Event emission coverage (issue #486) ────────────────────────────────────
+
+/// Assert that the last published event carries `expected_topics` and decode
+/// its data payload as `T`. Because every mutation emits strictly after its
+/// write, "last event after the mutating call" is a call-order assertion: the
+/// event cannot have fired before the storage write it describes.
+fn assert_last_event<T: FromVal<Env, Val>>(env: &Env, expected_topics: (Symbol, Symbol)) -> T {
+    find_event::<T>(env, expected_topics).expect("expected an event with the requested topic")
+}
+
+/// Find the (single) event with `expected_topics` and decode its payload.
+///
+/// Several registry mutations follow their state write with an
+/// `audit::record` trail event, so "the last event" is not always the
+/// mutation's own event; topic-scoped lookup is the stable selector.
+/// Because the mutation's event is published strictly after the storage
+/// write it describes, the presence of the event proves the write completed.
+fn find_event<T: FromVal<Env, Val>>(env: &Env, expected_topics: (Symbol, Symbol)) -> Option<T> {
+    let events = env.events().all();
+    let mut found: Option<T> = None;
+    let mut matches = 0u32;
+    for idx in 0..events.len() {
+        let (_, topics, data) = events.get(idx).unwrap();
+        if topics.len() != 2 {
+            continue;
+        }
+        // Normalise both sides through their string form: symbol_short! and
+        // Symbol::from_val of the same text must compare equal, and doing it
+        // via strings sidesteps any short-symbol representation differences.
+        let t0 = Symbol::from_val(env, &topics.get(0).unwrap());
+        let t1 = Symbol::from_val(env, &topics.get(1).unwrap());
+        let want0 = ToString::to_string(&expected_topics.0);
+        let want1 = ToString::to_string(&expected_topics.1);
+        if ToString::to_string(&t0) == want0 && ToString::to_string(&t1) == want1 {
+            matches += 1;
+            found = Some(data.into_val(env));
+        }
+    }
+    assert_eq!(matches, 1, "expected exactly one matching event");
+    found
+}
+
+#[test]
+fn freeze_agent_emits_typed_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+
+    client.freeze_agent(&Symbol::new(&env, "agt"));
+
+    let payload: AgentFrozen =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("frz_upd")));
+    assert_eq!(payload.agent_id, Symbol::new(&env, "agt"));
+    assert!(payload.frozen);
+    // State must already be frozen once the event has been observed.
+    assert!(client.is_agent_frozen(&Symbol::new(&env, "agt")));
+}
+
+#[test]
+fn unfreeze_agent_emits_resumed_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+    let agent = Symbol::new(&env, "agt");
+    client.freeze_agent(&agent);
+    let _ = env.events().all(); // drain
+
+    client.unfreeze_agent(&agent);
+
+    let payload: AgentResumed =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("frz_upd")));
+    assert_eq!(payload.agent_id, agent);
+    assert!(!payload.frozen, "resume event must carry frozen=false");
+    // State must already be unfrozen once the event has been observed.
+    assert!(!client.is_agent_frozen(&agent));
+}
+
+#[test]
+fn set_multisig_config_emits_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+    let caller = client.get_admin().unwrap();
+    let admins = soroban_sdk::vec![&env, caller.clone(), Address::generate(&env)];
+
+    client.set_multisig_config(&caller, &admins, &2, &60u64);
+
+    let payload: MultisigConfigSetEvent =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("msig_set")));
+    assert_eq!(payload.threshold, 2);
+    assert_eq!(payload.timelock_delay, 60);
+}
+
+#[test]
+fn set_min_bond_emits_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+    let before = client.get_min_bond();
+
+    client.set_min_bond(&(before + 1));
+
+    let payload: MinBondSetEvent =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("minbond")));
+    assert_eq!(payload.amount_stroops, before + 1);
+    // New minimum must already be readable once the event has been observed.
+    assert_eq!(client.get_min_bond(), before + 1);
+}
+
+#[test]
+fn set_error_ttl_emits_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+
+    client.set_error_ttl(&1_234);
+
+    let payload: ErrorTtlSetEvent =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("errttl")));
+    assert_eq!(payload.ttl_ledgers, 1_234);
+    assert_eq!(client.get_error_ttl(), 1_234);
+}
+
+#[test]
+fn cleanup_expired_errors_emits_event_when_something_removed() {
+    let (env, client, _admin) = setup_with_admin();
+    let reporter = Address::generate(&env);
+    let error_id = BytesN::from_array(&env, &[7u8; 32]);
+    client.set_error_ttl(&0); // expire immediately
+    client.report_error(&error_id, &reporter, &String::from_str(&env, "boom"));
+    env.ledger().with_mut(|l| l.sequence_number += 1);
+    let _ = env.events().all(); // drain
+
+    let removed = client.cleanup_expired_errors(&soroban_sdk::vec![&env, error_id.clone()]);
+
+    assert_eq!(removed, 1);
+    let payload: ErrorsCleanedEvent =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("errcln")));
+    assert_eq!(payload.removed, 1);
+}
+
+#[test]
+fn set_gas_config_emits_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+    let mut config = client.get_gas_config();
+    config.register_agent += 1;
+
+    client.set_gas_config(&config);
+
+    let payload: GasConfigSetEvent =
+        assert_last_event(&env, (symbol_short!("registry"), symbol_short!("gas_cfg")));
+    assert_eq!(payload.register_agent, config.register_agent);
+    assert_eq!(
+        client.get_gas_config().register_agent,
+        config.register_agent
+    );
+}
+
+#[test]
+fn set_storage_config_emits_event_after_write() {
+    let (env, client, _admin) = setup_with_admin();
+    let config = StorageConfig {
+        max_agents: 10,
+        max_per_capability: 5,
+    };
+
+    client.set_storage_config(&config);
+
+    let payload: StorageConfigSetEvent = assert_last_event(
+        &env,
+        (symbol_short!("registry"), symbol_short!("store_cfg")),
+    );
+    assert_eq!(payload.max_agents, 10);
+    assert_eq!(payload.max_per_capability, 5);
+    assert_eq!(client.get_storage_config().max_agents, 10);
+}
+
+#[test]
+fn slash_bond_event_fires_after_bond_is_reduced() {
+    let (env, client, _admin) = setup_with_admin();
+    let owner = Address::generate(&env);
+    let agent_id = Symbol::new(&env, "bonded");
+    client.register_agent(&make_record(&env, "bonded", "coding", owner));
+    let _ = env.events().all(); // drain
+
+    client.slash_bond_amount(&agent_id, &1_000_000i128);
+
+    // The reduced bond must already be observable when the event is read.
+    let payload: events::BondSlashed = assert_last_event(
+        &env,
+        (symbol_short!("registry"), symbol_short!("bond_slsh")),
+    );
+    assert_eq!(payload.penalty_stroops, 1_000_000);
+    assert_eq!(
+        payload.remaining_stroops,
+        DEFAULT_MIN_BOND_STROOPS - 1_000_000
+    );
+}
+
+// ── Roundtrip serialize/deserialize tests for new event structs ─────────────
+
+#[test]
+fn agent_frozen_and_resumed_roundtrip() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let original = AgentFrozen {
+        agent_id: Symbol::new(&env, "agt"),
+        frozen: true,
+        admin: admin.clone(),
+        frozen_at_ledger: 42,
+    };
+    let decoded: AgentFrozen =
+        <AgentFrozen as IntoVal<Env, Val>>::into_val(&original.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(original, decoded);
+
+    let resumed = AgentResumed {
+        agent_id: Symbol::new(&env, "agt"),
+        frozen: false,
+        admin,
+        frozen_at_ledger: 43,
+    };
+    let decoded: AgentResumed =
+        <AgentResumed as IntoVal<Env, Val>>::into_val(&resumed.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(resumed, decoded);
+}
+
+#[test]
+fn registry_config_events_roundtrip() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let admins = soroban_sdk::vec![&env, admin.clone(), Address::generate(&env)];
+
+    let msig = MultisigConfigSetEvent {
+        admins: admins.clone(),
+        threshold: 2,
+        timelock_delay: 60,
+    };
+    let decoded: MultisigConfigSetEvent =
+        <MultisigConfigSetEvent as IntoVal<Env, Val>>::into_val(&msig.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(msig, decoded);
+
+    let min_bond = MinBondSetEvent {
+        admin: admin.clone(),
+        amount_stroops: 5,
+    };
+    let decoded: MinBondSetEvent =
+        <MinBondSetEvent as IntoVal<Env, Val>>::into_val(&min_bond.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(min_bond, decoded);
+
+    let err_ttl = ErrorTtlSetEvent {
+        admin: admin.clone(),
+        ttl_ledgers: 9,
+    };
+    let decoded: ErrorTtlSetEvent =
+        <ErrorTtlSetEvent as IntoVal<Env, Val>>::into_val(&err_ttl.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(err_ttl, decoded);
+
+    let cleaned = ErrorsCleanedEvent { removed: 3 };
+    let decoded: ErrorsCleanedEvent =
+        <ErrorsCleanedEvent as IntoVal<Env, Val>>::into_val(&cleaned.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(cleaned, decoded);
+
+    let gas = GasConfigSetEvent {
+        admin: admin.clone(),
+        tx_overhead: 1,
+        register_agent: 2,
+        resolve_error: 3,
+    };
+    let decoded: GasConfigSetEvent =
+        <GasConfigSetEvent as IntoVal<Env, Val>>::into_val(&gas.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(gas, decoded);
+
+    let store = StorageConfigSetEvent {
+        admin,
+        max_agents: 4,
+        max_per_capability: 5,
+    };
+    let decoded: StorageConfigSetEvent =
+        <StorageConfigSetEvent as IntoVal<Env, Val>>::into_val(&store.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(store, decoded);
+
+    let gas_upd = GasConfigUpdatedEvent {
+        proposal_id: 7,
+        tx_overhead: 1,
+        register_agent: 2,
+        resolve_error: 3,
+    };
+    let decoded: GasConfigUpdatedEvent =
+        <GasConfigUpdatedEvent as IntoVal<Env, Val>>::into_val(&gas_upd.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(gas_upd, decoded);
+
+    let msig_upd = MultisigConfigUpdatedEvent {
+        proposal_id: 8,
+        admins,
+        threshold: 2,
+        timelock_delay: 60,
+    };
+    let decoded: MultisigConfigUpdatedEvent =
+        <MultisigConfigUpdatedEvent as IntoVal<Env, Val>>::into_val(&msig_upd.clone(), &env)
+            .try_into_val(&env)
+            .unwrap();
+    assert_eq!(msig_upd, decoded);
 }
 
 #[test]
@@ -2192,4 +2624,541 @@ fn error_mapper_propagation_consistency() {
     let common = client.error_mapper(&already_exists_code);
     assert!(common.is_some());
     assert_eq!(common.unwrap(), CommonExitCode::AlreadyExists);
+}
+
+// ── On-chain reputation (issue #244) ─────────────────────────────────────────
+
+fn full_reputation_input() -> ReputationInput {
+    ReputationInput {
+        success_rate: 100,
+        quality: 100,
+        uptime: 100,
+        price_fairness: 100,
+    }
+}
+
+fn register_reputation_agent(
+    env: &Env,
+    client: &AgentRegistryContractClient<'static>,
+    id: &str,
+) -> Symbol {
+    let owner = Address::generate(env);
+    let record = make_record(env, id, "research", owner);
+    client.register_agent(&record);
+    record.id.clone()
+}
+
+/// Count emitted events whose topic[1] equals `action`.
+fn count_events_with_action(env: &Env, action: Symbol) -> u32 {
+    let events = env.events().all();
+    let mut count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let t1 = Symbol::from_val(env, &topics.get(1).unwrap());
+        if t1 == action {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[test]
+fn reputation_perfect_score_is_full_scale() {
+    let (env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&env, &client, "rep1");
+
+    let score = client.update_reputation(&admin, &agent, &full_reputation_input());
+    assert_eq!(score, REPUTATION_SCALE);
+
+    let stored = client.get_reputation(&agent);
+    assert_eq!(stored.agent_id, agent);
+    assert_eq!(stored.score, REPUTATION_SCALE);
+    assert_eq!(stored.last_updated, env.ledger().timestamp());
+
+    // register_agent emits 2 events; update emits (registry, rep_upd) at idx 2.
+    assert_event_topics(
+        &env,
+        2,
+        Symbol::new(&env, "registry"),
+        symbol_short!("rep_upd"),
+    );
+}
+
+#[test]
+fn reputation_weighted_formula() {
+    let (_env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&_env, &client, "repw");
+
+    // 40% success only.
+    let input = ReputationInput {
+        success_rate: 100,
+        quality: 0,
+        uptime: 0,
+        price_fairness: 0,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 400_000);
+
+    // 30% quality only.
+    let input = ReputationInput {
+        success_rate: 0,
+        quality: 100,
+        uptime: 0,
+        price_fairness: 0,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 300_000);
+
+    // 20% uptime only.
+    let input = ReputationInput {
+        success_rate: 0,
+        quality: 0,
+        uptime: 100,
+        price_fairness: 0,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 200_000);
+
+    // 10% price fairness only.
+    let input = ReputationInput {
+        success_rate: 0,
+        quality: 0,
+        uptime: 0,
+        price_fairness: 100,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 100_000);
+
+    // Even split.
+    let input = ReputationInput {
+        success_rate: 50,
+        quality: 50,
+        uptime: 50,
+        price_fairness: 50,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 500_000);
+}
+
+#[test]
+fn reputation_inputs_clamped_to_percent_scale() {
+    let (_env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&_env, &client, "repc");
+
+    // Out-of-range components clamp to 100: score saturates at full scale.
+    let input = ReputationInput {
+        success_rate: 150,
+        quality: 200,
+        uptime: 300,
+        price_fairness: 400,
+    };
+    assert_eq!(
+        client.update_reputation(&admin, &agent, &input),
+        REPUTATION_SCALE
+    );
+}
+
+#[test]
+fn reputation_zero_inputs_score_zero() {
+    let (_env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&_env, &client, "repz");
+
+    let input = ReputationInput {
+        success_rate: 0,
+        quality: 0,
+        uptime: 0,
+        price_fairness: 0,
+    };
+    assert_eq!(client.update_reputation(&admin, &agent, &input), 0);
+}
+
+#[test]
+fn reputation_unknown_agent_is_not_found() {
+    let (env, client, admin) = setup_with_admin();
+    let ghost = Symbol::new(&env, "ghost");
+    assert_eq!(
+        client.try_update_reputation(&admin, &ghost, &full_reputation_input()),
+        Err(Ok(Error::NotFound))
+    );
+    assert_eq!(client.try_get_reputation(&ghost), Err(Ok(Error::NotFound)));
+}
+
+#[test]
+fn reputation_lazy_decay_preserves_epoch_remainder() {
+    let (env, client, admin) = setup_with_admin();
+    let t0 = 1_700_000_000u64;
+    env.ledger().set_timestamp(t0);
+    let agent = register_reputation_agent(&env, &client, "repd");
+    client.update_reputation(&admin, &agent, &full_reputation_input());
+
+    // Advance 2 full epochs plus a remainder: only 2 decays apply.
+    env.ledger()
+        .set_timestamp(t0 + 2 * DEFAULT_EPOCH_SECS + 1_000);
+    let record = client.get_reputation(&agent);
+    // 1_000_000 -> 950_000 -> 902_500 at the 5% default.
+    assert_eq!(record.score, 902_500);
+    // last_updated advances by whole epochs only — no drift.
+    assert_eq!(record.last_updated, t0 + 2 * DEFAULT_EPOCH_SECS);
+
+    assert_event_topics(
+        &env,
+        env.events().all().len() - 1,
+        Symbol::new(&env, "registry"),
+        symbol_short!("rep_dec"),
+    );
+
+    // A second read with no further time passing changes nothing.
+    let before = env.events().all().len();
+    let record2 = client.get_reputation(&agent);
+    assert_eq!(record2, record);
+    assert_eq!(env.events().all().len(), before);
+}
+
+#[test]
+fn reputation_decay_caps_iterations_on_dormant_agents() {
+    let (env, client, admin) = setup_with_admin();
+    let t0 = 1_700_000_000u64;
+    env.ledger().set_timestamp(t0);
+    let agent = register_reputation_agent(&env, &client, "repold");
+    client.update_reputation(&admin, &agent, &full_reputation_input());
+
+    // 250 dormant epochs: score collapses to 0 instead of looping 250 times.
+    env.ledger().set_timestamp(t0 + 250 * DEFAULT_EPOCH_SECS);
+    let record = client.get_reputation(&agent);
+    assert_eq!(record.score, 0);
+    assert_eq!(record.last_updated, t0 + 250 * DEFAULT_EPOCH_SECS);
+}
+
+#[test]
+fn reputation_custom_config_is_honored() {
+    let (env, client, admin) = setup_with_admin();
+    client.set_reputation_config(&10, &86_400);
+    let config = client.get_reputation_config();
+    assert_eq!(config.decay_pct, 10);
+    assert_eq!(config.epoch_secs, 86_400);
+
+    let t0 = 1_700_000_000u64;
+    env.ledger().set_timestamp(t0);
+    let agent = register_reputation_agent(&env, &client, "repcfg");
+    client.update_reputation(&admin, &agent, &full_reputation_input());
+
+    env.ledger().set_timestamp(t0 + 86_400);
+    let record = client.get_reputation(&agent);
+    assert_eq!(record.score, 900_000);
+}
+
+#[test]
+fn reputation_config_rejects_invalid_values() {
+    let (_env, client, _admin) = setup_with_admin();
+    // Zero-length epochs would divide by zero on read.
+    assert_eq!(
+        client.try_set_reputation_config(&5, &0),
+        Err(Ok(Error::InvalidConfig))
+    );
+    // Decay above 100% is meaningless.
+    assert_eq!(
+        client.try_set_reputation_config(&101, &604_800),
+        Err(Ok(Error::InvalidConfig))
+    );
+}
+
+#[test]
+fn reputation_batch_update_is_atomic() {
+    let (env, client, admin) = setup_with_admin();
+    let a1 = register_reputation_agent(&env, &client, "repb1");
+    let a2 = register_reputation_agent(&env, &client, "repb2");
+    let ghost = Symbol::new(&env, "ghost");
+
+    let mut updates = Vec::new(&env);
+    updates.push_back(ReputationUpdate {
+        agent_id: a1.clone(),
+        input: full_reputation_input(),
+    });
+    updates.push_back(ReputationUpdate {
+        agent_id: ghost,
+        input: full_reputation_input(),
+    });
+    updates.push_back(ReputationUpdate {
+        agent_id: a2.clone(),
+        input: full_reputation_input(),
+    });
+
+    let results = client.batch_update_reputation(&admin, &updates);
+    assert_eq!(results.len(), 3);
+    assert_eq!(results.get(0).unwrap(), BatchResult::Ok(a1.clone()));
+    assert_eq!(
+        results.get(1).unwrap(),
+        BatchResult::Err(Error::NotFound as u32)
+    );
+    assert_eq!(results.get(2).unwrap(), BatchResult::Ok(a2.clone()));
+
+    // Atomicity: the unknown agent aborts every write — no rep_upd events.
+    assert_eq!(count_events_with_action(&env, symbol_short!("rep_upd")), 0);
+
+    // All-known batch commits every item.
+    let mut good = Vec::new(&env);
+    good.push_back(ReputationUpdate {
+        agent_id: a1.clone(),
+        input: full_reputation_input(),
+    });
+    good.push_back(ReputationUpdate {
+        agent_id: a2.clone(),
+        input: full_reputation_input(),
+    });
+    let results = client.batch_update_reputation(&admin, &good);
+    assert_eq!(results.len(), 2);
+    assert_eq!(count_events_with_action(&env, symbol_short!("rep_upd")), 2);
+    assert_eq!(client.get_reputation(&a1).score, REPUTATION_SCALE);
+    assert_eq!(client.get_reputation(&a2).score, REPUTATION_SCALE);
+}
+
+#[test]
+fn reputation_coordinator_can_update_without_admin_keys() {
+    let (env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&env, &client, "repcoord");
+    let coordinator = Address::generate(&env);
+    client.set_coordinator(&coordinator);
+    assert_eq!(client.get_coordinator(), Some(coordinator.clone()));
+
+    // Coordinator writes succeed.
+    let score = client.update_reputation(&coordinator, &agent, &full_reputation_input());
+    assert_eq!(score, REPUTATION_SCALE);
+
+    // Admin fallback still works after a coordinator is set.
+    let score = client.update_reputation(&admin, &agent, &full_reputation_input());
+    assert_eq!(score, REPUTATION_SCALE);
+
+    // An unrelated third party is rejected by the storage check.
+    let stranger = Address::generate(&env);
+    assert_eq!(
+        client.try_update_reputation(&stranger, &agent, &full_reputation_input()),
+        Err(Ok(Error::Unauthorized))
+    );
+}
+
+#[test]
+fn reputation_non_admin_cannot_set_coordinator() {
+    let env = Env::default();
+    let contract_id = env.register(AgentRegistryContract, ());
+    let client = AgentRegistryContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    env.mock_all_auths();
+    client.initialize(&admin);
+
+    env.mock_auths(&[]);
+    let result = client.try_set_coordinator(&Address::generate(&env));
+    assert!(result.is_err());
+}
+
+#[test]
+fn reputation_paused_contract_blocks_updates() {
+    let (env, client, admin) = setup_with_admin();
+    let agent = register_reputation_agent(&env, &client, "reppaused");
+    client.pause();
+    assert_eq!(
+        client.try_update_reputation(&admin, &agent, &full_reputation_input()),
+        Err(Ok(Error::ContractPaused))
+    );
+}
+
+// ── Agent Capability Versioning tests (issue #243) ───────────────────────────
+
+fn register_versioned_agent(
+    env: &Env,
+    client: &AgentRegistryContractClient<'static>,
+    id: &str,
+) -> AgentRecord {
+    let owner = Address::generate(env);
+    let record = make_record(env, id, "research", owner);
+    client.register_agent(&record);
+    record
+}
+
+#[test]
+fn version_register_and_retrieve_single_version() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent1");
+
+    client.register_agent_version(&record, &String::from_str(&env, "1.0.0"));
+
+    let page = client.get_agent_versions(&record.id);
+    assert_eq!(page.versions.len(), 1);
+
+    let v = page.versions.get(0).unwrap();
+    assert_eq!(v.version.major, 1);
+    assert_eq!(v.version.minor, 0);
+    assert_eq!(v.version.patch, 0);
+    assert!(!v.superseded);
+}
+
+#[test]
+fn version_publish_new_version_supersedes_previous() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent2");
+
+    client.register_agent_version(&record, &String::from_str(&env, "1.0.0"));
+    client.register_agent_version(&record, &String::from_str(&env, "1.1.0"));
+
+    let page = client.get_agent_versions(&record.id);
+    assert_eq!(page.versions.len(), 2);
+
+    // Oldest version should be superseded.
+    let v0 = page.versions.get(0).unwrap();
+    assert_eq!(v0.version.major, 1);
+    assert_eq!(v0.version.minor, 0);
+    assert!(v0.superseded, "1.0.0 should be superseded");
+
+    // Latest version should not be superseded.
+    let v1 = page.versions.get(1).unwrap();
+    assert_eq!(v1.version.minor, 1);
+    assert!(!v1.superseded, "1.1.0 should not be superseded");
+}
+
+#[test]
+fn version_get_all_versions_ordered_oldest_first() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent3");
+
+    for ver in &["1.0.0", "1.1.0", "2.0.0"] {
+        client.register_agent_version(&record, &String::from_str(&env, ver));
+    }
+
+    let page = client.get_agent_versions(&record.id);
+    assert_eq!(page.versions.len(), 3);
+
+    assert_eq!(page.versions.get(0).unwrap().version.major, 1);
+    assert_eq!(page.versions.get(0).unwrap().version.minor, 0);
+    assert_eq!(page.versions.get(1).unwrap().version.minor, 1);
+    assert_eq!(page.versions.get(2).unwrap().version.major, 2);
+
+    // Only the last should be non-superseded.
+    assert!(page.versions.get(0).unwrap().superseded);
+    assert!(page.versions.get(1).unwrap().superseded);
+    assert!(!page.versions.get(2).unwrap().superseded);
+}
+
+#[test]
+fn version_rollback_rejected() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent4");
+
+    client.register_agent_version(&record, &String::from_str(&env, "2.0.0"));
+
+    // Trying to register a lower version should fail.
+    assert_eq!(
+        client.try_register_agent_version(&record, &String::from_str(&env, "1.9.9")),
+        Err(Ok(Error::AlreadyExists))
+    );
+    // Same version is also rejected.
+    assert_eq!(
+        client.try_register_agent_version(&record, &String::from_str(&env, "2.0.0")),
+        Err(Ok(Error::AlreadyExists))
+    );
+}
+
+#[test]
+fn version_invalid_semver_rejected() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent5");
+
+    for bad in &["1.0", "1.0.0.0", "abc", "1.x.0"] {
+        assert_eq!(
+            client.try_register_agent_version(&record, &String::from_str(&env, bad)),
+            Err(Ok(Error::InvalidVersion)),
+            "expected InvalidVersion for {:?}",
+            bad
+        );
+    }
+}
+
+#[test]
+fn version_unregistered_agent_returns_not_found() {
+    let (env, client, _admin) = setup_with_admin();
+    let owner = Address::generate(&env);
+    // Build a record without calling register_agent first.
+    let record = make_record(&env, "ghost", "research", owner);
+
+    assert_eq!(
+        client.try_register_agent_version(&record, &String::from_str(&env, "1.0.0")),
+        Err(Ok(Error::NotFound))
+    );
+}
+
+#[test]
+fn version_no_versions_returns_error() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vagent6");
+
+    assert_eq!(
+        client.try_get_agent_versions(&record.id),
+        Err(Ok(Error::NoVersionsFound))
+    );
+}
+
+#[test]
+fn version_lookup_versioned_no_constraint_returns_all() {
+    let (env, client, _admin) = setup_with_admin();
+
+    let r1 = register_versioned_agent(&env, &client, "vlook1");
+    let r2 = register_versioned_agent(&env, &client, "vlook2");
+
+    client.register_agent_version(&r1, &String::from_str(&env, "1.0.0"));
+    client.register_agent_version(&r2, &String::from_str(&env, "2.0.0"));
+
+    let results = client.lookup_agents_versioned(&Symbol::new(&env, "research"), &None);
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn version_lookup_versioned_constraint_filters_older_agents() {
+    let (env, client, _admin) = setup_with_admin();
+
+    let r1 = register_versioned_agent(&env, &client, "vflt1");
+    let r2 = register_versioned_agent(&env, &client, "vflt2");
+
+    // r1 is on v1.0.0, r2 is on v2.0.0.
+    client.register_agent_version(&r1, &String::from_str(&env, "1.0.0"));
+    client.register_agent_version(&r2, &String::from_str(&env, "2.0.0"));
+
+    // Ask for agents with version >= 2.0.0 — only r2 should match.
+    let constraint = Some(AgentVersion {
+        major: 2,
+        minor: 0,
+        patch: 0,
+    });
+    let results = client.lookup_agents_versioned(&Symbol::new(&env, "research"), &constraint);
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get(0).unwrap().id, r2.id);
+}
+
+#[test]
+fn version_events_emitted_on_publish_and_supersede() {
+    let (env, client, _admin) = setup_with_admin();
+    let record = register_versioned_agent(&env, &client, "vevt1");
+
+    client.register_agent_version(&record, &String::from_str(&env, "1.0.0"));
+    client.register_agent_version(&record, &String::from_str(&env, "1.1.0"));
+
+    // After two versions there must be at least one ver_pub and one ver_sup event.
+    let events = env.events().all();
+    let mut pub_count = 0u32;
+    let mut sup_count = 0u32;
+
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if topics.len() < 2 {
+            continue;
+        }
+        let t1 = Symbol::from_val(&env, &topics.get(1).unwrap());
+        if t1 == Symbol::new(&env, "ver_pub") {
+            pub_count += 1;
+        }
+        if t1 == Symbol::new(&env, "ver_sup") {
+            sup_count += 1;
+        }
+    }
+
+    assert!(
+        pub_count >= 2,
+        "expected >=2 ver_pub events, got {pub_count}"
+    );
+    assert!(
+        sup_count >= 1,
+        "expected >=1 ver_sup event, got {sup_count}"
+    );
 }

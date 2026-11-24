@@ -1,4 +1,4 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Capability, AgentResult, ResearchReportResult, CodingResult, RiskResult, DesignResult } from '../../types/agent';
 import RiskMatrix from './RiskMatrix';
@@ -14,6 +14,8 @@ interface Props {
   agentName?: string;
   executionTimeMs?: number;
   tokenCount?: number;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
 
 const LoadingFallback: React.FC = () => {
@@ -32,8 +34,37 @@ const LoadingFallback: React.FC = () => {
   );
 };
 
-const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
+const AgentOutputRenderer: React.FC<Props> = ({
+  agentType,
+  result,
+  agentName,
+  executionTimeMs,
+  tokenCount,
+  searchQuery: controlledSearchQuery,
+  onSearchChange,
+}) => {
   const { t } = useTranslation();
+  const [internalSearchQuery, setInternalSearchQuery] = useState<string>(
+    controlledSearchQuery ?? ''
+  );
+  const [isFullScreen, setIsFullScreen] = useState<boolean>(false);
+
+  // Keep internal state in sync when used as a controlled component.
+  // Filter query is owned here and threaded down to the individual renderers
+  // as a prop — lifting it keeps the header controls in one place, while the
+  // controlled props allow a parent to drive the filter externally.
+  useEffect(() => {
+    if (controlledSearchQuery !== undefined) {
+      setInternalSearchQuery(controlledSearchQuery);
+    }
+  }, [controlledSearchQuery]);
+
+  const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+  const setSearchQuery = (value: string): void => {
+    setInternalSearchQuery(value);
+    onSearchChange?.(value);
+  };
+  const displayName = agentName ?? agentType;
   // All renderers handle null/undefined result with an empty-state placeholder
   if (result === null || result === undefined) {
     return (
@@ -131,8 +162,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
     <div className="agent-output-header" data-testid="agent-output-header" style={headerContainerStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Sparkles size={16} color="var(--accent-cyan, #38bdf8)" />
-          <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#f5f7fa' }} data-testid="agent-name">
+          <Sparkles size={16} color="var(--accent-info)" />
+          <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-primary)' }} data-testid="agent-name">
             {displayName}
           </span>
         </div>
@@ -145,8 +176,8 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               alignItems: 'center',
               gap: '4px',
               fontSize: '0.75rem',
-              color: 'var(--text-secondary, #8a93a3)',
-              background: 'rgba(255, 255, 255, 0.05)',
+              color: 'var(--text-secondary)',
+              background: 'var(--white-alpha-05)',
               padding: '3px 8px',
               borderRadius: '6px',
               fontFamily: 'monospace',
@@ -165,9 +196,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               alignItems: 'center',
               gap: '4px',
               fontSize: '0.75rem',
-              color: 'var(--accent-purple, #8b5cf6)',
-              background: 'rgba(139, 92, 246, 0.12)',
-              border: '1px solid rgba(139, 92, 246, 0.25)',
+              color: 'var(--accent-text)',
+              background: 'var(--accent-surface)',
+              border: '1px solid var(--accent-border)',
               padding: '3px 8px',
               borderRadius: '6px',
               fontFamily: 'monospace',
@@ -184,7 +215,7 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
           <Search
             size={14}
-            color="#8a93a3"
+            color="var(--text-secondary)"
             style={{ position: 'absolute', left: '10px', pointerEvents: 'none' }}
           />
           <input
@@ -197,9 +228,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
               padding: '5px 10px 5px 30px',
               fontSize: '0.8rem',
               borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              background: 'rgba(0, 0, 0, 0.3)',
-              color: '#fff',
+              border: '1px solid var(--border-muted)',
+              background: 'var(--surface-black-subtle)',
+              color: 'var(--text-primary)',
               outline: 'none',
               width: '160px',
             }}
@@ -214,9 +245,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '4px',
-            background: isFullScreen ? 'rgba(56, 189, 248, 0.2)' : 'rgba(255, 255, 255, 0.08)',
-            border: isFullScreen ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.12)',
-            color: '#fff',
+            background: isFullScreen ? 'var(--info-surface)' : 'var(--white-alpha-08)',
+            border: isFullScreen ? '1px solid var(--accent-info)' : '1px solid var(--border-muted)',
+            color: 'var(--text-primary)',
             padding: '5px 10px',
             borderRadius: '6px',
             cursor: 'pointer',
@@ -247,9 +278,9 @@ const AgentOutputRenderer: React.FC<Props> = ({ agentType, result }) => {
             onClick={() => setIsFullScreen(false)}
             data-testid="fullscreen-close-btn"
             style={{
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#f87171',
+              background: 'var(--status-danger-surface)',
+              border: '1px solid var(--status-danger-border)',
+              color: 'var(--status-danger-text)',
               borderRadius: '6px',
               padding: '6px 12px',
               cursor: 'pointer',

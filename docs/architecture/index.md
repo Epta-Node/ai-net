@@ -148,6 +148,93 @@ For detailed sequence diagrams, contract state machine matrices, dispute filing 
 
 ---
 
+---
+
+## 5. Task Events — Schema & Cursor-Resume Contract
+
+### 5.1 task_events DDL
+
+The `task_events` table is the append-only event log for every task lifecycle
+event.  It is the single source of truth defined in exactly one place:
+
+```
+backend/src/db/migrations/tasks/005_replace_task_events_schema.up.sql
+```
+
+The canonical DDL (also in `backend/src/db/events.sql` for documentation):
+
+```sql
+CREATE TABLE IF NOT EXISTS task_events (
+  global_seq  INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_seq    INTEGER NOT NULL,
+  version     INTEGER NOT NULL DEFAULT 1,
+  type        TEXT    NOT NULL,
+  task_id     TEXT    NOT NULL,
+  node_id     TEXT,
+  occurred_at TEXT    NOT NULL,
+  payload     TEXT,
+  UNIQUE (task_id, task_seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_events_task_seq    ON task_events (task_id, task_seq ASC);
+CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON task_events (occurred_at ASC);
+CREATE INDEX IF NOT EXISTS idx_events_type        ON task_events (type, occurred_at ASC);
+```
+
+| Column | Type | Description |
+|---|---|---|
+| `global_seq` | INTEGER PK AUTOINCREMENT | Globally-ordered row id. Used for cross-task ordering and CDC. |
+| `task_seq` | INTEGER NOT NULL | Per-task monotonic cursor starting at 0. Assigned by the EventBus. |
+| `version` | INTEGER DEFAULT 1 | Payload schema version. Consumers branch on this value. |
+| `type` | TEXT NOT NULL | Event type discriminator (PascalCase, e.g. `NodeStarted`). |
+| `task_id` | TEXT NOT NULL | The task this event belongs to. |
+| `node_id` | TEXT | The DAG node (NULL for task-level events). |
+| `occurred_at` | TEXT NOT NULL | ISO-8601 wall-clock timestamp set by the emitter. |
+| `payload` | TEXT | JSON-serialised event-specific payload (may be NULL). |
+
+The `UNIQUE (task_id, task_seq)` constraint ensures duplicate appends are
+detected immediately at the database layer.
+
+### 5.2 Cursor-Resume Contract
+
+WebSocket clients connect to `ws://<host>/tasks/:id/stream?lastEventId=<seq>`.
+
+- `seq` is the per-task `taskSeq` value from the last event the client received.
+- On reconnect the server calls `eventStore.listByTaskSince(taskId, lastEventId)`,
+  which returns all events with `task_seq > lastEventId` in ascending order.
+- New events are emitted to live subscribers; each flush deduplicates via
+  `lastSentSeq` so nothing is delivered twice.
+- If `lastEventId` is absent the client receives a full replay (equivalent to
+  `lastEventId = -1`).
+
+```
+client                      server
+  │                            │
+  │  ws://…/tasks/X/stream     │
+  │  ?lastEventId=3            │
+  │ ─────────────────────────► │
+  │                            │  listByTaskSince('X', 3)
+  │                            │  → [seq=4, seq=5]
+  │ ◄──────────────────────── seq=4
+  │ ◄──────────────────────── seq=5
+  │                            │  (live events arrive)
+  │ ◄──────────────────────── seq=6
+```
+
+### 5.3 Schema Versioning
+
+Every event record carries a `version` field (integer, ≥ 1).  Schema rules:
+
+- Adding a new **optional** field does NOT require a version bump.
+- Removing, renaming, or changing the type of a field requires a version bump.
+- Consumer code must guard version-specific fields: `if (event.version >= 2) { … }`.
+
+Payload schemas are validated at append time via `src/events/schemaRegistry.ts`.
+A malformed payload (wrong type, missing required field, unknown version) throws
+immediately rather than silently persisting a corrupt event.
+
+See `docs/EVENTS.md` for the full per-version payload specifications.
+
 ## 4. Multi-Tier Security & Testing Strategy
 
 ```mermaid

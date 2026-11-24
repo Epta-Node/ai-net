@@ -9,6 +9,7 @@ import express from "express";
 import request from "supertest";
 import Database from "better-sqlite3";
 import { createAgentDb, type AgentDb } from "../../db/agents";
+import * as agentsDb from "../../db/agents";
 import { createAgentsRouter } from "./agents";
 import { errorHandler } from "../middleware/errorHandler";
 
@@ -50,16 +51,16 @@ const VALID_KEY = "GTESTAGENTSTELLARKEYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("GET /api/agents — db error returns 500", () => {
-  it("returns 500 when db.list() throws", async () => {
+  it("returns 500 when db.listCursor() throws", async () => {
     const raw = makeDb();
     const db = createAgentDb(raw);
     const failingDb: AgentDb = {
       ...db,
-      list: () => { throw new Error("DB exploded"); },
+      listCursor: () => { throw new Error("DB exploded"); },
     };
 
     const app = buildApp(failingDb);
-    const res = await request(app).get("/api/agents");
+    const res = await request(app).get("/api/agents?limit=20");
     expect(res.status).toBe(500);
     expect(res.body.error).toBeDefined();
   });
@@ -179,8 +180,13 @@ describe("DELETE /api/agents/:id", () => {
     const app = buildApp(db);
     const res = await request(app).delete("/api/agents/del-agent");
     expect(res.status).toBe(401);
+    // The shared challenge–response helper used by register/heartbeat/delete
+    // reports the missing challenge first and tags it AGENT_CHALLENGE_INVALID
+    // (#557/#558), replacing the legacy "Missing challenge or signature" text.
     const msg = typeof res.body.error === "string" ? res.body.error : res.body.error?.message;
-    expect(msg).toMatch(/Missing challenge or signature/i);
+    expect(msg).toMatch(/Missing agent challenge/i);
+    const code = (res.body.error as { code?: string } | undefined)?.code;
+    expect(code).toBe("AGENT_CHALLENGE_INVALID");
   });
 
   it("returns 401 when signature is invalid", async () => {
@@ -345,6 +351,92 @@ describe("POST /api/agents/register — Sybil Resistance (Issue #497)", () => {
     expect(res.status).toBe(400);
     const msg = typeof res.body.error === "string" ? res.body.error : res.body.error?.message;
     expect(msg).toMatch(/Agent limit per Stellar account reached/i);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Issue #646 — the schema DDL must not run on the request path
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("GET /api/agents — schema DDL (issue #646)", () => {
+  it("issues zero DDL across a loop of requests and reuses one wrapper", async () => {
+    const raw = makeDb();
+    const execSpy = jest.spyOn(raw, "exec");
+    const prepareSpy = jest.spyOn(raw, "prepare");
+    const getAgentDbSpy = jest.spyOn(agentsDb, "getAgentDb").mockReturnValue(raw);
+
+    // No `options.db` here: this exercises the real per-request
+    // `getDb()` path, which is the one the issue is about.
+    const app = express();
+    app.use(express.json());
+    app.use("/api/agents", createAgentsRouter());
+    app.use(errorHandler);
+
+    const wrapper = agentsDb.createAgentDb(raw);
+
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        // `limit` is mandatory on the bounded list contract; the DDL guarantee
+        // this test covers is about the request path, not about query parsing.
+        const res = await request(app).get("/api/agents?limit=50");
+        expect(res.status).toBe(200);
+      }
+
+      // Every request reached the database ...
+      expect(prepareSpy).toHaveBeenCalled();
+      // ... and none of them ran schema DDL.
+      expect(execSpy).not.toHaveBeenCalled();
+      const ddl = prepareSpy.mock.calls
+        .map(([sql]) => String(sql))
+        .filter((sql) => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql));
+      expect(ddl).toEqual([]);
+
+      // The wrapper the loop reused is the same object callers get.
+      expect(agentsDb.createAgentDb(raw)).toBe(wrapper);
+    } finally {
+      getAgentDbSpy.mockRestore();
+    }
+  });
+});
+
+// Cursor validation is exercised independently of the SQLite stub.
+describe('GET /api/agents — bounded contract', () => {
+  // Query strings the bounded contract must reject before touching the store.
+  const invalidLimitQueries = [
+    '',
+    '?limit=0',
+    '?limit=-1',
+    '?limit=101',
+    '?limit=1.5',
+    '?limit=NaN',
+    '?limit=Infinity',
+  ];
+
+  it.each(invalidLimitQueries)('rejects an unbounded or invalid request: %s', async (query) => {
+      const db = createAgentDb(makeDb());
+      const list = jest.spyOn(db, 'listCursor');
+      const response = await request(buildApp(db)).get(`/api/agents${query}`);
+      expect(response.status).toBe(400);
+      expect(list).not.toHaveBeenCalled();
+    });
+
+  it('returns pagination metadata and preserves filters in next links', async () => {
+    const db = createAgentDb(makeDb());
+    const list = jest.spyOn(db, 'listCursor').mockReturnValue({ items: [], nextCursor: 'next-token' });
+    const response = await request(buildApp(db)).get('/api/agents?limit=2&capability=research&status=online');
+    expect(response.status).toBe(200);
+    expect(list).toHaveBeenCalledWith({ limit: 2, capability: 'research', status: 'online' });
+    expect(response.body.data.pagination).toEqual({ limit: 2, nextCursor: 'next-token', hasNextPage: true });
+    const next = new URL(response.body._links.next, 'https://example.test');
+    expect(next.searchParams.get('capability')).toBe('research');
+    expect(next.searchParams.get('status')).toBe('online');
+    expect(next.searchParams.get('cursor')).toBe('next-token');
+  });
+
+  it('rejects malformed cursors instead of silently restarting', async () => {
+    const response = await request(buildApp(createAgentDb(makeDb())))
+      .get('/api/agents?limit=20&cursor=invalid');
+    expect(response.status).toBe(400);
   });
 });
 

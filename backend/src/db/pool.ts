@@ -26,6 +26,7 @@
 
 import Database from "better-sqlite3";
 import { createLogger } from "../utils/logger";
+import { instrumentDatabase } from "./queryMetrics";
 
 const logger = createLogger({ component: "db-pool" });
 
@@ -33,6 +34,12 @@ const logger = createLogger({ component: "db-pool" });
 export interface PoolOptions {
   /** Path to the SQLite database file. */
   filePath: string;
+  /**
+   * Logical database name (`agents`, `tasks`, `payments`). When set, every
+   * statement on the pool's handles is timed into the query-latency metrics
+   * (#807). Unnamed pools, such as those used in tests, are not instrumented.
+   */
+  name?: string;
   /** Reader connections opened eagerly at construction. Default: 2. */
   min?: number;
   /** Upper bound on reader connections. Default: 10. */
@@ -152,6 +159,7 @@ function applyPragmas(db: Database.Database, readonly: boolean): void {
 export function createPool(options: PoolOptions): SqlitePool {
   const {
     filePath,
+    name,
     min = DEFAULT_MIN_CONNECTIONS,
     max = DEFAULT_MAX_CONNECTIONS,
     acquireTimeoutMs = DEFAULT_ACQUIRE_TIMEOUT_MS,
@@ -166,6 +174,8 @@ export function createPool(options: PoolOptions): SqlitePool {
   // before any read-only handle is opened.
   const writer = new Database(filePath);
   applyPragmas(writer, false);
+  // Instrument before `onCreate` so schema setup is timed too.
+  if (name) instrumentDatabase(writer, name);
   onCreate?.(writer);
 
   const idle: Database.Database[] = [];
@@ -186,6 +196,7 @@ export function createPool(options: PoolOptions): SqlitePool {
   function openReader(): Database.Database {
     const db = new Database(filePath, { readonly: true });
     applyPragmas(db, true);
+    if (name) instrumentDatabase(db, name);
     openReaders += 1;
     return db;
   }

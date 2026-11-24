@@ -1,18 +1,57 @@
 import express, { Request, Response, NextFunction } from "express";
 import type { AddressInfo } from "net";
 import request from "supertest";
+import { Keypair } from "@stellar/stellar-sdk";
 import { createAgentsRouter } from "../src/api/routes/agents";
 import { createTasksRouter } from "../src/api/routes/tasks";
-import { AgentRecord, createAgentDb } from "../src/db/agents";
+import { AgentRecord, createAgentDb, ensureAgentTable } from "../src/db/agents";
 import Database from "better-sqlite3";
 import { AppError } from "../src/errors";
+import {
+  AGENT_CHALLENGE_HEADER,
+  AGENT_SIGNATURE_HEADER,
+  AgentAuthPurpose,
+  buildAgentAuthMessage,
+  hashAgentPayload,
+  issueAgentChallenge,
+} from "../src/api/agentSignature";
+
+/**
+ * Complete the challenge/response handshake the way a real agent would, so a
+ * test that is not about auth still exercises an authenticated request.
+ */
+function signedAuthHeaders(
+  payload: unknown,
+  publicKey: string,
+  secret: string,
+  purpose: AgentAuthPurpose,
+  agentId?: string
+): Record<string, string> {
+  const challenge = issueAgentChallenge({ purpose, publicKey, payload, agentId });
+  const message = buildAgentAuthMessage({
+    purpose,
+    publicKey,
+    challenge: challenge.challenge,
+    payloadHash: hashAgentPayload(payload),
+  });
+
+  return {
+    [AGENT_CHALLENGE_HEADER]: challenge.challenge,
+    [AGENT_SIGNATURE_HEADER]: Keypair.fromSecret(secret).sign(Buffer.from(message, "utf8")).toString("base64"),
+  };
+}
+
+// Synthetic secret: the stellar-sdk mock derives a deterministic Ed25519 key
+// from any string, so this is never real key material.
+const AGENT_SECRET = "SYNTHETIC_TEST_SECRET_DO_NOT_USE_000001";
+const agentKeypair = Keypair.fromSecret(AGENT_SECRET);
 
 const codingAgent: AgentRecord = {
   id: "coding-1",
   capabilities: ["coding"],
   pricingXLM: 2.5,
   endpoint: "http://127.0.0.1:3001/health",
-  stellarPublicKey: "GBXX...",
+  stellarPublicKey: agentKeypair.publicKey(),
   reputationScore: 0,
   lastSeenAt: new Date().toISOString(),
   status: "online"
@@ -34,18 +73,7 @@ function testErrorHandler(err: Error, _req: Request, res: Response, _next: NextF
 
 function createTestApp(initialAgents: AgentRecord[] = [], healthTimeoutMs = 500) {
   const rawDb = new Database(":memory:");
-  rawDb.exec(`
-    CREATE TABLE IF NOT EXISTS agents (
-      id               TEXT PRIMARY KEY,
-      capabilities     TEXT NOT NULL,
-      pricingXLM       REAL NOT NULL,
-      endpoint         TEXT NOT NULL,
-      stellarPublicKey TEXT NOT NULL,
-      reputationScore  REAL NOT NULL DEFAULT 0,
-      lastSeenAt       TEXT NOT NULL,
-      status           TEXT NOT NULL DEFAULT 'online'
-    )
-  `);
+  ensureAgentTable(rawDb);
   const db = createAgentDb(rawDb);
   for (const agent of initialAgents) {
     db.upsert(agent);
@@ -69,17 +97,17 @@ function listen(app: express.Express) {
 
 describe("Agents API route", () => {
   it("returns 200 with an empty array when no agents are registered", async () => {
-    const response = await request(createTestApp()).get("/api/agents");
+    const response = await request(createTestApp()).get("/api/agents?limit=100");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual([]);
+    expect(response.body.data.items).toEqual([]);
   });
 
-  it("returns all agents from the local registry cache", async () => {
-    const response = await request(createTestApp([codingAgent])).get("/api/agents");
+  it("returns a bounded page from the local registry cache", async () => {
+    const response = await request(createTestApp([codingAgent])).get("/api/agents?limit=100");
 
     expect(response.status).toBe(200);
-    expect(response.body).toEqual([expect.objectContaining(codingAgent)]);
+    expect(response.body.data.items).toEqual([expect.objectContaining(codingAgent)]);
   });
 
   it("returns a single agent by id", async () => {
@@ -147,8 +175,11 @@ describe("Agents API route", () => {
     const app = createTestApp([codingAgent]);
     // SQLite's datetime('now') has second precision, so floor the baseline.
     const before = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const auth = signedAuthHeaders(undefined, agentKeypair.publicKey(), AGENT_SECRET, "heartbeat", "coding-1");
 
-    const response = await request(app).post("/api/agents/coding-1/heartbeat");
+    const response = await request(app)
+      .post("/api/agents/coding-1/heartbeat")
+      .set(auth);
 
     expect(response.status).toBe(200);
     expect(response.body.status).toBe("ok");
@@ -159,7 +190,11 @@ describe("Agents API route", () => {
   });
 
   it("returns 404 when sending heartbeat to an unknown agent", async () => {
-    const response = await request(createTestApp()).post("/api/agents/missing/heartbeat");
+    const auth = signedAuthHeaders(undefined, agentKeypair.publicKey(), AGENT_SECRET, "heartbeat", "missing");
+
+    const response = await request(createTestApp())
+      .post("/api/agents/missing/heartbeat")
+      .set(auth);
 
     expect(response.status).toBe(404);
     expect(response.body).toEqual({ error: { code: "NOT_FOUND", message: "Agent not found" } });
@@ -168,6 +203,7 @@ describe("Agents API route", () => {
 
 describe("Stellar public key validation", () => {
   const VALID_KEY = "GB3W5IYBKWGAZ277DJEEG5H635MUUGBTFPUTF7R2N5IJYP36AY2H2CUZ";
+  const VALID_SECRET = "SYNTHETIC_TEST_SECRET_DO_NOT_USE_000002";
 
   beforeAll(() => {
     process.env.SKIP_STELLAR_ACCOUNT_VERIFY = "true";
@@ -227,16 +263,23 @@ describe("Stellar public key validation", () => {
     });
 
     it("returns 201 for valid Stellar public key", async () => {
-      const response = await request(createTestApp()).post("/api/agents/register").send({
+      const keypair = Keypair.fromSecret(VALID_SECRET);
+      const body = {
         agentId: "test-agent",
         capabilities: ["coding"],
         pricingXLM: 1,
         endpoint: "http://localhost:3001/health",
-        stellarPublicKey: VALID_KEY,
-      });
+        stellarPublicKey: keypair.publicKey(),
+      };
+      const auth = await signedAuthHeaders(body, keypair.publicKey(), VALID_SECRET, "register");
+
+      const response = await request(createTestApp())
+        .post("/api/agents/register")
+        .set(auth)
+        .send(body);
 
       expect(response.status).toBe(201);
-      expect(response.body.stellarPublicKey).toBe(VALID_KEY);
+      expect(response.body.stellarPublicKey).toBe(keypair.publicKey());
     });
   });
 

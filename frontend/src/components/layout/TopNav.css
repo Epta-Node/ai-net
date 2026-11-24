@@ -173,6 +173,19 @@
   color: var(--status-danger);
 }
 
+/* Network badge when the wallet is on a different network than this build
+   targets. Reads as a warning next to the otherwise-green address chip. */
+.wallet-chip.network-mismatch {
+  background: var(--status-warning-surface);
+  border-color: var(--status-warning-border, var(--status-warning-surface-strong));
+  color: var(--status-warning-text);
+  font-weight: 700;
+}
+
+.wallet-chip.network-mismatch::before {
+  content: '⚠ ';
+}
+
 .disconnect-btn {
   padding: 8px 16px;
   background: var(--danger);

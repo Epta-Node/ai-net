@@ -1,0 +1,285 @@
+/*
+ * Task submission wizard (TaskSubmissionForm).
+ *
+ * Colours come exclusively from the theme tokens in styles/tokens.css, which
+ * `.theme-dark` / `.theme-light` redefine, so the wizard follows the active
+ * theme without any per-theme overrides here.
+ */
+
+.wizardWrapper {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 1.25rem;
+  color: var(--text-main, var(--text-primary));
+}
+
+.progressHeader {
+  margin-bottom: 2rem;
+}
+
+.stepTitle {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 1.25rem;
+  color: var(--text-main, var(--text-primary));
+}
+
+.sectionTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  color: var(--text-main, var(--text-primary));
+}
+
+/* ─── Fields ──────────────────────────────────────────────────────────────── */
+
+.field {
+  margin-bottom: 1.25rem;
+}
+
+.label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.textarea,
+.budgetInput {
+  padding: var(--space-3);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.budgetInput {
+  width: 180px;
+}
+
+.textarea::placeholder,
+.budgetInput::placeholder {
+  color: var(--text-muted);
+}
+
+.textarea:focus,
+.budgetInput:focus {
+  outline: none;
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 3px var(--accent-surface);
+}
+
+.textarea[aria-invalid='true'],
+.budgetInput[aria-invalid='true'] {
+  border-color: var(--status-danger);
+}
+
+.textarea[aria-invalid='true']:focus,
+.budgetInput[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px var(--status-danger-surface);
+}
+
+.errorText {
+  color: var(--status-danger);
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.budgetHelper {
+  color: var(--text-muted);
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* ─── Agent preferences ───────────────────────────────────────────────────── */
+
+.agentGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.agentOption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--space-3);
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.agentOption:hover {
+  border-color: var(--border-strong);
+}
+
+.agentOption:has(input:checked) {
+  border-color: var(--accent-secondary);
+  background: var(--accent-surface);
+}
+
+.agentOption:focus-within {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 2px;
+}
+
+.agentOption input {
+  accent-color: var(--accent-secondary);
+}
+
+.agentError {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--status-danger);
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+}
+
+/* ─── Navigation ──────────────────────────────────────────────────────────── */
+
+.buttonGroup {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.backButton {
+  padding: 0.5rem 1rem;
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: background 0.15s, transform 0.1s;
+}
+
+.backButton:hover {
+  background: var(--bg-secondary);
+}
+
+.backButton:active {
+  transform: scale(0.96);
+}
+
+.nextButton,
+.submitButton {
+  padding: 0.5rem 1rem;
+  background: var(--primary, var(--accent));
+  color: var(--text-inverse);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.submitButton {
+  padding: 12px 20px;
+}
+
+.nextButton:hover:not(:disabled),
+.submitButton:hover:not(:disabled) {
+  background: var(--primary-hover, var(--accent-hover));
+}
+
+.nextButton:active:not(:disabled),
+.submitButton:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.backButton:focus-visible,
+.nextButton:focus-visible,
+.submitButton:focus-visible {
+  outline: 2px solid var(--accent-info);
+  outline-offset: 2px;
+}
+
+.nextButton:disabled,
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.successText {
+  color: var(--status-success);
+  margin-top: 1rem;
+  display: inline-block;
+}
+
+/* ─── Review summary ──────────────────────────────────────────────────────── */
+
+.summary {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  overflow: hidden;
+  margin: 0 0 1rem;
+}
+
+.summaryRow {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.summaryRow:last-child {
+  border-bottom: none;
+}
+
+.summaryRow dt {
+  width: 11rem;
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.summaryRow dd {
+  margin: 0;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+@media (max-width: 767px) {
+  .summaryRow {
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .summaryRow dt {
+    width: auto;
+  }
+}
+
+.errorBanner {
+  margin-top: 1.5rem;
+  padding: 16px;
+  border-radius: var(--radius-xl);
+  background: var(--status-danger-surface);
+  color: var(--status-danger-text);
+  border: 1px solid var(--status-danger-border);
+}

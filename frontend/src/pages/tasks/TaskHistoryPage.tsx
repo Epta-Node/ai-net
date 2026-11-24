@@ -36,7 +36,9 @@ export const TaskHistoryPageSkeleton: React.FC = () => (
     </div>
 
     {/* Filter bar skeleton */}
-    <SkeletonCard style={{ marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' as const }}>
+    <SkeletonCard
+      style={{ marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' as const }}
+    >
       <Skeleton variant="pill" width="6rem" height="2rem" />
       <Skeleton variant="pill" width="8rem" height="2rem" />
       <Skeleton variant="pill" width="7rem" height="2rem" />
@@ -52,10 +54,7 @@ const TaskHistoryPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Derive filters from URL so the view is shareable / bookmarkable
-  const filters = useMemo(
-    () => filtersFromSearchParams(searchParams),
-    [searchParams]
-  );
+  const filters = useMemo(() => filtersFromSearchParams(searchParams), [searchParams]);
 
   const updateFilters = useCallback(
     (next: Partial<TaskHistoryFilters>) => {
@@ -75,6 +74,8 @@ const TaskHistoryPage: React.FC = () => {
     loading,
     error,
     refetch,
+    hasNextPage,
+    loadMore,
     selectedIds,
     toggleSelect,
     clearSelection,
@@ -102,6 +103,27 @@ const TaskHistoryPage: React.FC = () => {
   // Show skeleton on initial load (no data yet)
   if (loading && allTasks.length === 0) {
     return <TaskHistoryPageSkeleton />;
+  }
+
+  // #879: empty state when user has no task history
+  if (!loading && allTasks.length === 0) {
+    return (
+      <div className={styles.page}>
+        <div style={{ padding: '4rem 0', textAlign: 'center' }}>
+          <History size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
+          <h2 style={{ marginBottom: 8 }}>No task history yet</h2>
+          <p style={{ color: 'var(--color-text-muted)', marginBottom: 24 }}>
+            Run your first agent task to see results here.
+          </p>
+          <a
+            href="/tasks/new"
+            style={{ textDecoration: 'underline', color: 'var(--color-primary)' }}
+          >
+            Create a new task
+          </a>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -188,6 +210,19 @@ const TaskHistoryPage: React.FC = () => {
         isComparing={isComparing}
         hasFilters={hasFilters}
       />
+
+      {hasNextPage && (
+        <div className={styles.loadMoreContainer}>
+          <button
+            type="button"
+            className={styles.loadMoreButton}
+            onClick={loadMore}
+            disabled={loading}
+          >
+            {loading ? 'Loading…' : 'Load more'}
+          </button>
+        </div>
+      )}
 
       {/* Comparison panel — shown when both tasks selected */}
       {isComparing && taskA && taskB && (

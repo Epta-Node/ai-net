@@ -5,7 +5,6 @@
   },
   "auth": [
     [],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -13,13 +12,10 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "pre_upgrade_hook",
+              "function_name": "initialize",
               "args": [
                 {
-                  "string": "1.1.0"
-                },
-                {
-                  "bytes": "0200000000000000000000000000000000000000000000000000000000000000"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 }
               ]
             }
@@ -27,11 +23,12 @@
           "sub_invocations": []
         }
       ]
-    ]
+    ],
+    []
   ],
   "ledger": {
     "protocol_version": 22,
-    "sequence_number": 0,
+    "sequence_number": 1,
     "timestamp": 0,
     "network_id": "0000000000000000000000000000000000000000000000000000000000000000",
     "base_reserve": 0,
@@ -78,6 +75,21 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "Agent"
+                            },
+                            {
+                              "symbol": "version"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "string": "1.0.0"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Paused"
                             }
                           ]
@@ -93,7 +105,7 @@
             },
             "ext": "v0"
           },
-          4095
+          241921
         ]
       ],
       [
@@ -126,7 +138,7 @@
             },
             "ext": "v0"
           },
-          6311999
+          6312000
         ]
       ],
       [
@@ -147,7 +159,7 @@
             },
             "ext": "v0"
           },
-          4095
+          241921
         ]
       ]
     ]
@@ -196,7 +208,7 @@
                         "string": "Data integrity validated"
                       },
                       {
-                        "string": "Storage migration required"
+                        "string": "Storage format compatible"
                       },
                       {
                         "string": "Admin access validated"

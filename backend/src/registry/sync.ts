@@ -33,7 +33,7 @@ import { Server } from "@stellar/stellar-sdk/rpc";
 import { scValToNative } from "@stellar/stellar-base";
 import { getAgentDb, createAgentDb } from "../db/agents";
 import { createLogger } from "../utils/logger";
-import { getConfig } from "../config";
+import { getConfig, stellarClientOptions } from "../config";
 import { invalidateAgentsCache } from "../cache/invalidation";
 
 const logger = createLogger({ module: "registry-sync" });
@@ -294,7 +294,7 @@ export function startAgentSync(): void {
     return;
   }
 
-  const server = new Server(config.SOROBAN_RPC_URL);
+  const server = new Server(config.SOROBAN_RPC_URL, stellarClientOptions(config));
 
   const poll = async () => {
     try {

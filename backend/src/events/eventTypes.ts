@@ -53,6 +53,12 @@ export interface BaseEvent {
    * any subscriber sees the event; absent on events not yet emitted.
    */
   taskSeq?: number;
+  /** Optional metadata shared by on-chain event adapters. */
+  meta?: {
+    version: number;
+    contract: string;
+    ledgerTimestamp?: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +113,76 @@ export interface PaymentReleasedPayload {
 
 // task_completed and task_failed carry no additional payload beyond BaseEvent.
 
+/**
+ * Reconciliation event name (issue #496).
+ *
+ * Exported as a constant so producers and consumers agree on the single
+ * spelling of the discriminator instead of hard-coding the literal. The event
+ * covers both *drift detected* and *drift remediated*, discriminated by
+ * `payload.kind`.
+ */
+export const RECONCILIATION_EVENT = 'ReconciliationEvent' as const;
+
+/** Drift categories reported by a {@link ReconciliationEventEvent}. */
+export type ReconciliationDriftType =
+  | 'orphaned_locked'
+  | 'missing_release_tx'
+  | 'release_unconfirmed'
+  | 'expired_escrow'
+  | 'missing_local'
+  | 'amount_mismatch';
+
+/** Outcome of the remediation attempt carried by a reconciliation event. */
+export interface ReconciliationRemediationOutcome {
+  action: string;
+  status: 'remediated' | 'skipped' | 'failed' | 'manual_review';
+  txHash?: string;
+  reason?: string;
+  at: string;
+}
+
+/** Payload of a `ReconciliationEvent`. */
+export interface ReconciliationEventPayload {
+  /** Run that produced the observation. */
+  runId: string;
+  /** `drift` when something was detected, `remediation` when acted upon. */
+  kind: 'drift' | 'remediation';
+  driftType: ReconciliationDriftType;
+  balanceId: string;
+  taskId?: string;
+  nodeId?: string;
+  severity?: 'info' | 'warning' | 'critical';
+  description: string;
+  remediation?: ReconciliationRemediationOutcome;
+  previousStatus?: string;
+  newStatus?: string;
+}
+
+export interface ReconciliationEventEvent extends BaseEvent {
+  type: typeof RECONCILIATION_EVENT;
+  payload: ReconciliationEventPayload;
+}
+
+/**
+ * Emitted when the agent watchdog evicts an agent for missing its heartbeat
+ * (#804). Agents have no task, so `taskId` carries the synthetic stream key
+ * `agent:<agentId>`. It is not a real task id and is never looked up as one.
+ */
+export const AGENT_EVICTED_EVENT = 'agent.evicted' as const;
+
+/** Payload of an {@link AgentEvictedEvent}. */
+export interface AgentEvictedPayload {
+  agentId: string;
+  reason: 'heartbeat_timeout';
+  /** Last heartbeat the registry recorded, or null when it was unparseable. */
+  lastSeenAt: string | null;
+}
+
+export interface AgentEvictedEvent extends BaseEvent {
+  type: typeof AGENT_EVICTED_EVENT;
+  payload: AgentEvictedPayload;
+}
+
 // ---------------------------------------------------------------------------
 // Discriminated union
 // ---------------------------------------------------------------------------
@@ -119,7 +195,9 @@ export type EventType =
   | 'PaymentLocked'
   | 'PaymentReleased'
   | 'TaskCompleted'
-  | 'TaskFailed';
+  | 'TaskFailed'
+  | typeof RECONCILIATION_EVENT
+  | typeof AGENT_EVICTED_EVENT;
 
 export interface TaskCreatedEvent extends BaseEvent {
   type: 'TaskCreated';
@@ -183,7 +261,9 @@ export type AppEvent =
   | PaymentLockedEvent
   | PaymentReleasedEvent
   | TaskCompletedEvent
-  | TaskFailedEvent;
+  | TaskFailedEvent
+  | ReconciliationEventEvent
+  | AgentEvictedEvent;
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -221,6 +301,10 @@ export function isTaskFailed(e: AppEvent): e is TaskFailedEvent {
   return e.type === 'TaskFailed';
 }
 
+export function isReconciliationEvent(e: AppEvent): e is ReconciliationEventEvent {
+  return e.type === RECONCILIATION_EVENT;
+}
+
 // ---------------------------------------------------------------------------
 // Factory helpers — enforce required fields and stamp the current version
 // ---------------------------------------------------------------------------
@@ -243,7 +327,14 @@ export function makeNodeStarted(
   payload: NodeStartedPayload,
   occurredAt = nowIso()
 ): NodeStartedEvent {
-  return { type: 'NodeStarted', taskId, nodeId, occurredAt, version: CURRENT_EVENT_VERSION, payload };
+  return {
+    type: 'NodeStarted',
+    taskId,
+    nodeId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
+  };
 }
 
 export function makeNodeCompleted(
@@ -252,7 +343,14 @@ export function makeNodeCompleted(
   payload: NodeCompletedPayload,
   occurredAt = nowIso()
 ): NodeCompletedEvent {
-  return { type: 'NodeCompleted', taskId, nodeId, occurredAt, version: CURRENT_EVENT_VERSION, payload };
+  return {
+    type: 'NodeCompleted',
+    taskId,
+    nodeId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
+  };
 }
 
 export function makeNodeFailed(
@@ -261,7 +359,14 @@ export function makeNodeFailed(
   payload: NodeFailedPayload,
   occurredAt = nowIso()
 ): NodeFailedEvent {
-  return { type: 'NodeFailed', taskId, nodeId, occurredAt, version: CURRENT_EVENT_VERSION, payload };
+  return {
+    type: 'NodeFailed',
+    taskId,
+    nodeId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
+  };
 }
 
 export function makePaymentLocked(
@@ -270,7 +375,14 @@ export function makePaymentLocked(
   payload: PaymentLockedPayload,
   occurredAt = nowIso()
 ): PaymentLockedEvent {
-  return { type: 'PaymentLocked', taskId, nodeId, occurredAt, version: CURRENT_EVENT_VERSION, payload };
+  return {
+    type: 'PaymentLocked',
+    taskId,
+    nodeId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
+  };
 }
 
 export function makePaymentReleased(
@@ -279,7 +391,14 @@ export function makePaymentReleased(
   payload: PaymentReleasedPayload,
   occurredAt = nowIso()
 ): PaymentReleasedEvent {
-  return { type: 'PaymentReleased', taskId, nodeId, occurredAt, version: CURRENT_EVENT_VERSION, payload };
+  return {
+    type: 'PaymentReleased',
+    taskId,
+    nodeId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
+  };
 }
 
 export function makeTaskCompleted(taskId: string, occurredAt = nowIso()): TaskCompletedEvent {
@@ -297,5 +416,22 @@ export function makeTaskFailed(
     occurredAt,
     version: CURRENT_EVENT_VERSION,
     payload: error !== undefined ? { error } : undefined,
+  };
+}
+
+/**
+ * Build a `ReconciliationEvent` (`RECONCILIATION_EVENT`) — issue #496.
+ */
+export function makeReconciliationEvent(
+  taskId: string,
+  payload: ReconciliationEventPayload,
+  occurredAt = nowIso()
+): ReconciliationEventEvent {
+  return {
+    type: RECONCILIATION_EVENT,
+    taskId,
+    occurredAt,
+    version: CURRENT_EVENT_VERSION,
+    payload,
   };
 }

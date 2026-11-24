@@ -314,4 +314,61 @@ describe('WebSocket task stream', () => {
     });
     expect(eventBus.listenerCount(taskId)).toBe(before);
   }, 10_000);
+
+  // ── Issue #654: advertised URL must match accepted path ───────────────────
+
+  it('the URL returned in the task response upgrades successfully (AC1 & AC3)', async () => {
+    // Create a task via the API and capture the full response body.
+    const createRes = await request(httpServer)
+      .post('/api/tasks')
+      .set('Accept-Version', '2.0')
+      .set('X-Api-Version', '2.0')
+      .send({ prompt: PROMPT, walletPublicKey: OWNER });
+
+    // The _links.stream field is the canonical advertised URL (AC3: derived
+    // from taskStreamUrl(), the same constant the handler matches against).
+    const advertisedPath: string = createRes.body._links?.stream;
+    expect(advertisedPath).toBeDefined();
+    expect(advertisedPath).toMatch(/^\/api\/tasks\/.+\/stream$/);
+
+    // Connect using the exact string the API returned — no manual construction.
+    const wsUrl = `ws://127.0.0.1:${(httpServer.address() as { port: number }).port}${advertisedPath}`;
+    const ws = new WebSocket(wsUrl);
+
+    const opened = await new Promise<void>((resolve, reject) => {
+      ws.on('open', resolve);
+      ws.on('error', reject);
+    });
+    expect(opened).toBeUndefined(); // 101 Switching Protocols
+
+    ws.close();
+  }, 10_000);
+
+  it('accepts /tasks/:id/stream (no /api prefix) — backward-compat path (AC2)', async () => {
+    const taskId = await createTaskFor(OWNER);
+    const port = (httpServer.address() as { port: number }).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/tasks/${taskId}/stream`);
+
+    const opened = await new Promise<void>((resolve, reject) => {
+      ws.on('open', resolve);
+      ws.on('error', reject);
+    });
+    expect(opened).toBeUndefined();
+
+    ws.close();
+  }, 10_000);
+
+  it('accepts /api/tasks/:id/stream (/api prefix) — canonical path (AC2)', async () => {
+    const taskId = await createTaskFor(OWNER);
+    const port = (httpServer.address() as { port: number }).port;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/tasks/${taskId}/stream`);
+
+    const opened = await new Promise<void>((resolve, reject) => {
+      ws.on('open', resolve);
+      ws.on('error', reject);
+    });
+    expect(opened).toBeUndefined();
+
+    ws.close();
+  }, 10_000);
 });

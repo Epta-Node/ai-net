@@ -44,4 +44,9 @@ describe('KpiCard Component', () => {
     const sparklineContainer = container.querySelector('[class*="sparkline"]');
     expect(sparklineContainer).toBeInTheDocument();
   });
+
+  test('renders without a sparkline when no series is available', () => {
+    const { container } = render(<KpiCard title="Total Agents" value={12} />);
+    expect(container.querySelector('[class*="sparkline"]')).not.toBeInTheDocument();
+  });
 });

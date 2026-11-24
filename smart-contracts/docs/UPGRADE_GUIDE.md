@@ -2,6 +2,25 @@
 
 This guide explains how to safely upgrade ai-net smart contracts using the comprehensive upgrade mechanism with data migration, version tracking, and rollback capabilities.
 
+---
+
+## Architectural Decision Record (ADR-001): Standardized Workspace Upgrade Design
+
+### Context & Problem Statement
+The workspace previously contained multiple fragmented upgrade patterns:
+- **Canonical Design**: Proposal-scoped upgrade via `UpgradeManager` + `Upgradeable` trait + timelock + pre/post-migration hooks (used by `agent_registry`).
+- **Ad-Hoc Design**: Direct, unvalidated `update_current_contract_wasm` calls bypassing version checks, compatibility hooks, and rollback records (previously in `error-registry`, `task_store`, `agent_bidding`).
+
+Ad-hoc upgrades constituted a major security vulnerability, allowing immediate WASM replacement without safety checks or emergency rollback windows.
+
+### Decision
+We standardize on **Design 2 (UpgradeManager + Upgradeable Trait + Timelock + Hooks)** across the workspace:
+1. **Single Canonical Upgrade Path**: All contract upgrades must be performed through `UpgradeManager` via proposals, validation hooks, and 48-hour rollback windows.
+2. **Deprecation of Ad-Hoc Paths**: All direct public `upgrade` methods calling `update_current_contract_wasm` outside `UpgradeManager` and the `Upgradeable` implementation have been removed.
+3. **CI Enforcement**: `scripts/check_upgrade_paths.sh` is executed in CI to ensure no contract invokes `update_current_contract_wasm` directly outside canonical files.
+
+---
+
 ## Overview
 
 The ai-net smart contracts support two upgrade methods:
@@ -10,6 +29,59 @@ The ai-net smart contracts support two upgrade methods:
 2. **Direct Upgrade**: Traditional upgrade method for compatibility
 
 > 📖 **Operator Runbook:** For step-by-step testnet deployment, migration verification, and emergency rollback commands, see the [Testnet Contract Upgrade Runbook](TESTNET_UPGRADE_RUNBOOK.md).
+
+## Version Format Contract
+
+Version tags passed to `initialize`, `propose_upgrade` and the
+`Upgradeable` hooks must follow:
+
+```text
+MAJOR.MINOR.PATCH[.N...][-PRERELEASE][+BUILD]
+```
+
+- 1 to 8 dot-separated **numeric** components, each a `u32` with no sign and
+  no empty parts (`1..0`, `v1.0.0`, `1.x.0` are rejected).
+- Tags longer than 64 bytes are rejected.
+- Precedence (`strutil::compare_versions`) is **numeric and component-wise**,
+  not byte-wise: `1.10.0 > 1.9.0`, `1.100.0 > 1.99.0`, `10.0.0 > 2.0.0`.
+  Missing trailing components count as `0` (`1.0 == 1.0.0`).
+- A **pre-release** (`-rc.1`, `-alpha`) sorts **below** its release:
+  `1.0.0-rc.1 < 1.0.0`. Pre-release identifiers follow SemVer 2.0 §11
+  (numeric identifiers compared numerically and below alphanumeric ones;
+  `1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-alpha.beta < 1.0.0-beta.2 <
+  1.0.0-beta.11 < 1.0.0-rc.1 < 1.0.0`).
+- **Build metadata** (`+build.5`) is ignored for precedence.
+
+`propose_upgrade` accepts only a strictly newer version:
+
+| Condition | Error |
+|---|---|
+| Proposed tag malformed | `UpgradeError::MalformedVersion` (14) |
+| Proposed `<=` current | `UpgradeError::DowngradeNotAllowed` (12) |
+
+`agent_registry` (`version_utils::check_compatibility` /
+`generate_migration_steps`) uses the same comparison and returns
+`UpgradeableError::IncompatibleVersion` for malformed tags.
+
+## Wasm Swap Guarantees
+
+`execute_upgrade`, `rollback_upgrade` and `agent_registry`'s
+`upgrade` / `upgrade_contract` / `emergency_rollback` all go through
+`upgrade_manager::swap_wasm`, which never reports success without swapping:
+
+| Build | Behaviour |
+|---|---|
+| `wasm32`, no `testutils` (on-chain) | calls `update_current_contract_wasm(hash)` |
+| `cfg(test)` or feature `testutils` | mock deployer records every target hash (`mock_swap_calls`) so tests assert the swap and its hash |
+| any other native build | returns `SwapUnavailable` (`UpgradeError` 15 / `UpgradeableError` 9 / registry `Error` 38) |
+
+After a successful swap the hash is stored under the `wasm_hash` instance key;
+`get_wasm_hash` returns it (all-zero hash if nothing has been recorded yet).
+
+`validate_proposal` reports the plan-based estimate from
+`estimate_migration_gas`; the per-batch `gas_used` in migration progress
+events uses the same model (`GAS_MIGRATION_STEP_OVERHEAD +
+GAS_MIGRATION_PER_ITEM × items`) since Soroban exposes no in-contract gas meter.
 
 ## Upgrade Manager Architecture
 

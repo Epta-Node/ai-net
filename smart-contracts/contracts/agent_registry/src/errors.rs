@@ -69,6 +69,20 @@ pub enum Error {
     InvalidConfig = 34,
     /// Price supplied is zero or negative.
     InvalidPrice = 35,
+    /// Multisig configuration is already active for this contract.
+    MultisigAlreadyConfigured = 36,
+    /// Bond cannot be withdrawn or modified while a dispute is unresolved.
+    DisputePending = 37,
+    /// The Wasm swap is unavailable in this build; the upgrade was not applied.
+    SwapUnavailable = 38,
+    /// Agent has been deregistered (bond cooldown is still in effect).
+    AgentDeregistered = 39,
+    /// Version string is not valid semver (major.minor.patch).
+    InvalidVersion = 40,
+    /// No versions are registered for this agent.
+    NoVersionsFound = 41,
+    /// The requested agent version does not exist.
+    VersionNotFound = 42,
 }
 
 impl Error {
@@ -110,6 +124,13 @@ impl Error {
             33 => Some(Error::RateLimitExceeded),
             34 => Some(Error::InvalidConfig),
             35 => Some(Error::InvalidPrice),
+            36 => Some(Error::MultisigAlreadyConfigured),
+            37 => Some(Error::DisputePending),
+            38 => Some(Error::SwapUnavailable),
+            39 => Some(Error::AgentDeregistered),
+            40 => Some(Error::InvalidVersion),
+            41 => Some(Error::NoVersionsFound),
+            42 => Some(Error::VersionNotFound),
             _ => None,
         }
     }

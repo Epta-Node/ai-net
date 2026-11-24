@@ -78,3 +78,28 @@ Indicates that the Venice AI service is currently down or the circuit breaker ha
 
 ### `STELLAR_UNAVAILABLE` (HTTP 503)
 Indicates that the Stellar network (e.g., Horizon API) is currently unreachable or experiencing issues.
+
+### Bounded agent listing
+
+`GET /api/agents` requires `limit` (an integer from 1 to 100). Requests without
+it, or with invalid limits/cursors, return HTTP 400. The legacy unbounded array
+response is no longer supported. Capability, reputation, price, and status
+filters can be combined with pagination.
+
+```text
+GET /api/agents?limit=100&capability=research
+```
+
+The response contains `data.items` and `data.pagination` (`limit`, `nextCursor`,
+`hasNextPage`). Pass `nextCursor` as `cursor` for the next request, keeping the
+same filters, or follow `_links.next`, which preserves those filters. A null
+`nextCursor` marks the final page. `AgentDb.list()` is a bounded convenience
+wrapper (20 by default, 100 maximum); use `listCursor()` to traverse all pages.
+
+### Task history database API
+
+`getEventHistory(taskId, { afterId, limit })` returns `{ items, nextCursor }`.
+`limit` defaults to 100 and must be between 1 and 100; `afterId` defaults to -1 so events at sequence zero are included.
+Pass the returned numeric `nextCursor` as `afterId` until it is null. This cursor
+is the immutable **per-task sequence** (`task_seq`) in the current event schema,
+not the global event sequence. The coordinator wrapper accepts the same options.

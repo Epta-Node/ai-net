@@ -3,8 +3,6 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { SkeletonTable } from '../common/Skeleton';
 import styles from './RecentTasksTable.module.css';
-import { getRecentTasks } from '@services/api';
-import { useToast } from '../../hooks/useToast';
 import type { TaskResponse } from '../../types/api';
 import { formatDateTime } from '../../utils/format';
 import { DataTable, type DataTableColumn } from '../common/DataTable';
@@ -18,34 +16,8 @@ interface Props {
 }
 
 export const RecentTasksTable: React.FC<Props> = ({ walletAddress, loading }) => {
-  const [tasks, setTasks] = React.useState<TaskResponse[]>([]);
-  const { showToast } = useToast();
+  const [tasks] = React.useState<TaskResponse[]>([]);
   const { t, i18n } = useTranslation();
-
-  React.useEffect(() => {
-    if (!walletAddress) return;
-    const fetchTasks = async () => {
-      try {
-        const data = await getRecentTasks(walletAddress);
-        const mappedTasks = data.map(task => ({
-          ...task,
-          id: task.id || task.taskId,
-        }));
-        setTasks(mappedTasks);
-      } catch (e) {
-        const message = e instanceof Error ? e.message : 'Failed to load recent tasks.';
-        showToast(message, 'error');
-        showToast('Failed to fetch recent tasks', 'error');
-        // i18n.t (not the captured t) so the toast always uses the current
-        // language without putting t in the deps, which would refetch on every
-        // language change.
-        const fallback = i18n.t('dashboard.recentTasks.fetchError');
-        showToast(e instanceof Error ? e.message : fallback, 'error');
-        setTasks([]);
-      }
-    };
-    fetchTasks();
-  }, [walletAddress, showToast, i18n]);
 
   if (loading) {
     return (

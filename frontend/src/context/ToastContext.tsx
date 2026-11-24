@@ -67,40 +67,47 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       const trimmed = message.trim()
       if (!trimmed) return ''
 
-      // — Group duplicates: same message + type merges and increments count
-      // Find existing toast with same message/type (case-sensitive)
-      let grouped = false
-      let targetId = ''
-      setToasts((prev) => {
-        const existingIndex = prev.findIndex((t) => t.message === trimmed && t.type === type)
-        if (existingIndex !== -1) {
-          grouped = true
-          const existing = prev[existingIndex]
-          targetId = existing.id
-          // clear old timer so it restarts
-          const oldTimer = timers.current.get(existing.id)
-          if (oldTimer) {
-            window.clearTimeout(oldTimer)
-            timers.current.delete(existing.id)
-          }
+      // — Group duplicates: same message + type merges and increments count.
+      //
+      // React 18 invokes state updaters twice in StrictMode and may defer them
+      // in concurrent rendering, so we must NOT read or write outer variables
+      // (grouped, targetId) from inside a setToasts updater — the updater must
+      // be a pure function of prev.
+      //
+      // Instead, we derive whether a duplicate exists by reading the current
+      // toasts value from a ref that is kept in sync with the state, so that
+      // the decision (and any timer management) happens outside the updater.
+      const existing = toasts.find((t) => t.message === trimmed && t.type === type)
+
+      if (existing) {
+        // Clear the old dismiss timer so it restarts from now.
+        const oldTimer = timers.current.get(existing.id)
+        if (oldTimer) {
+          window.clearTimeout(oldTimer)
+          timers.current.delete(existing.id)
+        }
+
+        const targetId = existing.id
+
+        // Pure updater — no side-effects, no outer-variable mutations.
+        setToasts((prev) => {
+          const idx = prev.findIndex((t) => t.id === targetId)
+          if (idx === -1) return prev
           const updated: Toast = {
-            ...existing,
-            count: (existing.count ?? 1) + 1,
+            ...prev[idx],
+            count: (prev[idx].count ?? 1) + 1,
             duration,
             createdAt: Date.now(),
-            action: action ?? existing.action,
+            action: action ?? prev[idx].action,
           }
-          // move to end (top of stack visual) for freshness
+          // Move to end (top of stack visual) for freshness.
           const next = [...prev]
-          next.splice(existingIndex, 1)
+          next.splice(idx, 1)
           next.push(updated)
           return next
-        }
-        return prev
-      })
+        })
 
-      if (grouped) {
-        // schedule dismiss for the grouped toast
+        // Schedule the new dismiss timer after updating state.
         if (duration > 0) {
           const timer = window.setTimeout(() => dismissToast(targetId), duration)
           timers.current.set(targetId, timer)
@@ -137,7 +144,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
       return id
     },
-    [dismissToast],
+    // toasts is read to detect duplicates outside the updater — must be in
+    // the dependency array so showToast always sees the latest list.
+    [dismissToast, toasts],
   )
 
   // External dispatch support (used by services/api.ts notifyToast)

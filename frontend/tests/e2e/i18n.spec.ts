@@ -27,6 +27,21 @@ test.describe('phase 2 · i18n in the real app', () => {
     await page.reload()
     await expect(page.locator('#page-title')).toHaveText('Wallet')
     await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+
+    // Switch to Spanish
+    await page.locator('#btn-lang-es').click()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+    await expect(page.locator('#page-title')).toHaveText('Cartera')
+    await expect(page.locator('#wallet-pubkey-display')).toHaveText('No conectado')
+
+    // Reload persists Spanish
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'es')
+    await expect(page.locator('#page-title')).toHaveText('Cartera')
+    expect(await page.evaluate(() => localStorage.getItem('i18nextLng'))).toBe('es')
+
+    // Restore to English
+    await page.locator('#btn-lang-en').click()
   })
 
   test('page title follows client-side navigation (getTitle regression)', async ({ page }) => {

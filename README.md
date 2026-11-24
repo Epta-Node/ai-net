@@ -138,7 +138,8 @@ docker compose up -d
 
 # 3. Access interfaces:
 # - Frontend: http://localhost:5173
-# - Backend API: http://localhost:3000 (Health: http://localhost:3000/health)
+# - Backend API: http://localhost:3000 (Liveness: /health/live, dependencies: /health/deep)
+# - API docs (Swagger UI): http://localhost:3000/api-docs
 # - Stellar Standalone RPC: http://localhost:8000/soroban/rpc
 ```
 
@@ -260,6 +261,7 @@ npm run test:e2e
 - [Developer Setup Guide](docs/DEVELOPER_SETUP.md): Fast onboarding from clean clone to running local node, testnet deployments, Freighter wallet setup, and testing.
 - [Architecture Specification](docs/architecture/index.md): System context, component architecture, Mermaid sequence diagrams, and security model.
 - [REST API Reference](docs/API_REFERENCE.md): Comprehensive per-endpoint documentation, error codes taxonomy, authentication headers, and runnable curl examples.
+- [Interactive API Reference](http://localhost:3000/api-docs): Live Swagger UI served by the backend, backed by the OpenAPI 3.1 spec. Raw spec at [`/openapi.json`](http://localhost:3000/openapi.json) and [`/openapi.yaml`](http://localhost:3000/openapi.yaml).
 - [Node Operators Guide](docs/NODE_OPERATORS_GUIDE.md): Step-by-step instructions for provisioning, configuring secrets, deploying smart contracts, funding accounts, operating nodes, monitoring metrics, and troubleshooting common errors.
 - [Smart Contract Deployment Guide](smart-contracts/docs/DEPLOYMENT_GUIDE.md): Complete deployment and upgrade workflows on Soroban.
 - [Task Store Lifecycle Events](smart-contracts/docs/TASK_STORE_EVENTS.md): Versioned on-chain event schema for task creation, updates, and finalization.

@@ -10,9 +10,51 @@ import type { PoolMetrics } from "./pool";
 import { currentPaymentPool } from "./index";
 import { currentTaskPool } from "./tasks";
 import { currentAgentPool } from "./agents";
+import { getDbQueryMetricsSnapshot, type DbOperation, type DbQueryMetricsSnapshot } from "./queryMetrics";
+
+export { getDbQueryMetricsSnapshot, type DbOperation, type DbQueryMetricsSnapshot };
 
 /** Per-database metrics, keyed by database name. Absent pools are omitted. */
 export type DatabasePoolMetrics = Record<string, PoolMetrics>;
+
+/**
+ * Per-database health view used by `GET /health/deep` (#807): pool utilisation
+ * plus the query-latency summary for each named database.
+ */
+export interface DatabaseMetricsSnapshot {
+  [database: string]: {
+    activeConnections: number;
+    idleConnections: number;
+    totalConnections: number;
+    pendingAcquires: number;
+    timedOutAcquires: number;
+    p99LatencyMs: number;
+    slowQueries: number;
+  };
+}
+
+/**
+ * Snapshot pool utilisation and query latency for every open database. A
+ * database that has not been opened yet is omitted rather than reported as idle.
+ */
+export function getDatabaseMetrics(): DatabaseMetricsSnapshot {
+  const pools = databasePoolMetrics();
+  const queries = getDbQueryMetricsSnapshot().databases;
+  const snapshot: DatabaseMetricsSnapshot = {};
+  for (const [name, pool] of Object.entries(pools)) {
+    const query = queries[name];
+    snapshot[name] = {
+      activeConnections: pool.activeConnections,
+      idleConnections: pool.idleConnections,
+      totalConnections: pool.totalConnections,
+      pendingAcquires: pool.pendingAcquires,
+      timedOutAcquires: pool.timedOutAcquires,
+      p99LatencyMs: query?.p99LatencyMs ?? 0,
+      slowQueries: query?.slowQueries ?? 0,
+    };
+  }
+  return snapshot;
+}
 
 /** Snapshot every open pool. Databases not yet opened are simply absent. */
 export function databasePoolMetrics(): DatabasePoolMetrics {

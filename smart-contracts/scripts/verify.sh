@@ -13,6 +13,9 @@ NC='\033[0m' # No Color
 NETWORK="testnet"
 DEPLOYMENT_FILE=""
 REBUILD=false
+STRICT=false
+JSON_OUTPUT=false
+REPORT_SIZES=false
 
 # Usage function
 usage() {
@@ -28,18 +31,25 @@ OPTIONS:
     -n, --network NETWORK    Network to verify against (testnet, futurenet, mainnet) [default: testnet]
     -f, --deployment-file    Path to deployment metadata file (optional, uses default for network)
     -r, --rebuild            Rebuild contracts before verification
+    --strict                 Exit non-zero on any mismatch or skipped check (use for releases)
+    --json                   Print the verification report as JSON on stdout (logs go to stderr)
+    --report-sizes           Report optimized Wasm sizes against the committed budget, then exit
+                             (requires a prior `cargo build --target wasm32v1-none --release`)
     -h, --help               Show this help message
 
 ENVIRONMENT VARIABLES:
     STELLAR_SECRET_KEY       Secret key for account (required for contract inspection)
     STELLAR_RPC_URL         RPC URL for the network (optional, uses default for network)
     STELLAR_HORIZON_URL     Horizon URL for the network (optional, uses default for network)
+    WASM_DIR                Directory with the locally built .wasm files (optional)
+    REPORT_DIR              Directory for the verification report (optional)
 
 EXAMPLES:
     $0                       Verify all contracts on testnet
     $0 agent-registry       Verify only the agent-registry contract
     $0 -n futurenet -r      Rebuild and verify on futurenet
     $0 -f /path/to/deployment.json  Use custom deployment file
+    $0 -n mainnet --strict --json   Release check: fail on any mismatch, emit JSON
 EOF
 }
 
@@ -57,6 +67,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         -r|--rebuild)
             REBUILD=true
+            shift
+            ;;
+        --strict)
+            STRICT=true
+            shift
+            ;;
+        --json)
+            JSON_OUTPUT=true
+            shift
+            ;;
+        --report-sizes)
+            REPORT_SIZES=true
             shift
             ;;
         -h|--help)
@@ -91,6 +113,11 @@ case $NETWORK in
         ;;
 esac
 
+# In JSON mode stdout carries only the report; logs go to stderr.
+if [[ "$JSON_OUTPUT" == "true" ]]; then
+    exec 3>&1 1>&2
+fi
+
 # Set network-specific defaults
 set_network_defaults() {
     case $NETWORK in
@@ -120,7 +147,8 @@ CONTRACTS=(
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 DEPLOYMENTS_DIR="$PROJECT_ROOT/deployments"
-TARGET_DIR="$PROJECT_ROOT/target/wasm32-unknown-unknown/release"
+TARGET_DIR="${WASM_DIR:-$PROJECT_ROOT/target/wasm32-unknown-unknown/release}"
+REPORT_DIR="${REPORT_DIR:-$PROJECT_ROOT}"
 
 # Set default deployment file if not specified
 if [[ -z "$DEPLOYMENT_FILE" ]]; then
@@ -145,6 +173,23 @@ check_deployment_file() {
         echo -e "${YELLOW}Hint: Run deploy.sh first to deploy contracts${NC}" >&2
         exit 1
     fi
+
+    # The metadata must describe the network being verified.
+    local file_network
+    file_network=$(jq -r '.network // empty' "$DEPLOYMENT_FILE")
+    if [[ "$file_network" != "$NETWORK" ]]; then
+        echo -e "${RED}Error: Deployment file is for '$file_network', not '$NETWORK'${NC}" >&2
+        exit 1
+    fi
+}
+
+# Report a skipped check: a warning normally, a failure in --strict mode.
+warn_or_fail() {
+    if [[ "$STRICT" == "true" ]]; then
+        echo -e "${RED}  ✗ $1 (--strict)${NC}"
+        return 1
+    fi
+    echo -e "${YELLOW}  ⚠ $1${NC}"
 }
 
 # Get deployed contract info
@@ -217,17 +262,37 @@ check_contract_health() {
     fi
 }
 
-# Get deployed contract Wasm hash (this is conceptual - Soroban doesn't expose this directly)
+# Get the Wasm hash of the code actually deployed on-chain (empty if unavailable)
 get_deployed_wasm_hash() {
     local contract_id="$1"
-    
-    # In a real implementation, you'd need to:
-    # 1. Query the contract's code hash from Soroban RPC
-    # 2. Use soroban contract inspect or similar commands
-    # For now, we'll use the stored hash from deployment metadata
-    
-    # This is a placeholder - in practice you'd query the network
-    echo "placeholder_hash_from_network"
+    local tmp
+    tmp=$(mktemp)
+    if soroban contract fetch \
+        --id "$contract_id" \
+        --rpc-url "$STELLAR_RPC_URL" \
+        --network-passphrase "$(get_network_passphrase)" \
+        --out-file "$tmp" >/dev/null 2>&1; then
+        calculate_wasm_hash "$tmp"
+    fi
+    rm -f "$tmp"
+}
+
+# Get the admin currently recorded on-chain (empty if unavailable)
+get_deployed_admin() {
+    local contract_id="$1"
+    local fn out
+    for fn in get_admin admin; do
+        if out=$(soroban contract invoke \
+            --id "$contract_id" \
+            --source-account "$STELLAR_SECRET_KEY" \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$(get_network_passphrase)" \
+            --send=no \
+            -- "$fn" 2>/dev/null); then
+            echo "$out" | tr -d '"[:space:]'
+            return
+        fi
+    done
 }
 
 # Verify contract deployment
@@ -236,6 +301,9 @@ verify_contract() {
     local wasm_file="$2"
     
     echo -e "${BLUE}Verifying $name...${NC}"
+    LOCAL_HASH=""
+    DEPLOYED_HASH=""
+    DEPLOYED_ADMIN=""
     
     # Get contract info from deployment metadata
     local contract_info
@@ -261,6 +329,7 @@ verify_contract() {
     # Calculate current hash
     local current_hash
     current_hash=$(calculate_wasm_hash "$wasm_file")
+    LOCAL_HASH="$current_hash"
     
     echo -e "${BLUE}  Contract ID:${NC} $contract_id"
     echo -e "${BLUE}  Stored hash:${NC} $stored_hash"
@@ -278,20 +347,46 @@ verify_contract() {
         return 1
     fi
     
-    # Check contract health
+    # Compare the code deployed on-chain against the local build
+    if command -v soroban >/dev/null 2>&1; then
+        DEPLOYED_HASH=$(get_deployed_wasm_hash "$contract_id")
+    fi
+    if [[ -z "$DEPLOYED_HASH" ]]; then
+        warn_or_fail "Could not fetch the on-chain Wasm hash" || return 1
+    elif [[ "$DEPLOYED_HASH" != "$current_hash" ]]; then
+        echo -e "${BLUE}  On-chain hash:${NC} $DEPLOYED_HASH"
+        echo -e "${RED}  ✗ On-chain Wasm differs from the local build${NC}"
+        return 1
+    else
+        echo -e "${GREEN}  ✓ On-chain Wasm matches the local build${NC}"
+    fi
+
+    # Check contract health and the admin / upgrade authority
     if [[ -n "$STELLAR_SECRET_KEY" ]]; then
         if ! check_contract_health "$name" "$contract_id"; then
             return 1
         fi
+        DEPLOYED_ADMIN=$(get_deployed_admin "$contract_id")
     else
-        echo -e "${YELLOW}  ⚠ Skipping health check (STELLAR_SECRET_KEY not set)${NC}"
+        warn_or_fail "Skipping health and admin checks (STELLAR_SECRET_KEY not set)" || return 1
     fi
+
+    local expected_admin
+    expected_admin=$(echo "$contract_info" | jq -r '.admin // empty')
+    if [[ -z "$expected_admin" ]]; then
+        warn_or_fail "No expected admin recorded in deployment metadata" || return 1
+    elif [[ -n "$STELLAR_SECRET_KEY" && "$DEPLOYED_ADMIN" != "$expected_admin" ]]; then
+        echo -e "${RED}  ✗ Admin mismatch (expected $expected_admin, on-chain ${DEPLOYED_ADMIN:-unknown})${NC}"
+        return 1
+    fi
+
+    echo -e "${BLUE}  Config summary:${NC} version=$(echo "$contract_info" | jq -r '.version // "unknown"') admin=${DEPLOYED_ADMIN:-${expected_admin:-unknown}} upgrade_function=$(echo "$contract_info" | jq -r '.upgrade_function // "unknown"')"
     
     # Verify Wasm file integrity
     echo -e "${BLUE}  Checking Wasm file integrity...${NC}"
     
     # Check magic number
-    if ! xxd -l 4 "$wasm_file" | grep -q "0061736d"; then
+    if ! [[ "$(xxd -p -l 4 "$wasm_file")" == "0061736d" ]]; then
         echo -e "${RED}  ✗ Invalid Wasm file (missing magic number)${NC}"
         return 1
     fi
@@ -361,7 +456,7 @@ get_contracts_to_verify() {
 # Generate verification report
 generate_report() {
     local verification_results="$1"
-    local report_file="$PROJECT_ROOT/verification-report-${NETWORK}-$(date +%Y%m%d-%H%M%S).json"
+    local report_file="$REPORT_DIR/verification-report-${NETWORK}-$(date +%Y%m%d-%H%M%S).json"
     
     echo -e "${BLUE}Generating verification report...${NC}"
     
@@ -383,6 +478,19 @@ generate_report() {
     
     echo "$report" > "$report_file"
     echo -e "${BLUE}Report saved to:${NC} $report_file"
+    if [[ "$JSON_OUTPUT" == "true" ]]; then
+        echo "$report" >&3
+    fi
+}
+
+# Build one machine-readable result entry for the current contract
+result_json() {
+    jq -nc --arg contract "$1" --arg status "$2" --arg reason "${3:-}" \
+        --arg local_hash "${LOCAL_HASH:-}" --arg deployed_hash "${DEPLOYED_HASH:-}" \
+        --arg admin "${DEPLOYED_ADMIN:-}" '
+        {contract: $contract, status: $status, local_hash: $local_hash,
+         deployed_hash: $deployed_hash, admin: $admin}
+        + (if $reason != "" then {reason: $reason} else {} end)'
 }
 
 # Main execution
@@ -425,7 +533,7 @@ main() {
             if [[ "$first_result" != "true" ]]; then
                 verification_results+=","
             fi
-            verification_results+="{\"contract\":\"$contract_name\",\"status\":\"failed\",\"reason\":\"wasm_file_not_found\"}"
+            verification_results+=$(LOCAL_HASH="" DEPLOYED_HASH="" DEPLOYED_ADMIN="" result_json "$contract_name" failed wasm_file_not_found)
             first_result=false
             continue
         fi
@@ -435,7 +543,7 @@ main() {
             if [[ "$first_result" != "true" ]]; then
                 verification_results+=","
             fi
-            verification_results+="{\"contract\":\"$contract_name\",\"status\":\"verified\"}"
+            verification_results+=$(result_json "$contract_name" verified)
         else
             verification_success=false
             
@@ -443,7 +551,7 @@ main() {
             if [[ "$first_result" != "true" ]]; then
                 verification_results+=","
             fi
-            verification_results+="{\"contract\":\"$contract_name\",\"status\":\"failed\"}"
+            verification_results+=$(result_json "$contract_name" failed)
         fi
         first_result=false
         
@@ -482,5 +590,9 @@ check_dependencies() {
 }
 
 # Entry point
+if [[ "$REPORT_SIZES" == "true" ]]; then
+    exec node "$SCRIPT_DIR/check-wasm-size.mjs" --report
+fi
+
 check_dependencies
 main "$@"

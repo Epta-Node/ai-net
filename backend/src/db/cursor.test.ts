@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "@jest/globals";
 import Database from "better-sqlite3";
 import { createTaskDb } from "../../src/db/tasks";
-import { createAgentDb, type AgentRecord } from "../../src/db/agents";
+import { createAgentDb, ensureAgentTable, type AgentRecord } from "../../src/db/agents";
 import { decodeCursor } from "../../src/db/cursor";
 import type { Task } from "../../src/types/task";
 
@@ -153,18 +153,7 @@ describe("AgentDb.listCursor", () => {
 
   beforeEach(() => {
     const raw = new Database(":memory:");
-    raw.exec(`
-      CREATE TABLE agents (
-        id TEXT PRIMARY KEY,
-        capabilities TEXT NOT NULL,
-        pricingXLM REAL NOT NULL,
-        endpoint TEXT NOT NULL,
-        stellarPublicKey TEXT NOT NULL,
-        reputationScore REAL NOT NULL DEFAULT 0,
-        lastSeenAt TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'online'
-      )
-    `);
+    ensureAgentTable(raw);
     db = createAgentDb(raw);
 
     const base = new Date("2024-06-01T00:00:00.000Z").getTime();

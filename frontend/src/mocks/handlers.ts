@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw'
 
 export const handlers = [
   http.get('/api/agents', () => {
-    return HttpResponse.json([
+    return HttpResponse.json({ data: { items: [
       {
         id: 'agent-1',
         name: 'Research Specialist',
@@ -27,7 +27,7 @@ export const handlers = [
         reputation: 4.2,
         status: 'inactive',
       },
-    ])
+    ], pagination: { limit: 100, nextCursor: null, hasNextPage: false } } })
   }),
 
   http.post('/api/tasks', async () => {
@@ -54,48 +54,13 @@ export const handlers = [
     })
   }),
 
-  // Dashboard KPIs. Without this handler `useNetworkStats` fails against the
-  // dev server (no `/api/stats` backend proxy in dev mode), leaving the
-  // dashboard stuck on an error toast instead of its real layout — which is
-  // both a poor dev experience and unusable as a visual-regression baseline.
-  http.get('/api/stats', () => {
+  // Dashboard KPIs. Mocks the stats endpoint for dev/test.
+  http.get('/api/stats/stats', () => {
     return HttpResponse.json({
       totalAgents: 12,
       totalTasks: 48,
       totalXLMTransacted: 156.75,
       uptimePercent: 99.95,
     })
-  }),
-
-  http.get('/api/wallets/:address/tasks', () => {
-    return HttpResponse.json([
-      {
-        taskId: 'mock-task-recent-1',
-        prompt: 'Summarize on-chain agent reputation trends.',
-        walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
-        status: 'completed',
-        dag: [],
-        createdAt: '2026-08-20T09:15:00.000Z',
-        updatedAt: '2026-08-20T09:22:00.000Z',
-      },
-      {
-        taskId: 'mock-task-recent-2',
-        prompt: 'Draft a smart-contract audit checklist.',
-        walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
-        status: 'running',
-        dag: [],
-        createdAt: '2026-08-21T14:02:00.000Z',
-        updatedAt: '2026-08-21T14:05:00.000Z',
-      },
-      {
-        taskId: 'mock-task-recent-3',
-        prompt: 'Generate a network health report.',
-        walletPublicKey: 'GBXV37U3P5SIH46YI77XQ6WPAUXF3C2EDTYO54PBYU11A7T5F2TY4S25',
-        status: 'failed',
-        dag: [],
-        createdAt: '2026-08-19T11:40:00.000Z',
-        updatedAt: '2026-08-19T11:41:00.000Z',
-      },
-    ])
   }),
 ]

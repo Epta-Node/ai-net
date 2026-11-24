@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { Networks } from '@stellar/stellar-sdk'
 import { WalletWizard } from './WalletWizard'
 import * as WalletContext from '../../context/WalletContext'
 import * as WalletBalanceHook from '../../hooks/useWalletBalance'
@@ -22,14 +23,21 @@ describe('WalletWizard', () => {
       publicKey: null,
       keypair: null,
       connected: false,
+      connecting: false,
       ready: false,
+      network: null,
+      expectedNetwork: Networks.TESTNET,
+      networkMismatch: false,
       connectionMethod: null,
       freighterAvailable: true,
+      error: null,
       connect: vi.fn(),
       connectFreighter: mockConnectFreighter,
+      connectSecretKey: vi.fn(),
       disconnect: vi.fn(),
       hasCompletedWizard: false,
       completeWizard: mockCompleteWizard,
+      autoReconnectSettled: true,
     })
     
     vi.spyOn(WalletBalanceHook, 'useWalletBalance').mockReturnValue({
@@ -93,14 +101,21 @@ describe('WalletWizard', () => {
       publicKey: 'GA123',
       keypair: null,
       connected: true,
+      connecting: false,
       ready: true,
+      network: Networks.TESTNET,
+      expectedNetwork: Networks.TESTNET,
+      networkMismatch: false,
       connectionMethod: 'freighter',
       freighterAvailable: true,
+      error: null,
       connect: vi.fn(),
       connectFreighter: mockConnectFreighter,
+      connectSecretKey: vi.fn(),
       disconnect: vi.fn(),
       hasCompletedWizard: false,
       completeWizard: mockCompleteWizard,
+      autoReconnectSettled: true,
     })
     
     render(<WalletWizard />)

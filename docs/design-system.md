@@ -50,6 +50,29 @@ Agent visuals use the `--agent-*` token set. Do not hard-code agent hex colors i
 
 Shadows and glow effects use `--shadow-*`, `--glow-*`, or `--info-glow-*`. Do not add raw `rgba()` shadows in component CSS.
 
+## Reduced motion (#721)
+
+All `framer-motion` animation runs inside `MotionProvider`
+(`frontend/src/components/common/MotionProvider.tsx`), which sets
+`MotionConfig reducedMotion="user"` so page transitions, toast/notification
+entrances, drawer slides, and DAG tooltips freeze automatically when the OS
+requests reduced motion. Shared variants live in
+`frontend/src/utils/animationPresets.ts` — do not define inline variants.
+
+For JS-driven effects outside `motion.*`, use `useMotionSafe()` (same file)
+or `usePrefersReducedMotion()` (`frontend/src/hooks/usePrefersReducedMotion.ts`)
+and render the final state immediately:
+
+```tsx
+const reduced = useMotionSafe();
+const display = reduced ? target : useAnimatedCounter(target);
+```
+
+CSS keyframes (toast slide-in, skeleton shimmer, status `animate-pulse` /
+`animate-spin` dots) each carry a `@media (prefers-reduced-motion: reduce)`
+override that disables the animation. Skeleton shimmer is decorative; the
+placeholder shape stays visible.
+
 ## Review Checklist
 
 Before merging UI changes:

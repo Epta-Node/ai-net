@@ -1,4 +1,4 @@
-import type { StatsResponse, TimePoint } from '../types/stats';
+import type { CostTotalsSummary, StatsResponse, TimePoint } from '../types/stats';
 
 import Database from 'better-sqlite3';
 
@@ -106,6 +106,88 @@ async function getXLMDailyTotals(db: DbClient, since: Date): Promise<Array<{ day
   return rows.map((row) => ({ day: row.day + 'T00:00:00.000Z', value: normalizeDecimal(Number(row.sum ?? 0) / STROOP_FACTOR) }));
 }
 
+/**
+ * Whether the cost tables exist yet.
+ *
+ * The stats endpoint is public and cached, and it must not start 500ing because
+ * a deployment predates migration 005 or the table was never created. One
+ * schema probe per call is cheap next to the eight aggregate queries beside it.
+ */
+function costTablesExist(db: DbClient): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_costs'")
+    .get() as { name?: string } | undefined;
+  return Boolean(row?.name);
+}
+
+async function getCostDailyTotals(db: DbClient, since: Date): Promise<Array<{ day: string; value: number }>> {
+  if (!costTablesExist(db)) return [];
+  // `task_costs` is upserted, so a task contributes exactly one row. Rows are
+  // keyed on createdAt, which is the task start time and is therefore stable
+  // across the periodic in-flight flushes.
+  const rows = db.prepare(
+    "SELECT strftime('%Y-%m-%d', \"createdAt\") AS day, COALESCE(SUM(\"costUsd\"), 0) AS sum FROM task_costs WHERE \"createdAt\" >= ? GROUP BY day ORDER BY day"
+  ).all(since.toISOString()) as Array<{ day: string; sum: string | number }>;
+  return rows.map((row) => ({ day: row.day + 'T00:00:00.000Z', value: Number(row.sum ?? 0) }));
+}
+
+const EMPTY_COST_TOTALS: Omit<CostTotalsSummary, 'costLast7d'> = {
+  tasks: 0,
+  calls: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  costUsd: 0,
+  overBudgetTasks: 0,
+};
+
+/**
+ * Platform-wide LLM spend rollup (Issue #390).
+ *
+ * Aggregated from `task_costs` rather than summed live, so the number survives
+ * a restart. Returns zeros when the table is empty or absent (fresh install, or
+ * before the 005 migration has run) instead of throwing — stats must not 500
+ * because cost tracking is unavailable.
+ */
+async function getCostTotals(db: DbClient): Promise<Omit<CostTotalsSummary, 'costLast7d'>> {
+  if (!costTablesExist(db)) return EMPTY_COST_TOTALS;
+
+  const row = db.prepare(
+    `SELECT
+       COUNT(*)                            AS tasks,
+       COALESCE(SUM(calls), 0)            AS calls,
+       COALESCE(SUM("promptTokens"), 0)   AS promptTokens,
+       COALESCE(SUM("completionTokens"), 0) AS completionTokens,
+       COALESCE(SUM("totalTokens"), 0)    AS totalTokens,
+       COALESCE(SUM("costUsd"), 0)         AS costUsd,
+       COALESCE(SUM(CASE WHEN exceeded = 1 THEN 1 ELSE 0 END), 0) AS overBudgetTasks
+     FROM task_costs`
+  ).get() as
+    | {
+        tasks: number;
+        calls: number;
+        promptTokens: number;
+        completionTokens: number;
+        totalTokens: number;
+        costUsd: number;
+        overBudgetTasks: number;
+      }
+    | undefined;
+
+  if (!row) return EMPTY_COST_TOTALS;
+
+  return {
+    tasks: Number(row.tasks ?? 0),
+    calls: Number(row.calls ?? 0),
+    promptTokens: Number(row.promptTokens ?? 0),
+    completionTokens: Number(row.completionTokens ?? 0),
+    totalTokens: Number(row.totalTokens ?? 0),
+    // 6dp: sub-cent totals must not round to a misleadingly round number.
+    costUsd: Math.round(Number(row.costUsd ?? 0) * 1e6) / 1e6,
+    overBudgetTasks: Number(row.overBudgetTasks ?? 0),
+  };
+}
+
 export async function getStats(db: DbClient, now: Date = new Date()): Promise<StatsResponse> {
   const currentHour = truncateToHour(now);
   const start24h = new Date(currentHour.getTime() - 23 * MS_PER_HOUR);
@@ -113,7 +195,7 @@ export async function getStats(db: DbClient, now: Date = new Date()): Promise<St
   const today = truncateToDay(now);
   const start7d = new Date(today.getTime() - 6 * MS_PER_DAY);
 
-  const [totalAgents, totalTasks, uptimePercent, taskRows, xlmRows, totalXLMTransacted, taskDayRows, xlmDayRows] = await Promise.all([
+  const [totalAgents, totalTasks, uptimePercent, taskRows, xlmRows, totalXLMTransacted, taskDayRows, xlmDayRows, costTotals, costDayRows] = await Promise.all([
     getTotalAgents(db),
     getTotalTasks(db),
     getUptimePercent(db, uptimeSince),
@@ -122,6 +204,8 @@ export async function getStats(db: DbClient, now: Date = new Date()): Promise<St
     getTotalXLMTransacted(db),
     getTasksDailyCounts(db, start7d),
     getXLMDailyTotals(db, start7d),
+    getCostTotals(db),
+    getCostDailyTotals(db, start7d),
   ]);
 
   return {
@@ -133,5 +217,6 @@ export async function getStats(db: DbClient, now: Date = new Date()): Promise<St
     xlmLast24h: buildHourlySeries(start24h, currentHour, xlmRows),
     tasksLast7d: buildDailySeries(start7d, today, taskDayRows),
     xlmLast7d: buildDailySeries(start7d, today, xlmDayRows),
+    cost: { ...costTotals, costLast7d: buildDailySeries(start7d, today, costDayRows) },
   };
 }

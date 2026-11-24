@@ -3,13 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   pull_request:
-    paths-ignore:
-      - "docs/**"
-      - "**.md"
   workflow_dispatch:
 
 concurrency:
@@ -18,6 +12,9 @@ concurrency:
 
 permissions:
   contents: read
+  # dorny/paths-filter queries the pull request files API on PR events.
+  # marocchino/sticky-pull-request-comment needs write to post/update comments.
+  pull-requests: write
 
 jobs:
   changes:
@@ -27,6 +24,8 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      contracts: ${{ steps.filter.outputs.contracts }}
+      compose: ${{ steps.filter.outputs.compose }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -39,14 +38,23 @@ jobs:
             backend:
               - 'backend/**'
               - 'tests/e2e/**'
-              - 'smart-contracts/**'
-              - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
+              - 'tests/e2e/**'
+            contracts:
+              - 'smart-contracts/**'
+              - '.github/workflows/ci.yml'
+            compose:
+              - 'backend/**'
+              - 'docker-compose.yml'
+              - '.dockerignore'
+              - 'tests/e2e/compose-smoke.mjs'
               - '.github/workflows/ci.yml'
 
   backend:
     name: backend
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -69,17 +77,37 @@ jobs:
       - name: Lint check
         run: npm run lint
 
+      - name: Validate .env.example matches config schema
+        run: npm run validate:env
+
       - name: Type-check and build
         run: npm run build
 
+      - name: Enforce gzipped route bundle budgets
+        run: npm run size
+
       - name: Unit tests & coverage
         run: npm run test:coverage
+
+      - name: Upload backend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: backend/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: OpenAPI contract tests
+        run: npm run test:contract
 
       - name: Performance latency budgets
         run: npm run test:performance
 
   frontend:
     name: frontend
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -99,6 +127,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # tsc accepts any `*.module.css`/asset path via vite/client's ambient
+      # module declarations, so a missing stylesheet only fails at bundle time.
+      - name: Check relative asset imports resolve
+        run: npm run check:imports
+
+      - name: Check locale key parity
+        run: npm run i18n:check
+
       - name: Lint check
         run: npm run lint
 
@@ -108,8 +144,19 @@ jobs:
       - name: Unit tests & coverage (vitest)
         run: npm run test:coverage
 
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: frontend/coverage/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 14
+
   frontend-visual:
     name: frontend-visual-regression
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.frontend == 'true' }}
     # Deliberately does NOT `needs: [frontend]`. This suite renders four
     # specific routes through `vite dev` (an on-demand, per-module dev
     # server), not the full production bundle `frontend`'s `npm run build`
@@ -150,33 +197,89 @@ jobs:
           path: frontend/playwright-report-visual/
           retention-days: 14
 
+      - name: Upload visual diff artifacts (actual/diff/expected PNGs)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-diffs
+          path: frontend/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Link visual diffs in job summary
         if: failure()
         run: |
           {
             echo "### Visual regression diffs detected";
             echo "Open the **playwright-visual-report** artifact attached to this run (Summary tab → Artifacts) and load \`index.html\` for side-by-side expected/actual/diff images per failing snapshot.";
+            echo "Raw PNGs (actual/diff/expected) are in the **playwright-visual-diffs** artifact (\`frontend/test-results/\`).";
           } >> "$GITHUB_STEP_SUMMARY"
+
+  visual-baseline-update:
+    name: visual-baseline-update
+    # Regenerates screenshot baselines in the same pinned Playwright image the
+    # visual job uses and commits them back to the branch. Runs on a manual
+    # dispatch, or on a push to main whose commit message has [update-snapshots].
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[update-snapshots]')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-jammy
+    env:
+      TZ: UTC
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      # The Playwright image has no git, which checkout needs to push back.
+      - name: Install git
+        working-directory: /
+        run: apt-get update && apt-get install -y --no-install-recommends git
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update visual baselines
+        run: npm run test:visual:update
+
+      - name: Commit updated baselines
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/visual/pages.visual.spec.ts-snapshots
+          if git diff --cached --quiet; then
+            echo "Baselines already up to date."
+            exit 0
+          fi
+          git commit -m "test: update visual baselines [skip ci]"
+          git push
 
   contracts:
     name: smart-contracts
-    # Run after the lightweight Node jobs so that at most one Rust compilation
-    # is active at a time, preventing the runner (or a local dev laptop) from
-    # being overwhelmed by concurrent cargo builds.
-    needs: [backend, frontend]
+    # Contract checks are independent of the backend and frontend suites.
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.contracts == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       # ── Rust resource limits ──────────────────────────────────────────
       # Run only 1 cargo job at a time (one crate compiled in parallel max).
-      CARGO_BUILD_JOBS: "1"
+      CARGO_BUILD_JOBS: '1'
       # 1 codegen unit = lower peak RAM; rustc won't split crates into many
       # parallel LLVM modules. Mirrors smart-contracts/.cargo/config.toml so
       # the flag is enforced even if the config file is not picked up.
-      RUSTFLAGS: "-C codegen-units=1"
+      RUSTFLAGS: '-C codegen-units=1'
       # Disable incremental compilation in CI — it saves time only on local
       # re-builds; in CI it just wastes disk/RAM building the cache layer.
-      CARGO_INCREMENTAL: "0"
+      CARGO_INCREMENTAL: '0'
     defaults:
       run:
         working-directory: smart-contracts
@@ -222,12 +325,12 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Cargo clippy
-        run: cargo clippy --locked -p error-resolver -p error-registry -p agent_registry -p agent-bidding -p upgrade-manager -p agent-marketplace -p task-store -p dispute-resolution --all-targets -- -D warnings
+        run: cargo clippy --locked -p error-resolver -p error-registry -p agent_registry -p agent-bidding -p upgrade-manager -p agent-marketplace -p task-store -p dispute-resolution -p oracle-manager -p agent-governance --all-targets -- -D warnings
 
       # `--locked` keeps CI on the workspace lockfile resolution, which pins
       # ed25519-dalek to a version compatible with current stable Rust.
       - name: Cargo tests
-        run: cargo test --locked -p error-resolver -p error-registry -p agent_registry -p agent-bidding -p upgrade-manager -p agent-marketplace -p task-store -p dispute-resolution
+        run: cargo test --locked -p error-resolver -p error-registry -p agent_registry -p agent-bidding -p upgrade-manager -p agent-marketplace -p task-store -p dispute-resolution -p oracle-manager -p agent-governance
 
       # Optimized Wasm builds for the deployable contracts.
       # (error-resolver is exercised natively above; its Wasm target is
@@ -243,6 +346,27 @@ jobs:
           cargo build --locked -p dispute-resolution --target wasm32v1-none --release
           cargo build --locked -p upgrade-manager --target wasm32v1-none --release
           ls -la target/wasm32v1-none/release/*.wasm
+
+      - name: Enforce Wasm size budgets
+        run: node scripts/check-wasm-size.mjs
+
+      - name: Upload Wasm size report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-report
+          path: smart-contracts/wasm-size-report.md
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Validate event topic convention
+        run: node scripts/check-events.mjs
+
+      - name: Regenerate TypeScript clients and check drift
+        run: |
+          npm run codegen
+          git diff --exit-code -- src/generated
+          test -z "$(git status --porcelain -- src/generated)"
 
   # ── Backend E2E: smoke (registry/list/create) ───────────────────────────────
   # Fast, deterministic smoke covering POST /api/agents/register,
@@ -281,7 +405,7 @@ jobs:
           command: cd backend && npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit --testPathPattern="scenario-a-registration" --json --outputFile=../test-results-backend-smoke.json
         env:
           NODE_ENV: test
-          SKIP_STELLAR_ACCOUNT_VERIFY: "true"
+          SKIP_STELLAR_ACCOUNT_VERIFY: 'true'
           STELLAR_TEST_SECRET: ${{ secrets.STELLAR_TEST_SECRET }}
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
 
@@ -332,7 +456,7 @@ jobs:
           command: cd backend && npx jest --config ../tests/e2e/jest.config.js --runInBand --forceExit --testPathPattern="scenario-b|scenario-c|full-pipeline|agent-lifecycle" --json --outputFile=../test-results-backend-heavy.json
         env:
           NODE_ENV: test
-          SKIP_STELLAR_ACCOUNT_VERIFY: "true"
+          SKIP_STELLAR_ACCOUNT_VERIFY: 'true'
           STELLAR_TEST_SECRET: ${{ secrets.STELLAR_TEST_SECRET }}
           VENICE_API_KEY: ${{ secrets.VENICE_API_KEY }}
 
@@ -385,7 +509,7 @@ jobs:
           retry_wait_seconds: 10
           command: cd frontend && npx playwright test tests/e2e/agent-registry.spec.ts tests/e2e/task-submission.spec.ts --reporter=html
         env:
-          CI: "true"
+          CI: 'true'
 
       - name: Upload frontend smoke Playwright report (flake tracking)
         if: always()
@@ -436,7 +560,7 @@ jobs:
           retry_wait_seconds: 10
           command: cd frontend && npx playwright test tests/e2e/task-monitoring.spec.ts tests/e2e/wallet.spec.ts tests/e2e/i18n.spec.ts --reporter=html
         env:
-          CI: "true"
+          CI: 'true'
 
       - name: Upload frontend heavy Playwright report (flake tracking)
         if: always()
@@ -450,19 +574,160 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # ── PR coverage comment reporter ────────────────────────────────────────────
+  # Posts (or updates) a sticky PR comment with a per-component coverage table.
+  # Runs only on pull_request events; skipped on push/dispatch so it does not
+  # fail main-branch runs where the comment action has nothing to post to.
+  coverage-report:
+    name: coverage-report
+    if: github.event_name == 'pull_request'
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download backend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage-${{ github.run_id }}
+          path: coverage/backend
+        continue-on-error: true
+
+      - name: Download frontend coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-coverage-${{ github.run_id }}
+          path: coverage/frontend
+        continue-on-error: true
+
+      - name: Build coverage summary
+        id: summary
+        run: |
+          extract() {
+            local file="$1"
+            if [ -f "$file" ]; then
+              python3 - "$file" <<'EOF'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          t = data.get("total", {})
+          lines   = t.get("lines",   {}).get("pct", "n/a")
+          stmts   = t.get("statements", {}).get("pct", "n/a")
+          funcs   = t.get("functions", {}).get("pct", "n/a")
+          branches = t.get("branches", {}).get("pct", "n/a")
+          print(f"{lines}%|{stmts}%|{funcs}%|{branches}%")
+          EOF
+            else
+              echo "n/a|n/a|n/a|n/a"
+            fi
+          }
+          BE=$(extract coverage/backend/coverage-summary.json)
+          FE=$(extract coverage/frontend/coverage-summary.json)
+          BE_LINES=$(echo "$BE" | cut -d'|' -f1)
+          BE_STMTS=$(echo "$BE" | cut -d'|' -f2)
+          BE_FUNCS=$(echo "$BE" | cut -d'|' -f3)
+          BE_BR=$(echo "$BE" | cut -d'|' -f4)
+          FE_LINES=$(echo "$FE" | cut -d'|' -f1)
+          FE_STMTS=$(echo "$FE" | cut -d'|' -f2)
+          FE_FUNCS=$(echo "$FE" | cut -d'|' -f3)
+          FE_BR=$(echo "$FE" | cut -d'|' -f4)
+          {
+            echo 'MESSAGE<<EOF'
+            echo '## CI Coverage Summary'
+            echo ''
+            echo '| Component | Lines | Statements | Functions | Branches | Status |'
+            echo '|-----------|-------|------------|-----------|----------|--------|'
+            echo "| **Backend**  | $BE_LINES | $BE_STMTS | $BE_FUNCS | $BE_BR | ${{ needs.backend.result == 'success' && '✅' || '❌' }} |"
+            echo "| **Frontend** | $FE_LINES | $FE_STMTS | $FE_FUNCS | $FE_BR | ${{ needs.frontend.result == 'success' && '✅' || '❌' }} |"
+            echo ''
+            echo "_Generated for commit \`${{ github.sha }}\` — [full run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post coverage comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: ci-coverage
+          message: ${{ steps.summary.outputs.MESSAGE }}
+
   # ── Required aggregator gate ────────────────────────────────────────────────
+  # ── Docker Compose integration (issue #753) ─────────────────────────────────
+  # Builds the real backend image and runs tests/e2e/compose-smoke.mjs against
+  # the compose `test` profile (Stellar standalone + backend), then checks the
+  # backend exits cleanly on SIGTERM. Catches image, wiring and env breakage
+  # that the in-process suites cannot see.
+  integration-compose:
+    name: integration-compose
+    needs: [changes]
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.compose == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image (GitHub Actions layer cache)
+        uses: docker/bake-action@v6
+        with:
+          source: .
+          files: docker-compose.yml
+          targets: backend
+          load: true
+          set: |
+            backend.cache-from=type=gha,scope=compose-backend
+            backend.cache-to=type=gha,mode=max,scope=compose-backend
+
+      - name: Run compose smoke suite
+        run: docker compose --profile test up --no-build --exit-code-from smoke smoke
+
+      - name: Check graceful shutdown
+        run: |
+          docker compose stop -t 30 backend
+          code=$(docker compose ps -a backend --format '{{.ExitCode}}')
+          echo "backend exit code: $code"
+          test "$code" = "0"
+
+      - name: Collect compose logs
+        if: failure()
+        run: docker compose --profile test logs --no-color --timestamps > compose-logs.txt
+
+      - name: Upload compose logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: compose-logs.txt
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile test down -v
+
   # Branch protection should require this single check. It passes only when all
   # non-skipped dependencies succeeded; skipped (path-filtered) counts as success
   # so frontend-only or backend-only PRs can still be green.
   ci-gate:
     name: ci-gate (required)
     if: always()
-    needs: [backend, frontend, contracts, e2e-backend-smoke, e2e-backend-heavy, e2e-frontend-smoke, e2e-frontend-heavy]
+    needs:
+      [
+        changes,
+        backend,
+        frontend,
+        contracts,
+        e2e-backend-smoke,
+        e2e-backend-heavy,
+        e2e-frontend-smoke,
+        e2e-frontend-heavy,
+        integration-compose,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Evaluate CI results (skipped = success for path-filtered PRs)
         run: |
+          echo "changes: ${{ needs.changes.result }}"
           echo "backend: ${{ needs.backend.result }}"
           echo "frontend: ${{ needs.frontend.result }}"
           echo "contracts: ${{ needs.contracts.result }}"
@@ -470,9 +735,10 @@ jobs:
           echo "e2e-backend-heavy: ${{ needs.e2e-backend-heavy.result }}"
           echo "e2e-frontend-smoke: ${{ needs.e2e-frontend-smoke.result }}"
           echo "e2e-frontend-heavy: ${{ needs.e2e-frontend-heavy.result }}"
+          echo "integration-compose: ${{ needs.integration-compose.result }}"
 
           fail=0
-          for job in "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.contracts.result }}"; do
+          for job in "${{ needs.changes.result }}" "${{ needs.backend.result }}" "${{ needs.frontend.result }}" "${{ needs.contracts.result }}" "${{ needs.integration-compose.result }}"; do
             if [[ "$job" == "failure" || "$job" == "cancelled" ]]; then
               echo "❌ Required job failed: $job"
               fail=1
@@ -523,8 +789,73 @@ jobs:
         if: env.STELLAR_COORDINATOR_SECRET != '' && env.VENICE_API_KEY != ''
         run: npm run test:integration
         env:
-          RUN_INTEGRATION_TESTS: "true"
+          RUN_INTEGRATION_TESTS: 'true'
 
       - name: Skip notice
         if: env.STELLAR_COORDINATOR_SECRET == '' || env.VENICE_API_KEY == ''
         run: echo "Integration secrets not configured — skipping integration tests."
+
+  # ── Security scanning (issue #854) ──────────────────────────────────────────
+  # Advisory jobs, deliberately NOT wired into `ci-gate`: a flaky upstream
+  # scanner must never block a feature PR, while findings still surface on
+  # every run. Branch protection may require them separately if desired.
+  security-audit:
+    name: security-audit (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [backend, frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ${{ matrix.package }}/package-lock.json
+
+      - name: Audit dependencies (fail on high+)
+        run: npm audit --audit-level=high
+
+  secret-scan:
+    name: secret-scan (trufflehog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository (full history)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Scan git history for leaked credentials
+        uses: trufflesecurity/trufflehog@main
+        with:
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+
+  container-scan:
+    name: container-scan (trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile -t ai-net-backend:scan .
+
+      - name: Scan image for HIGH/CRITICAL CVEs
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ai-net-backend:scan
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true

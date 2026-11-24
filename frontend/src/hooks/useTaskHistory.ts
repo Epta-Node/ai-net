@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { TaskResponse, NodeStatus } from '../types/api';
-import { apiClient } from '../services/api';
+import type { CursorPageEnvelope, TaskResponse, NodeStatus } from '../types/api';
+import { ApiError, apiClient } from '../services/api';
+import { readWalletSession } from '../services/walletSession';
 
 // ─── Filter types ────────────────────────────────────────────────────────────
 
@@ -102,6 +103,68 @@ export function formatDuration(ms: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+// ─── Cursor merging & virtualisation (#816) ──────────────────────────────────
+
+/** Default page size requested from the cursor endpoint. */
+export const DEFAULT_TASK_PAGE_SIZE = 50;
+
+/**
+ * Appends a cursor page to the tasks already loaded. A task that shows up in
+ * two cursor windows (clock skew between pages) is kept once, in its original
+ * position, updated to the newer copy so a status change isn't lost. New tasks
+ * are appended in page order; display sorting happens in `filteredTasks`.
+ */
+export function mergeTaskPages(existing: TaskResponse[], incoming: TaskResponse[]): TaskResponse[] {
+  const byId = new Map<string, TaskResponse>();
+  for (const task of existing) byId.set(task.taskId, task);
+  for (const task of incoming) byId.set(task.taskId, task);
+  return Array.from(byId.values());
+}
+
+export interface VirtualRange {
+  start: number;
+  /** Exclusive end index. */
+  end: number;
+  /** Space above the first rendered row, in px. */
+  offsetTop: number;
+  totalHeight: number;
+}
+
+/**
+ * Rows to render for a fixed-height virtual list: only the rows in the
+ * viewport plus `overscan` on each side, so the DOM size stays constant no
+ * matter how many tasks are loaded.
+ */
+export function getVirtualRange(
+  scrollTop: number,
+  viewportHeight: number,
+  rowHeight: number,
+  itemCount: number,
+  overscan = 5,
+): VirtualRange {
+  const totalHeight = itemCount * rowHeight;
+  if (itemCount === 0 || rowHeight <= 0) return { start: 0, end: 0, offsetTop: 0, totalHeight: 0 };
+  const visible = Math.ceil(viewportHeight / rowHeight);
+  // Clamp so an over-scrolled position still renders the last screenful.
+  const first = Math.min(
+    Math.floor(Math.max(0, scrollTop) / rowHeight),
+    Math.max(0, itemCount - visible),
+  );
+  const start = Math.max(0, first - overscan);
+  const end = Math.min(itemCount, first + visible + overscan);
+  return { start, end, offsetTop: start * rowHeight, totalHeight };
+}
+
+/** True when the scroll position is within `threshold` px of the bottom. */
+export function shouldFetchNextPage(
+  scrollTop: number,
+  viewportHeight: number,
+  totalHeight: number,
+  threshold = 200,
+): boolean {
+  return totalHeight > 0 && scrollTop + viewportHeight >= totalHeight - threshold;
+}
+
 // ─── Filter logic ─────────────────────────────────────────────────────────────
 
 function taskMatchesFilters(
@@ -160,6 +223,8 @@ export interface UseTaskHistoryResult {
   /** Tasks matching current filters within the zoom window */
   filteredTasks: TaskResponse[];
   loading: boolean;
+  /** True while a follow-up page (not the first) is loading — show the bottom spinner. */
+  isFetchingNextPage: boolean;
   error: string | null;
   /** Currently applied filters */
   filters: TaskHistoryFilters;
@@ -169,6 +234,12 @@ export interface UseTaskHistoryResult {
   resetFilters: () => void;
   /** Refetch task list from API */
   refetch: () => void;
+  /** Cursor for the next page, if one is available */
+  nextCursor: string | null;
+  /** Whether another page of tasks is available */
+  hasNextPage: boolean;
+  /** Append the next page of tasks */
+  loadMore: () => void;
   /** IDs of the (up to 2) tasks selected for comparison */
   selectedIds: [string | null, string | null];
   /** Toggle a task's selection for comparison; deselects oldest if >2 */
@@ -184,27 +255,29 @@ export interface UseTaskHistoryResult {
 export function useTaskHistory(
   filters: TaskHistoryFilters,
   updateFilters: (next: Partial<TaskHistoryFilters>) => void,
-  resetFilters: () => void
+  resetFilters: () => void,
+  pageSize: number = DEFAULT_TASK_PAGE_SIZE
 ): UseTaskHistoryResult {
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isFetchingNextPage, setIsFetchingNextPage] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<[string | null, string | null]>([
     null,
     null,
   ]);
   // Cursor state for incremental loading
-  const [, setNextCursor] = useState<string | null>(null);
-  const [, setHasNextPage] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
   const fetchTasks = useCallback(async (cursor?: string | null) => {
     setLoading(true);
+    setIsFetchingNextPage(!!cursor);
     setError(null);
     try {
-      const walletAddress =
-        localStorage.getItem('wallet_pubkey') ||
-        localStorage.getItem('walletAddress') ||
-        '';
+      // Read through the shared session layer (#477) so this stays in step with
+      // WalletContext after the move from localStorage to sessionStorage.
+      const walletAddress = readWalletSession()?.publicKey ?? '';
 
       if (!walletAddress) {
         setAllTasks([]);
@@ -212,60 +285,78 @@ export function useTaskHistory(
       }
 
       // Build cursor-based query params
-      const qs = new URLSearchParams({ limit: '50' });
+      const qs = new URLSearchParams({ limit: String(pageSize) });
       if (cursor) qs.set('cursor', cursor);
       if (filters.status && filters.status !== 'all') qs.set('status', filters.status);
 
       const url = `/api/wallets/${walletAddress}/tasks?${qs.toString()}`;
 
-      // Try v2 cursor envelope first, fall back to flat array
+      // Try v2 cursor envelope first, with a flat-array compatibility fallback.
       let fetchedTasks: TaskResponse[] = [];
       let newCursor: string | null = null;
       let morePages = false;
+      let envelope: CursorPageEnvelope<TaskResponse> | TaskResponse[] | undefined;
+      let useFallback = false;
 
       try {
-        type V2Envelope = { data: { items: TaskResponse[]; pagination: { nextCursor: string | null; hasNextPage: boolean } } };
-        const envelope = await apiClient.get<V2Envelope>(url);
-        if (envelope?.data?.items) {
-          fetchedTasks = envelope.data.items;
-          newCursor = envelope.data.pagination.nextCursor ?? null;
-          morePages = envelope.data.pagination.hasNextPage;
+        envelope = await apiClient.get<CursorPageEnvelope<TaskResponse> | TaskResponse[]>(url);
+      } catch (err) {
+        if (err instanceof ApiError && err.statusCode === 404) {
+          useFallback = true;
         } else {
-          // Flat array response from v1 / wallet endpoint
-          fetchedTasks = Array.isArray(envelope) ? (envelope as unknown as TaskResponse[]) : [];
+          throw err;
         }
-      } catch {
-        // Fallback: fetch without cursor
+      }
+
+      if (!useFallback && Array.isArray(envelope)) {
+        fetchedTasks = envelope;
+      } else if (
+        !useFallback &&
+        envelope &&
+        !Array.isArray(envelope) &&
+        Array.isArray(envelope.data?.items) &&
+        envelope.data.pagination &&
+        typeof envelope.data.pagination.hasNextPage === 'boolean' &&
+        (typeof envelope.data.pagination.nextCursor === 'string' ||
+          envelope.data.pagination.nextCursor === null)
+      ) {
+        fetchedTasks = envelope.data.items;
+        newCursor = envelope.data.pagination.nextCursor;
+        morePages = envelope.data.pagination.hasNextPage;
+      } else {
+        useFallback = true;
+      }
+
+      if (useFallback) {
+        // Retry without the cursor only for a missing endpoint or incompatible response shape.
+        qs.delete('cursor');
         const fallback = await apiClient.get<TaskResponse[]>(
-          `/api/wallets/${walletAddress}/tasks?limit=200`
+          `/api/wallets/${walletAddress}/tasks?${qs.toString()}`
         );
         fetchedTasks = Array.isArray(fallback) ? fallback : [];
       }
 
-      setAllTasks((prev) => (cursor ? [...prev, ...fetchedTasks] : fetchedTasks));
+      setAllTasks((prev) => (cursor ? mergeTaskPages(prev, fetchedTasks) : fetchedTasks));
       setNextCursor(newCursor);
       setHasNextPage(morePages);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load task history');
     } finally {
       setLoading(false);
+      setIsFetchingNextPage(false);
     }
-  }, [filters.status]);
+  }, [filters.status, pageSize]);
 
   useEffect(() => {
-    // Reset and fetch from the start whenever filters change
+    // `fetchTasks` is recreated only when `filters.status` changes, so this
+    // effect fetches exactly once on mount and refetches exactly once per
+    // status change. Non-status filters are applied client-side and never
+    // trigger a new request.
     setAllTasks([]);
     setNextCursor(null);
     setHasNextPage(false);
     fetchTasks(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status]);
-
-  // Initial load (non-status filters are applied client-side)
-  useEffect(() => {
-    fetchTasks(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [fetchTasks]);
 
   const refetch = useCallback(() => {
     setAllTasks([]);
@@ -273,6 +364,10 @@ export function useTaskHistory(
     setHasNextPage(false);
     fetchTasks(null);
   }, [fetchTasks]);
+
+  const loadMore = useCallback(() => {
+    if (!loading && hasNextPage && nextCursor) fetchTasks(nextCursor);
+  }, [fetchTasks, hasNextPage, loading, nextCursor]);
 
   // Derive filtered + zoomed list
   const filteredTasks = useMemo(() => {
@@ -314,11 +409,15 @@ export function useTaskHistory(
     allTasks,
     filteredTasks,
     loading,
+    isFetchingNextPage,
     error,
     filters,
     updateFilters,
     resetFilters,
     refetch,
+    nextCursor,
+    hasNextPage,
+    loadMore,
     selectedIds,
     toggleSelect,
     clearSelection,

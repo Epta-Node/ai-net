@@ -38,6 +38,22 @@
   animation: toast-slide-in 0.22s ease-out;
 }
 
+/* Icon + message share a row, so the shell keeps `space-between` with the
+   dismiss control pinned right. Colour is inherited from the variant rule on
+   `.toast` below, so the icon needs no per-type colour of its own. */
+.toast__content {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+.toast__icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
 /* variants */
 .toast--success {
   background: var(--status-success-surface-muted);
@@ -188,3 +204,10 @@
   transition: opacity 0.15s;
 }
 .toast button:hover { opacity: 1; }
+
+/* Reduced motion (#721): toast entrances must not slide/fade. */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}

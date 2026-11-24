@@ -1,4 +1,4 @@
-//! # Error Types for Dispute Resolution
+//! Errors returned by the dispute-resolution contract.
 
 use soroban_sdk::contracterror;
 
@@ -12,29 +12,45 @@ pub enum Error {
     ContractPaused = 4,
     DisputeAlreadyResolved = 5,
     DisputeExpired = 6,
-    JurorAlreadyVoted = 7,
-    NotJuror = 8,
-    InvalidVote = 9,
-    AppealWindowClosed = 10,
-    NoJurorsAvailable = 11,
-    InvalidEvidence = 12,
+    AlreadyVoted = 7,
+    NotEligibleVoter = 8,
+    InvalidPhase = 9,
+    NoVotersAvailable = 10,
+    InvalidReason = 11,
+    InvalidReputation = 12,
+    InvalidAmount = 13,
+    InvalidVoterPool = 14,
+    EvidenceLimitReached = 15,
+    AppealExpired = 16,
+    AppealAlreadyFiled = 17,
+    /// `resolve` was called while the voting window is still open.
+    VotingStillOpen = 18,
+    /// `appeal_dispute` was called on a dispute that has no ruling to appeal.
+    NotResolved = 19,
 }
 
 impl Error {
     pub fn from_code(code: u32) -> Option<Self> {
         match code {
-            1 => Some(Error::NotFound),
-            2 => Some(Error::Unauthorized),
-            3 => Some(Error::AlreadyExists),
-            4 => Some(Error::ContractPaused),
-            5 => Some(Error::DisputeAlreadyResolved),
-            6 => Some(Error::DisputeExpired),
-            7 => Some(Error::JurorAlreadyVoted),
-            8 => Some(Error::NotJuror),
-            9 => Some(Error::InvalidVote),
-            10 => Some(Error::AppealWindowClosed),
-            11 => Some(Error::NoJurorsAvailable),
-            12 => Some(Error::InvalidEvidence),
+            1 => Some(Self::NotFound),
+            2 => Some(Self::Unauthorized),
+            3 => Some(Self::AlreadyExists),
+            4 => Some(Self::ContractPaused),
+            5 => Some(Self::DisputeAlreadyResolved),
+            6 => Some(Self::DisputeExpired),
+            7 => Some(Self::AlreadyVoted),
+            8 => Some(Self::NotEligibleVoter),
+            9 => Some(Self::InvalidPhase),
+            10 => Some(Self::NoVotersAvailable),
+            11 => Some(Self::InvalidReason),
+            12 => Some(Self::InvalidReputation),
+            13 => Some(Self::InvalidAmount),
+            14 => Some(Self::InvalidVoterPool),
+            15 => Some(Self::EvidenceLimitReached),
+            16 => Some(Self::AppealExpired),
+            17 => Some(Self::AppealAlreadyFiled),
+            18 => Some(Self::VotingStillOpen),
+            19 => Some(Self::NotResolved),
             _ => None,
         }
     }

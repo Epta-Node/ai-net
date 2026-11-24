@@ -17,6 +17,7 @@ beforeAll(() => {
   process.env.DATABASE_URL = process.env.DATABASE_URL || ":memory:";
 
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { loadConfig } = require("../../config");
     loadConfig();
   } catch {

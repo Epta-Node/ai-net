@@ -61,16 +61,24 @@ export class AppError extends Error {
    * In production `details` is omitted so internal information is never
    * leaked. Pass `includeDetails: true` only in development/test.
    */
-  public serialize(path?: string, includeDetails = false): SerializedError {
+  public serialize(includeDetails?: boolean): SerializedError;
+  public serialize(path: string, includeDetails?: boolean): SerializedError;
+  public serialize(includeDetailsOrPath?: boolean | string, includeDetails = false): SerializedError {
+    // `includeDetails` is the parameter every caller cares about (`serialize(true)`
+    // in tests/dev); `path` is carried through when the caller has one to report.
+    const includeDetailsFlag =
+      typeof includeDetailsOrPath === "boolean" ? includeDetailsOrPath : includeDetails;
+    const path = typeof includeDetailsOrPath === "string" ? includeDetailsOrPath : undefined;
+
     const payload: SerializedError = {
       code: this.code,
       message: this.message,
-      path: path,
+      path,
       correlationId: this.correlationId,
       timestamp: this.timestamp,
     };
 
-    if (includeDetails && this.details !== undefined) {
+    if (includeDetailsFlag && this.details !== undefined) {
       payload.details = this.details;
     }
 

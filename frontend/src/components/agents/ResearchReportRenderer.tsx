@@ -1,11 +1,13 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { Download } from 'lucide-react';
 import { ResearchReportResult } from '../../types/agent';
 import { getMarkdown } from '../../utils/agentUtils';
+import { downloadTextFile, buildOutputFilename } from '../../utils/download';
 import CopyButton from '../common/CopyButton';
 import CollapsibleSection from '../common/CollapsibleSection';
 
@@ -20,7 +22,19 @@ interface Heading {
   id: string;
 }
 
-const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
+const tocLinkStyle: React.CSSProperties = {
+  display: 'block',
+  padding: '2px 0',
+  fontSize: '0.75rem',
+  color: 'var(--accent-cyan, #38bdf8)',
+  textDecoration: 'none',
+  cursor: 'pointer',
+  background: 'none',
+  border: 'none',
+  textAlign: 'left',
+};
+
+const ResearchReportRenderer: React.FC<Props> = ({ result, searchQuery }) => {
   const { t } = useTranslation();
   const markdown = getMarkdown(result);
   const [headings, setHeadings] = useState<Heading[]>([]);
@@ -100,24 +114,109 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
           fontStyle: 'italic',
         }}
       >
-        No report content matching search filter "{searchQuery}".
+        {t('agent.output.noMatch', { query: searchQuery })}
       </div>
     );
   }
 
   const isLongReport = markdown.length > 500;
 
+  // A report is prose, so the export is the markdown source verbatim — that
+  // round-trips through any markdown tool rather than through a screenshot.
+  const handleDownload = () => {
+    downloadTextFile(
+      markdown,
+      buildOutputFilename('agent-report', 'markdown'),
+      'text/markdown;charset=utf-8',
+    );
+  };
+
+  /** Scroll a heading into view and move focus so keyboard users follow along. */
+  const jumpTo = (id: string) => {
+    const target = contentRef.current?.querySelector(`#${CSS.escape(id)}`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      target.setAttribute('tabindex', '-1');
+      target.focus({ preventScroll: true });
+    }
+  };
+
   const content = (
-    <div
-      className="markdown-body"
-      id="research-markdown"
-      data-testid="research-markdown"
-      style={{
-        color: 'var(--surface-primary)',
-        lineHeight: '1.7',
-        fontSize: '1rem',
-      }}
-    >
+    <>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '8px',
+          marginBottom: '12px',
+        }}
+      >
+        {headings.length > 2 ? (
+          <nav aria-label={t('agent.research.tableOfContents')} data-testid="report-toc">
+            <details>
+              <summary
+                style={{
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                {t('agent.research.tableOfContents')}
+              </summary>
+              <div style={{ marginTop: '6px' }}>
+                {headings.map((heading) => (
+                  <button
+                    key={heading.id}
+                    type="button"
+                    style={{ ...tocLinkStyle, paddingLeft: `${(heading.level - 1) * 10}px` }}
+                    onClick={() => jumpTo(heading.id)}
+                  >
+                    {heading.text}
+                  </button>
+                ))}
+              </div>
+            </details>
+          </nav>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          onClick={handleDownload}
+          data-testid="btn-download-report"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '5px 10px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            color: 'var(--text-secondary, #cbd5e1)',
+            background: 'rgba(255,255,255,0.05)',
+            border: '1px solid var(--white-alpha-10, rgba(255,255,255,0.12))',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+          title={t('a11y.downloadOutput')}
+        >
+          <Download size={12} />
+          <span>{t('task.output.downloadMarkdown')}</span>
+        </button>
+      </div>
+      <div
+        className="markdown-body"
+        id="research-markdown"
+        data-testid="research-markdown"
+        ref={contentRef}
+        style={{
+          color: 'var(--surface-primary)',
+          lineHeight: '1.7',
+          fontSize: '1rem',
+        }}
+      >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -185,7 +284,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                 target="_blank"
                 rel="noopener noreferrer"
                 data-testid="external-link"
-                style={{ color: 'var(--accent-cyan, #38bdf8)', textDecoration: 'underline' }}
+                style={{ color: 'var(--accent-info)', textDecoration: 'underline' }}
               >
                 {children}
               </a>
@@ -227,7 +326,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
                 style={{
                   padding: '10px 14px',
                   background: 'rgba(255, 255, 255, 0.08)',
-                  color: 'var(--text-primary, #f5f7fa)',
+                  color: 'var(--text-primary)',
                   fontWeight: 600,
                   textAlign: 'left',
                 }}
@@ -241,7 +340,7 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
               <td
                 style={{
                   padding: '10px 14px',
-                  color: 'var(--text-primary, #f5f7fa)',
+                  color: 'var(--text-primary)',
                   fontSize: '0.9rem',
                 }}
               >
@@ -253,13 +352,14 @@ const ResearchReportRenderer: React.FC<Props> = ({ result }) => {
       >
         {markdown}
       </ReactMarkdown>
-    </div>
+      </div>
+    </>
   );
 
   if (isLongReport) {
     return (
       <CollapsibleSection
-        title="Research Report Content"
+        title={t('agent.research.contentTitle')}
         contentLength={markdown.length}
         maxLength={500}
       >

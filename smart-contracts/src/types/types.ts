@@ -33,7 +33,7 @@ export interface AgentRecord {
    * Defaults to 1 for newly-registered agents and updated by the coordinator
    * after each successful/failed task.
    */
-  reputationScore: number;
+  reputationScore?: number;
   /** Additional capabilities an agent supports (multi-capability agents) */
   extraCapabilities?: Capability[];
 }

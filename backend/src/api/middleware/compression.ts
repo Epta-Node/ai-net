@@ -16,7 +16,7 @@
  *
  * Usage:
  *   import { compressionMiddleware } from './compression';
- *   app.use(compressionMiddleware());
+ *   app.use(...compressionMiddleware());
  */
 
 import compression from "compression";
@@ -34,7 +34,7 @@ export const COMPRESSION_THRESHOLD = 1024; // 1 KB
  * applying gzip/brotli on top wastes CPU and grows the payload.
  */
 const SKIP_CONTENT_TYPES =
-  /^(image\/|audio\/|video\/|application\/(zip|gzip|x-gzip|x-bzip|x-bzip2|x-7z-compressed|x-rar-compressed|octet-stream|wasm)|font\/)/i;
+  /^(image\/|audio\/|video\/|text\/event-stream|application\/(zip|gzip|x-gzip|x-bzip|x-bzip2|x-7z-compressed|x-rar-compressed|octet-stream|wasm)|font\/)/i;
 
 /** Whether a content-type should be skipped (already compressed / binary). */
 function shouldSkipContentType(contentType: string | undefined): boolean {
@@ -55,7 +55,7 @@ function shouldSkipContentType(contentType: string | undefined): boolean {
  * Note: Node's built-in `zlib.createBrotliCompress` is synchronous and does
  * not require an extra npm package.
  */
-function brotliMiddleware(): RequestHandler {
+function brotliMiddleware(threshold: number, level: number): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     const acceptEncoding = req.headers["accept-encoding"] ?? "";
     if (!acceptEncoding.includes("br")) {
@@ -63,28 +63,43 @@ function brotliMiddleware(): RequestHandler {
       return;
     }
 
-    // Intercept res.write / res.end to stream through Brotli.
     const originalWrite = res.write.bind(res);
     const originalEnd = res.end.bind(res);
+    const chunks: Buffer[] = [];
+    const callbacks: Array<() => void> = [];
+    let bytes = 0;
+    let bypassed = false;
 
-    let brotliEnabled = false;
-    let brotliStream: ReturnType<typeof createBrotliCompress> | null = null;
+    const restore = (): void => {
+      (res as any).write = originalWrite;
+      (res as any).end = originalEnd;
+    };
 
-    // We defer Brotli setup until the first write so we know the content-type.
-    const setupBrotli = (): boolean => {
-      if (brotliEnabled) return true;
+    const isBypassed = (): boolean => {
       const ct = res.getHeader("content-type") as string | undefined;
-      if (shouldSkipContentType(ct)) return false;
+      const cacheControl = res.getHeader("cache-control") as string | undefined;
+      return (
+        shouldSkipContentType(ct) ||
+        (typeof cacheControl === "string" && /no-transform/i.test(cacheControl))
+      );
+    };
 
-      const level = Math.min(Math.max(getConfig().COMPRESSION_LEVEL, 1), 11);
-      brotliStream = createBrotliCompress({
-        params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level },
-      });
-      brotliEnabled = true;
-      res.setHeader("Content-Encoding", "br");
-      res.removeHeader("Content-Length"); // length will change after compression
-      brotliStream.pipe(res as unknown as NodeJS.WritableStream);
-      return true;
+    const toBuffer = (chunk: any, encoding?: BufferEncoding): Buffer => {
+      if (Buffer.isBuffer(chunk)) return chunk;
+      if (typeof chunk === "string") return Buffer.from(chunk, encoding);
+      return Buffer.from(chunk);
+    };
+
+    const flushRaw = (chunk: any, encoding?: BufferEncoding, callback?: () => void): Response => {
+      restore();
+      for (const buffered of chunks) {
+        (originalWrite as any)(buffered);
+      }
+      for (const done of callbacks) done();
+      if (chunk !== undefined && chunk !== null) {
+        (originalWrite as any)(toBuffer(chunk, encoding));
+      }
+      return (originalEnd as any)(callback);
     };
 
     (res as any).write = function (
@@ -92,24 +107,48 @@ function brotliMiddleware(): RequestHandler {
       encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
       callback?: (err?: Error | null) => void,
     ): boolean {
-      if (!setupBrotli()) {
+      if (!bypassed && isBypassed()) {
+        bypassed = true;
+        restore();
+      }
+      if (bypassed) {
         return (originalWrite as any)(chunk, encodingOrCallback, callback);
       }
-      return brotliStream!.write(chunk, encodingOrCallback as BufferEncoding, callback);
+
+      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
+      const buffered = toBuffer(chunk, encoding);
+      chunks.push(buffered);
+      bytes += buffered.length;
+      const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+      if (done) callbacks.push(done);
+      return true;
     };
 
     (res as any).end = function (
       chunk?: any,
-      encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+      encodingOrCallback?: BufferEncoding | (() => void),
       callback?: () => void,
     ): Response {
-      if (!setupBrotli()) {
-        return (originalEnd as any)(chunk, encodingOrCallback, callback);
-      }
-      if (chunk) {
-        brotliStream!.write(chunk, encodingOrCallback as BufferEncoding);
-      }
-      brotliStream!.end(callback);
+      if (!bypassed && isBypassed()) bypassed = true;
+      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
+      const done = typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
+      if (bypassed) return flushRaw(chunk, encoding, done);
+
+      const declaredLength = Number(res.getHeader("content-length") ?? 0);
+      const largeEnough =
+        declaredLength > 0 ? declaredLength >= threshold : bytes >= threshold;
+      if (!largeEnough) return flushRaw(chunk, encoding, done);
+      const stream = createBrotliCompress({
+        params: { [zlibConstants.BROTLI_PARAM_QUALITY]: level },
+      });
+      restore();
+      res.setHeader("Content-Encoding", "br");
+      res.removeHeader("Content-Length");
+      stream.pipe(res as unknown as NodeJS.WritableStream);
+      for (const buffered of chunks) stream.write(buffered);
+      for (const flushCallback of callbacks) flushCallback();
+      if (chunk !== undefined && chunk !== null) stream.write(toBuffer(chunk, encoding));
+      stream.end(done);
       return res;
     };
 
@@ -130,8 +169,8 @@ export interface CompressionOptions {
 
 /**
  * Returns an array of Express middleware that together provide:
- *  1. Brotli compression (when client supports it) — highest priority.
- *  2. gzip/deflate compression via the `compression` npm package.
+ *  1. gzip/deflate compression via the `compression` npm package.
+ *  2. Brotli compression (when client supports it) — outer response wrapper.
  *
  * Mount the returned array with `app.use(...compressionMiddleware())`.
  */
@@ -155,5 +194,5 @@ export function compressionMiddleware(
     },
   });
 
-  return enableBrotli ? [brotliMiddleware(), gzipHandler] : [gzipHandler];
+  return enableBrotli ? [gzipHandler, brotliMiddleware(threshold, level)] : [gzipHandler];
 }

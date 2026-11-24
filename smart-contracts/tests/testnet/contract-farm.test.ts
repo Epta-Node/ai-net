@@ -177,6 +177,44 @@ describeFarm('Contract integration test farm (live testnet)', () => {
     recordGas({ operation: 'task_store.update_task_status', cpu_insns: update.gas?.cpu_insns ?? '0', mem_insns: update.gas?.mem_insns ?? '0', committed: true });
   });
 
+  it('task_store: create_task → update_status → get_task (budget lifecycle)', async () => {
+    const taskStore = deployed.contracts.task_store;
+    const taskIdHex = sha256Hex(`budget-task-${seed}`);
+    const promptHashHex = sha256Hex(`budget-prompt-${seed}`);
+
+    const created = await invoke(taskStore, 'create_task', [
+      `--task_id`, taskIdHex,
+      `--creator`, adminG,
+      `--prompt_hash`, promptHashHex,
+      `--budget_xlm`, '5000000',
+    ]);
+    recordGas({ operation: 'task_store.create_task', cpu_insns: created.gas?.cpu_insns ?? '0', mem_insns: created.gas?.mem_insns ?? '0', committed: true });
+
+    // Created → Queued → Assigned → Running → Completed, one accepted
+    // transition at a time; each appends exactly one history record.
+    for (const status of ['Queued', 'Assigned', 'Running', 'Completed']) {
+      const update = await invoke(taskStore, 'update_status', [
+        `--task_id`, taskIdHex,
+        `--new_status`, status,
+        `--updater`, adminG,
+      ]);
+      recordGas({ operation: `task_store.update_status(${status})`, cpu_insns: update.gas?.cpu_insns ?? '0', mem_insns: update.gas?.mem_insns ?? '0', committed: true });
+    }
+
+    const task = await invoke(taskStore, 'get_task', [`--task_id`, taskIdHex]);
+    expect(task.stdout).toContain(taskIdHex);
+    // Budget is echoed back in stroops, unchanged.
+    expect(task.stdout).toContain('5000000');
+    // A completed task is terminal, so reopening it must fail on-chain.
+    await expect(
+      invoke(taskStore, 'update_status', [
+        `--task_id`, taskIdHex,
+        `--new_status`, 'Running',
+        `--updater`, adminG,
+      ]),
+    ).rejects.toThrow();
+  });
+
   // ── Error registry ────────────────────────────────────────────────────────
 
   it('error_registry: submit_error → get_error', async () => {

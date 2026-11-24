@@ -2,24 +2,52 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import LanguageDetector from 'i18next-browser-languagedetector'
 
-import { i18nBaseOptions } from './options'
+import { getTextDirection, i18nBaseOptions } from './options'
 
-export { SUPPORTED_LANGUAGES } from './options'
+export { SUPPORTED_LANGUAGES, getTextDirection, isRtlLanguage } from './options'
 export type { SupportedLanguage } from './options'
 
 /**
- * Keeps `<html lang>` in sync with the active language, for accessibility and SEO.
+ * Keeps `<html lang>` and `--text-direction` in sync with the active language.
  *
  * This lives here rather than in a layout component on purpose: the landing page
  * renders outside `AppShell`, so a component-level effect would leave the
- * attribute stale on `/`. Using `resolvedLanguage` writes `zh` rather than the
- * detected `zh-CN`.
+ * attribute stale on `/`.
  */
-const syncDocumentLanguage = () => {
-  document.documentElement.lang = i18n.resolvedLanguage ?? 'en'
+export const syncDocumentLanguage = () => {
+  if (typeof document === 'undefined') return
+  const lang = i18n.resolvedLanguage ?? 'en'
+  document.documentElement.lang = lang
+  const dir = getTextDirection(lang)
+  document.documentElement.setAttribute('dir', dir)
+  document.documentElement.style.setProperty('--text-direction', dir)
 }
 
-i18n.on('languageChanged', syncDocumentLanguage)
+const handleLanguageChanged = (lng: string) => {
+  syncDocumentLanguage()
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.setItem('ai-net-locale', lng)
+      window.localStorage.setItem('i18nextLng', lng)
+    } catch {
+      // storage unavailable
+    }
+  }
+}
+
+i18n.on('languageChanged', handleLanguageChanged)
+
+// Seed i18nextLng from ai-net-locale if present
+if (typeof window !== 'undefined' && window.localStorage) {
+  try {
+    const stored = window.localStorage.getItem('ai-net-locale')
+    if (stored && !window.localStorage.getItem('i18nextLng')) {
+      window.localStorage.setItem('i18nextLng', stored)
+    }
+  } catch {
+    // storage unavailable
+  }
+}
 
 /**
  * Resolves once i18next is initialized.
@@ -35,7 +63,7 @@ export const i18nReady = i18n
     detection: {
       order: ['localStorage', 'navigator'],
       caches: ['localStorage'],
-      lookupLocalStorage: 'i18nextLng',
+      lookupLocalStorage: 'ai-net-locale',
     },
   })
   .then((t) => {

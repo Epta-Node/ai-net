@@ -110,9 +110,39 @@
 /* ─── Status colour overrides ─────────────────────────────────────────────── */
 
 .status_pending  { color: #94a3b8; }
-.status_running  { color: #818cf8; }
+.status_running  { color: #22d3ee; }
 .status_completed { color: #34d399; }
 .status_failed   { color: #f87171; }
+
+/* ─── Node state borders (pending gray / running cyan pulse / green / red) ── */
+
+.nodePending {
+  border-color: rgba(148, 163, 184, 0.45) !important;
+}
+
+.nodeCompleted {
+  border-color: rgba(52, 211, 153, 0.7) !important;
+  box-shadow: 0 0 14px rgba(52, 211, 153, 0.25) !important;
+}
+
+.nodeFailed {
+  border-color: rgba(248, 113, 113, 0.8) !important;
+  box-shadow: 0 0 14px rgba(248, 113, 113, 0.3) !important;
+}
+
+.nodeRunning {
+  border-color: rgba(34, 211, 238, 0.9) !important;
+  animation: nodePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes nodePulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(34, 211, 238, 0.25); }
+  50%      { box-shadow: 0 0 20px rgba(34, 211, 238, 0.65); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nodeRunning { animation: none; }
+}
 
 /* ─── ReactFlow handle dots ───────────────────────────────────────────────── */
 
@@ -254,6 +284,173 @@
 .fitViewBtn:focus-visible {
   outline: 2px solid #6366f1;
   outline-offset: 2px;
+}
+
+/* ─── PNG export button (bottom-right, beside Controls) ─────────────────── */
+
+.exportBtn {
+  position: absolute;
+  right: 10px;
+  bottom: 28px;
+  z-index: 5;
+
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(30, 41, 59, 0.9);
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 0.65rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.exportBtn:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.exportBtn:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+/* ─── Node detail side panel ──────────────────────────────────────────────── */
+
+.sidePanel {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+
+@media (min-width: 768px) {
+  .sidePanel {
+    width: 260px;
+    flex-shrink: 0;
+    max-height: 280px;
+  }
+}
+
+.panelHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1e293b;
+}
+
+.panelHeading {
+  min-width: 0;
+}
+
+.panelEyebrow {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.panelTitle {
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: #f1f5f9;
+  text-transform: capitalize;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.closeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.closeBtn:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.panelBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+.panelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.panelLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.panelValue {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #cbd5e1;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.65rem !important;
+  color: #94a3b8 !important;
+}
+
+.muted {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+.errorSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+}
+
+.errorBox {
+  font-size: 0.7rem;
+  color: #fecdd3;
+  background: rgba(127, 29, 29, 0.4);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 8px;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* ─── Hint line ───────────────────────────────────────────────────────────── */

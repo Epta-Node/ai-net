@@ -8,9 +8,12 @@ members = [
     "contracts/upgrade-manager",
     "contracts/task_store",
     "contracts/agent_marketplace",
+    "contracts/gas_interface",
     "contracts/dispute_resolution",
     "contracts/oracle_manager",
     "contracts/price_oracle",
+    "test-utils",
+    "tests/integration",
 ]
 resolver = "2"
 
@@ -23,3 +26,8 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
+
+# Release build with debug assertions (and therefore contract logs) enabled.
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

@@ -64,25 +64,25 @@ forwarding → backend submitter → sync handler → frontend hook → frontend
     - **Validates: Requirements 5.1, 5.2, 5.3**
 
 - [~] 4. Implement authorized caller management functions
-  - [ ] 4.1 Implement `add_authorized_caller(env, caller: Address) -> Result<(), Error>` and
+  - [x] 4.1 Implement `add_authorized_caller(env, caller: Address) -> Result<(), Error>` and
     `remove_authorized_caller(env, caller: Address) -> Result<(), Error>` in the
     `AgentRegistryContract` impl in `lib.rs`
     - Require `require_admin(env)?`
     - Read/write `Vec<Address>` under `DataKey::AuthorizedCallers` in Instance storage
     - Emit `(registry, auth_add)` / `(registry, auth_rem)` events carrying the `Address`
     - _Requirements: 3.1, 3.2, 3.3, 3.5_
-  - [ ] 4.2 Implement `is_authorized_caller(env, caller: Address) -> bool` view function
+  - [x] 4.2 Implement `is_authorized_caller(env, caller: Address) -> bool` view function
     - Read `AuthorizedCallers` from Instance storage; return `false` if absent
     - _Requirements: 3.6_
   - [ ] 4.3 Add private `require_authorized_caller(env: &Env, caller: &Address) -> Result<(), Error>` helper
     - Returns `Err(Error::Unauthorized)` if `caller` not present in `AuthorizedCallers`
     - _Requirements: 2.2, 3.4_
 
-  - [ ]* 4.4 Write property test for authorized caller add/remove round-trip
+  - [x] 4.4 Write property test for authorized caller add/remove round-trip
     - **Property 4: Authorized caller add/remove round-trip**
     - **Validates: Requirements 3.2, 3.3**
 
-  - [ ]* 4.5 Write property test for unauthorized caller rejection
+  - [x] 4.5 Write property test for unauthorized caller rejection
     - **Property 3: Unauthorized callers are rejected**
     - **Validates: Requirements 2.2, 3.4**
 

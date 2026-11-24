@@ -146,32 +146,63 @@ export function computeRunningTotal(transactions: TransactionEvent[]): number {
   return Number(total.toFixed(7))
 }
 
-async function fetchMemo(txHash: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
-    if (!res.ok) return undefined
-    const data = await res.json()
-    return data.memo || undefined
-  } catch {
-    return undefined
-  }
+const memoCache = new Map<string, Promise<string | undefined>>()
+
+export function clearMemoCache(): void {
+  memoCache.clear()
 }
 
+async function fetchMemo(txHash: string): Promise<string | undefined> {
+  if (memoCache.has(txHash)) {
+    return memoCache.get(txHash)!
+  }
+  const promise = (async () => {
+    try {
+      const res = await fetch(`${HORIZON_URL}/transactions/${txHash}`)
+      if (!res.ok) return undefined
+      const data = await res.json()
+      return data.memo || undefined
+    } catch {
+      return undefined
+    }
+  })()
+
+  memoCache.set(txHash, promise)
+  return promise
+}
+
+/**
+ * Fetches the payment history for a Stellar account from Horizon.
+ *
+ * Wallet-switch behaviour: changing `publicKey` immediately clears stale
+ * transaction data, sets loading to true, and triggers a fresh fetch without
+ * waiting for the next poll interval. No ref is mutated during the render phase.
+ */
 export function useTransactionHistory(publicKey: string | null): TransactionHistoryResult {
   const [transactions, setTransactions] = useState<TransactionEvent[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
-  const keyRef = useRef<string | null>(publicKey)
   const fetchingRef = useRef(false)
   const isFirstLoad = useRef(true)
 
-  keyRef.current = publicKey
+  // Clear stale data immediately when the wallet changes so the UI never shows
+  // the previous wallet's transactions while the new fetch is in-flight.
+  useEffect(() => {
+    setTransactions([])
+    setError(null)
+    setLoading(true)
+    isFirstLoad.current = true
+    // Also reset the in-flight guard so a new fetch can start immediately.
+    fetchingRef.current = false
+  }, [publicKey])
 
+  // `publicKey` is captured directly in the callback so a wallet switch
+  // produces a new function reference and re-triggers the fetch effect below.
   const fetchHistory = useCallback(async () => {
-    const key = keyRef.current
-    if (!key) {
+    if (!publicKey) {
       setTransactions([])
       setError(null)
+      setLoading(false)
       return
     }
 
@@ -184,7 +215,7 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
     try {
       // Fetch last 20 payment operations
       const res = await fetch(
-        `${HORIZON_URL}/accounts/${key}/payments?limit=20&order=desc`
+        `${HORIZON_URL}/accounts/${publicKey}/payments?limit=20&order=desc`
       )
       if (!res.ok) {
         if (res.status === 404) {
@@ -208,13 +239,13 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
       // Filter only payment operations
       const paymentRecords = records.filter((r) => r.type === 'payment')
 
-      // Fetch memos in parallel
+      // Fetch memos in parallel (memoCache guarantees each txHash is fetched at most once)
       const memoResults = await Promise.allSettled(
         paymentRecords.map((r) => fetchMemo(r.transaction_hash))
       )
 
       const parsed: TransactionEvent[] = paymentRecords.map((r, i) => {
-        const isIncoming = r.to === key
+        const isIncoming = r.to === publicKey
         const memoResult = memoResults[i]
         const memo =
           memoResult?.status === 'fulfilled' ? memoResult.value : undefined
@@ -231,6 +262,7 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
 
       setTransactions(parsed)
       setError(null)
+      isFirstLoad.current = false
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Failed to fetch transactions'
@@ -238,14 +270,52 @@ export function useTransactionHistory(publicKey: string | null): TransactionHist
     } finally {
       setLoading(false)
       fetchingRef.current = false
+      isFirstLoad.current = false
     }
-  }, [])
+  }, [publicKey])
 
   useEffect(() => {
     fetchHistory()
 
-    const interval = setInterval(fetchHistory, REFRESH_INTERVAL)
-    return () => clearInterval(interval)
+    let intervalId: ReturnType<typeof setInterval> | null = null
+
+    const startTimer = () => {
+      if (!intervalId) {
+        intervalId = setInterval(() => {
+          if (typeof document !== 'undefined' && document.hidden) return
+          fetchHistory()
+        }, REFRESH_INTERVAL)
+      }
+    }
+
+    const stopTimer = () => {
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = null
+      }
+    }
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        stopTimer()
+      } else {
+        fetchHistory()
+        startTimer()
+      }
+    }
+
+    startTimer()
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    return () => {
+      stopTimer()
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+    }
   }, [fetchHistory])
 
   const refresh = useCallback(() => {

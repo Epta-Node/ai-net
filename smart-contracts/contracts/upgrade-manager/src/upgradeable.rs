@@ -4,7 +4,9 @@
 //! Contracts implementing this trait can integrate with the upgrade manager
 //! to provide version tracking, data migration, and rollback capabilities.
 
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{
+    contracterror, contracttype, symbol_short, Address, BytesN, Env, String, Symbol, Vec,
+};
 
 /// Standard interface for upgradeable contracts
 pub trait Upgradeable {
@@ -109,6 +111,76 @@ pub enum UpgradeableError {
     PostUpgradeHookFailed = 7,
     /// Migration plan generation failed
     MigrationPlanFailed = 8,
+    /// The Wasm swap is not available in this build
+    SwapUnavailable = 9,
+}
+
+// ─── Wasm swap ───────────────────────────────────────────────────────────────
+
+/// Instance-storage key holding the Wasm hash the contract is running, as
+/// recorded by the last successful [`swap_wasm`] (or [`record_wasm_hash`]).
+pub const WASM_HASH_KEY: Symbol = symbol_short!("wasm_hash");
+
+/// Instance-storage key holding every hash passed to the mock deployer, in
+/// call order. Only written in test / `testutils` builds.
+pub const MOCK_SWAP_KEY: Symbol = symbol_short!("mock_swap");
+
+/// Record the Wasm hash the contract is running (e.g. at deployment).
+pub fn record_wasm_hash(env: &Env, hash: &BytesN<32>) {
+    env.storage().instance().set(&WASM_HASH_KEY, hash);
+}
+
+/// The Wasm hash recorded by the last swap, if any.
+pub fn stored_wasm_hash(env: &Env) -> Option<BytesN<32>> {
+    env.storage().instance().get(&WASM_HASH_KEY)
+}
+
+/// Replace the running contract's Wasm with `hash` and record it.
+///
+/// * On-chain (`wasm32`, no `testutils`): calls
+///   `update_current_contract_wasm`.
+/// * Test / `testutils` builds: a mock deployer appends `hash` to
+///   [`MOCK_SWAP_KEY`] so tests can assert the swap target, since the test
+///   host cannot load a real replacement Wasm.
+/// * Any other build (native without `testutils`): returns
+///   [`UpgradeableError::SwapUnavailable`] so callers never report an upgrade
+///   that did not happen.
+pub fn swap_wasm(env: &Env, hash: &BytesN<32>) -> Result<(), UpgradeableError> {
+    deploy_wasm(env, hash)?;
+    record_wasm_hash(env, hash);
+    Ok(())
+}
+
+#[cfg(all(target_arch = "wasm32", not(any(test, feature = "testutils"))))]
+fn deploy_wasm(env: &Env, hash: &BytesN<32>) -> Result<(), UpgradeableError> {
+    env.deployer().update_current_contract_wasm(hash.clone());
+    Ok(())
+}
+
+#[cfg(any(test, feature = "testutils"))]
+fn deploy_wasm(env: &Env, hash: &BytesN<32>) -> Result<(), UpgradeableError> {
+    let mut calls: Vec<BytesN<32>> = env
+        .storage()
+        .instance()
+        .get(&MOCK_SWAP_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+    calls.push_back(hash.clone());
+    env.storage().instance().set(&MOCK_SWAP_KEY, &calls);
+    Ok(())
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(any(test, feature = "testutils"))))]
+fn deploy_wasm(_env: &Env, _hash: &BytesN<32>) -> Result<(), UpgradeableError> {
+    Err(UpgradeableError::SwapUnavailable)
+}
+
+/// Every hash the mock deployer was asked to swap to (test builds only).
+#[cfg(any(test, feature = "testutils"))]
+pub fn mock_swap_calls(env: &Env) -> Vec<BytesN<32>> {
+    env.storage()
+        .instance()
+        .get(&MOCK_SWAP_KEY)
+        .unwrap_or_else(|| Vec::new(env))
 }
 
 /// Utility functions for version comparison and compatibility checking
@@ -118,14 +190,12 @@ pub mod version_utils {
     use core::cmp::Ordering;
     use soroban_sdk::{Env, String, Vec};
 
-    /// Lexicographic comparison of two version tags.
-    ///
-    /// [`String`] implements `Ord` through the host's byte comparison, so this
-    /// behaves identically natively and under `wasm32v1-none`. It is a
-    /// byte-wise ordering, not a semver-aware one: `"1.10.0"` sorts before
-    /// `"1.9.0"`. Callers that need semver precedence must zero-pad components.
-    pub fn compare_versions(v1: &String, v2: &String) -> Ordering {
-        v1.cmp(v2)
+    /// Semver precedence of two version tags (see
+    /// [`crate::strutil::compare_versions`]): numeric components compare as
+    /// integers (`"1.10.0"` > `"1.9.0"`) and pre-releases sort below their
+    /// release. Malformed tags return [`UpgradeableError::IncompatibleVersion`].
+    pub fn compare_versions(v1: &String, v2: &String) -> Result<Ordering, UpgradeableError> {
+        crate::strutil::compare_versions(v1, v2).ok_or(UpgradeableError::IncompatibleVersion)
     }
 
     /// Check if upgrade from one version to another is compatible
@@ -143,9 +213,8 @@ pub mod version_utils {
         let mut is_compatible = true;
         let mut migration_required = false;
 
-        // Simple version comparison - in practice would use proper semver
-        match current.cmp(&target) {
-            core::cmp::Ordering::Less => {
+        match compare_versions(&current, &target)? {
+            Ordering::Less => {
                 // Upgrading to newer version - generally compatible
                 migration_required = true;
             }
@@ -177,8 +246,8 @@ pub mod version_utils {
     ) -> Result<Vec<String>, UpgradeableError> {
         let mut steps = Vec::new(env);
 
-        // Simple version-based migration planning
-        match from_version.cmp(to_version) {
+        // Version-based migration planning
+        match compare_versions(from_version, to_version)? {
             Ordering::Less => {
                 // Upgrading
                 if starts_with(from_version, "1.") && starts_with(to_version, "2.") {
@@ -265,8 +334,11 @@ macro_rules! impl_upgradeable_basics {
                 true
             }
 
+            /// Hash recorded by the last `swap_wasm` / `record_wasm_hash`;
+            /// the all-zero hash means none has been recorded yet.
             fn get_wasm_hash(env: Env) -> BytesN<32> {
-                env.current_contract_address().into() // Placeholder
+                $crate::upgradeable::stored_wasm_hash(&env)
+                    .unwrap_or_else(|| BytesN::from_array(&env, &[0u8; 32]))
             }
 
             // Other methods need custom implementation

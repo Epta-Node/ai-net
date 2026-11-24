@@ -163,6 +163,32 @@
   outline-offset: 2px;
 }
 
+.loadMoreContainer {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.loadMoreButton {
+  padding: 8px 18px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.loadMoreButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.loadMoreButton:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ─── Responsive ────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {

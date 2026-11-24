@@ -81,7 +81,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
   })
 
   test('honors explicit stored preference from localStorage on mount', () => {
-    localStorage.setItem('theme-mode', 'light')
+    localStorage.setItem('ainet.theme', 'light')
 
     render(
       <ThemeProvider>
@@ -108,7 +108,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
     expect(screen.getByTestId('mode').textContent).toBe('dark')
     expect(screen.getByTestId('effective').textContent).toBe('dark')
     expect(document.documentElement.classList.contains('theme-light')).toBe(false)
-    expect(localStorage.getItem('theme-mode')).toBe('dark')
+    expect(localStorage.getItem('ainet.theme')).toBe('dark')
 
     const meta = document.querySelector('meta[name="theme-color"]')
     expect(meta?.getAttribute('content')).toBe('#0A0E14')
@@ -120,7 +120,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
     expect(screen.getByTestId('mode').textContent).toBe('light')
     expect(screen.getByTestId('effective').textContent).toBe('light')
     expect(document.documentElement.classList.contains('theme-light')).toBe(true)
-    expect(localStorage.getItem('theme-mode')).toBe('light')
+    expect(localStorage.getItem('ainet.theme')).toBe('light')
     expect(meta?.getAttribute('content')).toBe('#FFFFFF')
   })
 
@@ -137,7 +137,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
     act(() => {
       window.dispatchEvent(
         new StorageEvent('storage', {
-          key: 'theme-mode',
+          key: 'ainet.theme',
           newValue: 'light',
         })
       )
@@ -151,7 +151,7 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
     act(() => {
       window.dispatchEvent(
         new StorageEvent('storage', {
-          key: 'theme-mode',
+          key: 'ainet.theme',
           newValue: 'dark',
         })
       )

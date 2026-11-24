@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 soroban-sdk = { version = "=22.0.11" }
+gas-interface = { path = "../gas_interface" }
 # default-features = false drops the UpgradeManager contract entry points.
 # Only the Upgradeable trait and the shared version/migration types are needed
 # here, and a dependency exporting contract symbols collides with this
@@ -17,7 +18,7 @@ upgrade-manager = { path = "../upgrade-manager", default-features = false }
 
 [features]
 default = []
-testutils = ["soroban-sdk/testutils"]
+testutils = ["soroban-sdk/testutils", "upgrade-manager/testutils"]
 
 [dev-dependencies]
 soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
@@ -29,7 +30,10 @@ error-resolver = { path = "../error-resolver", default-features = false, feature
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # Tests register the real UpgradeManager contract in the test Env, so they need
 # its entry points; the wasm build above does not.
-upgrade-manager = { path = "../upgrade-manager", features = ["contract"] }
+upgrade-manager = { path = "../upgrade-manager", features = ["contract", "testutils"] }
+contract-test-utils = { path = "../../test-utils" }
+# Property-based tests for bond arithmetic (stake / slash / refund).
+proptest = "1"
 
 [profile.release]
 opt-level = "z"
@@ -40,3 +44,10 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
+
+
+
+
+
+
+

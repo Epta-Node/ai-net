@@ -4,6 +4,7 @@
 //! and threshold configuration.
 
 use crate::GasConfig;
+use crate::AgentRecord;
 use soroban_sdk::{contracttype, Address, BytesN, Symbol, Vec};
 
 /// On-chain metrics for an agent, combining SLA terms and analytics.
@@ -187,6 +188,45 @@ pub struct DiscoveryStats {
     pub cache_hits: u64,
 }
 
+// ─── Agent capability versioning (issue #243) ────────────────────────────────
+
+/// Semantic version for an agent capability.
+///
+/// `major` bumps indicate breaking changes; `minor` bumps add features in a
+/// backwards-compatible way; `patch` bumps are backwards-compatible fixes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+/// A versioned snapshot of an agent's registration record.
+///
+/// Every call to `register_agent_version` stores one of these. The
+/// previous latest version is kept intact but its `superseded` flag is set
+/// to `true`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionedAgentRecord {
+    /// Core registration details (capability, price, endpoint, …).
+    pub record: AgentRecord,
+    /// Semantic version published with this registration.
+    pub version: AgentVersion,
+    /// `true` when a newer version of this agent has been published.
+    pub superseded: bool,
+    /// Ledger timestamp when this version was published.
+    pub published_at: u64,
+}
+
+/// All versions published for one agent, ordered oldest-first.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AgentVersionPage {
+    pub versions: Vec<VersionedAgentRecord>,
+}
+
 // ─── Cross-chain identity bridging (issue #259) ──────────────────────────────
 
 /// Chains an agent identity can be bridged to.
@@ -303,4 +343,56 @@ pub struct CallerActivity {
     pub window_start: u64,
     /// Timestamp of this caller's most recent audited operation.
     pub last_seen: u64,
+}
+
+// ─── On-chain reputation (issue #244) ──────────────────────────────────────
+
+/// Stored reputation record for one agent.
+///
+/// `score` is a fixed-point integer: `REPUTATION_SCALE` (1_000_000) == 100%.
+/// All arithmetic uses `u128` intermediates and saturates on overflow.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationScore {
+    /// Agent this score belongs to.
+    pub agent_id: Symbol,
+    /// Weighted score in fixed-point (`REPUTATION_SCALE` == 100%).
+    pub score: u64,
+    /// Ledger timestamp of the last update or decay application.
+    pub last_updated: u64,
+}
+
+/// Tunable lazy-decay schedule (instance storage).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationConfig {
+    /// Percentage lost per epoch, [0, 100].
+    pub decay_pct: u32,
+    /// Epoch length in seconds. Must be > 0.
+    pub epoch_secs: u64,
+}
+
+/// Per-task component scores supplied by the coordinator.
+/// Each field is a percentage [0, 100]; out-of-range values are clamped.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationInput {
+    /// Task success rate [0, 100]. Weight: 40%.
+    pub success_rate: u32,
+    /// Response quality score [0, 100]. Weight: 30%.
+    pub quality: u32,
+    /// Uptime score [0, 100]. Weight: 20%.
+    pub uptime: u32,
+    /// Price fairness score [0, 100]. Weight: 10%.
+    pub price_fairness: u32,
+}
+
+/// One item of a batch reputation update.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReputationUpdate {
+    /// Agent to update.
+    pub agent_id: Symbol,
+    /// Component scores for this agent.
+    pub input: ReputationInput,
 }

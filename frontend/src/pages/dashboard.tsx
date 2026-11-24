@@ -8,8 +8,15 @@ import { DashboardLayout } from '../components/dashboard/DashboardLayout';
 import { KpiCard } from '../components/dashboard/KpiCard';
 import { NetworkHealthBadge } from '../components/dashboard/NetworkHealthBadge';
 import { RecentTasksTable } from '../components/dashboard/RecentTasksTable';
+import { AgentWatchdogPanel } from '../components/dashboard/AgentWatchdogPanel';
+import { DashboardPanel } from '../components/dashboard/DashboardPanel';
 import { useToast } from '../hooks/useToast';
-import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonTable } from '../components/common/Skeleton';
+import {
+  Skeleton,
+  SkeletonAvatar,
+  SkeletonCard,
+  SkeletonTable,
+} from '../components/common/Skeleton';
 import styles from './dashboard.module.css';
 import type { TimePoint, NetworkStats } from '../types/api';
 
@@ -21,13 +28,11 @@ const toSeries = (points: TimePoint[] | undefined): number[] => {
   return [];
 };
 
-const syntheticSeries = (value: number, length = 7): number[] => {
-  const base = Math.max(value, 1);
-  return Array.from({ length }, (_, i) => {
-    const wave = Math.sin(i / 2) * base * 0.12;
-    const drift = (i / (length - 1)) * base * 0.3;
-    return Math.max(0, Math.round(drift + wave + 1));
-  });
+// Sub-cent totals need more precision than cents, or a real cost renders as $0.00.
+const formatCostUsd = (value: number): string => {
+  if (!Number.isFinite(value) || value === 0) return '$0.00';
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  return `$${value.toFixed(2)}`;
 };
 
 /**
@@ -62,7 +67,7 @@ export const DashboardSkeleton: React.FC = () => {
 
 export const DashboardPage: React.FC = () => {
   const { address, connected } = useWallet();
-  const { data, loading, error } = useNetworkStats();
+  const { data, loading, error, retry } = useNetworkStats();
   const { showToast } = useToast();
   const { t, i18n } = useTranslation();
 
@@ -70,7 +75,10 @@ export const DashboardPage: React.FC = () => {
     if (error) {
       // i18n.t so the toast uses the current language without re-running the
       // effect on every language change.
-      showToast(i18n.t('page.dashboard.statsError', { error: error.message || String(error) }), 'error');
+      showToast(
+        i18n.t('page.dashboard.statsError', { error: error.message || String(error) }),
+        'error'
+      );
     }
   }, [error, showToast, i18n]);
 
@@ -80,14 +88,6 @@ export const DashboardPage: React.FC = () => {
   }
 
   if (!address) return null; // render nothing while redirecting
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <DashboardSkeleton />
-      </DashboardLayout>
-    );
-  }
-
   const kpiData: NetworkStats = data || {
     totalAgents: 0,
     totalTasks: 0,
@@ -95,38 +95,69 @@ export const DashboardPage: React.FC = () => {
     uptimePercent: 0,
   };
 
-  const agentsSeries =
-    toSeries(kpiData.tasksLast7d).length > 0
-      ? toSeries(kpiData.tasksLast7d)
-      : syntheticSeries(kpiData.totalAgents);
-  const tasksSeries =
-    toSeries(kpiData.tasksLast7d).length > 0
-      ? toSeries(kpiData.tasksLast7d)
-      : syntheticSeries(kpiData.totalTasks);
-  const xlmSeries =
-    toSeries(kpiData.xlmLast7d).length > 0
-      ? toSeries(kpiData.xlmLast7d)
-      : syntheticSeries(kpiData.totalXLMTransacted);
-  const uptimeSeries =
-    toSeries(kpiData.tasksLast7d).length > 0
-      ? toSeries(kpiData.tasksLast7d)
-      : syntheticSeries(Math.round(kpiData.uptimePercent));
+  // Only totalTasks and totalXLMTransacted have a real 7-day series from the
+  // backend. totalAgents and uptimePercent have no time-series equivalent, so
+  // their KPI cards render without a sparkline rather than a fabricated one.
+  const tasksSeries = toSeries(kpiData.tasksLast7d);
+  const xlmSeries = toSeries(kpiData.xlmLast7d);
+  // No synthetic fallback here either: inventing a spend series for a metric
+  // that is actually measured would make a zero-cost platform look like it had
+  // a trend.
+  const costSeries = toSeries(kpiData.cost?.costLast7d);
 
   return (
     <DashboardLayout className="fade-in">
-      <section className={styles.kpis}>
-        <KpiCard title={t('page.dashboard.totalAgents')} value={kpiData.totalAgents} sparklineData={agentsSeries} loading={loading} />
-        <KpiCard title={t('page.dashboard.totalTasks')} value={kpiData.totalTasks} sparklineData={tasksSeries} loading={loading} />
-        <KpiCard title={t('page.dashboard.totalXLM')} value={kpiData.totalXLMTransacted} sparklineData={xlmSeries} loading={loading} />
-        <KpiCard title={t('page.dashboard.uptime')} value={`${kpiData.uptimePercent.toFixed(2)}%`} sparklineData={uptimeSeries} loading={loading} />
-      </section>
-      <section className={styles.health}>
-        <NetworkHealthBadge uptimePercent={kpiData.uptimePercent} />
-      </section>
-      <section className={styles.recentTasks}>
-        <h2 className={styles.heading}>{t('page.dashboard.recentTasks')}</h2>
-        <RecentTasksTable walletAddress={address ?? ''} loading={loading} />
-      </section>
+      <DashboardPanel
+        loading={loading}
+        error={error}
+        onRetry={() => void retry()}
+        empty={!data}
+        emptyTitle={t('page.dashboard.emptyTitle')}
+        emptyDescription={t('page.dashboard.emptyDescription')}
+        loadingContent={<DashboardSkeleton />}
+      >
+        <section className={styles.kpis}>
+          <KpiCard
+            title={t('page.dashboard.totalAgents')}
+            value={kpiData.totalAgents}
+            loading={loading}
+          />
+          <KpiCard
+            title={t('page.dashboard.totalTasks')}
+            value={kpiData.totalTasks}
+            sparklineData={tasksSeries}
+            loading={loading}
+          />
+          <KpiCard
+            title={t('page.dashboard.totalXLM')}
+            value={kpiData.totalXLMTransacted}
+            sparklineData={xlmSeries}
+            loading={loading}
+          />
+          <KpiCard
+            title={t('page.dashboard.uptime')}
+            value={`${kpiData.uptimePercent.toFixed(2)}%`}
+            loading={loading}
+          />
+          {/* Platform LLM spend (Issue #390). Renders as a string, so KpiCard shows
+            it verbatim rather than count-animating a dollar figure. */}
+          <KpiCard
+            title={t('page.dashboard.totalCost', { defaultValue: 'LLM spend' })}
+            value={formatCostUsd(kpiData.cost?.costUsd ?? 0)}
+            sparklineData={costSeries}
+            loading={loading}
+          />
+        </section>
+        <section className={styles.health}>
+          <NetworkHealthBadge uptimePercent={kpiData.uptimePercent} />
+        </section>
+        <section className={styles.recentTasks}>
+          <h2 className={styles.heading}>{t('page.dashboard.recentTasks')}</h2>
+          <RecentTasksTable walletAddress={address ?? ''} loading={loading} />
+        </section>
+      </DashboardPanel>
+      {/* Agent heartbeat health (Issue #379) */}
+      <AgentWatchdogPanel />
     </DashboardLayout>
   );
 };

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { config } from "../../config";
 
 export interface AccessTokenPayload {
   sub: string; // walletPublicKey
@@ -23,6 +24,8 @@ function base64UrlDecode(str: string): string {
   return Buffer.from(base64, "base64").toString("utf-8");
 }
 
+import { getConfig } from "../../config";
+
 export class TokenService {
   private jwtSecret: string;
   private accessTtlSeconds: number;
@@ -35,10 +38,10 @@ export class TokenService {
     refreshTtlSeconds?: number;
     sessionMaxTtlSeconds?: number;
   }) {
-    this.jwtSecret = options?.jwtSecret ?? process.env.AUTH_JWT_SECRET ?? "ai-net-auth-secret";
-    this.accessTtlSeconds = options?.accessTtlSeconds ?? 900; // 15 mins
-    this.refreshTtlSeconds = options?.refreshTtlSeconds ?? 604800; // 7 days
-    this.sessionMaxTtlSeconds = options?.sessionMaxTtlSeconds ?? 2592000; // 30 days
+    this.jwtSecret = options?.jwtSecret ?? config.AUTH_JWT_SECRET;
+    this.accessTtlSeconds = options?.accessTtlSeconds ?? config.AUTH_ACCESS_TOKEN_TTL_SECONDS;
+    this.refreshTtlSeconds = options?.refreshTtlSeconds ?? config.AUTH_REFRESH_TOKEN_TTL_SECONDS;
+    this.sessionMaxTtlSeconds = options?.sessionMaxTtlSeconds ?? config.AUTH_SESSION_MAX_TTL_SECONDS;
   }
 
   /**

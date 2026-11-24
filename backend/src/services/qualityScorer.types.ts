@@ -80,6 +80,7 @@ export interface QualityScoringRules {
  * Stored in the `quality_scores` table of the tasks database.
  */
 export interface QualityScoreRecord {
+  id?: number;
   taskId: string;
   nodeId: string;
   /** Agent that produced the output; undefined when no registry agent ran. */

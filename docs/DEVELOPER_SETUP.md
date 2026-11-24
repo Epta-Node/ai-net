@@ -1,6 +1,51 @@
-# 🛠️ AI-Net Developer Onboarding & Local Setup Guide
+# AI-Net Developer Onboarding & Local Setup Guide
 
-Welcome to **AI-Net**! This guide takes you from a clean machine checkout to a fully running multi-agent platform and local/testnet development environment in minutes.
+Welcome to **AI-Net**! This guide takes you from a clean machine checkout to a fully running multi-agent platform and local/testnet development environment in under 30 minutes — even if you have never used the Stellar blockchain before.
+
+---
+
+## 0. Stellar Crash Course for New Contributors
+
+Skip this section if you are already familiar with Stellar keypairs and the testnet.
+
+### What is Stellar?
+
+Stellar is an open-source blockchain network designed for fast, low-cost financial transactions. Think of it as a global payment rail where anyone can hold and transfer any asset — including its native currency, **XLM (Lumens)** — with transactions settling in 3-5 seconds. AI-Net uses Stellar to hold escrow payments between task submitters and AI agents: when a submitter creates a task, XLM is locked in a Claimable Balance; when the agent delivers, the coordinator releases the balance to the agent.
+
+You do not need to understand the full Stellar protocol to contribute. The payment layer (`smart-contracts/src/payment/payment.ts`) abstracts all network calls, and the rest of the codebase interacts through typed TypeScript functions.
+
+### What is a Keypair?
+
+A Stellar **keypair** is a public/private key pair:
+
+| Key | Starts with | Safe to share? | Purpose |
+|---|---|---|---|
+| **Public key** | `G...` (56 chars) | Yes — it is your address | Receive XLM, identify your account |
+| **Secret key** | `S...` (56 chars) | **Never** — it is your password | Sign transactions; anyone who has it controls your funds |
+
+Think of the public key as your bank account number and the secret key as your PIN. The secret key never leaves your machine.
+
+### Why testnet? How Friendbot works
+
+The **Stellar testnet** is a parallel copy of the network that uses fake XLM with no real value. It resets every few months. You can fund a testnet account for free through **Friendbot**, a faucet operated by the Stellar Development Foundation:
+
+```bash
+curl "https://friendbot.stellar.org?addr=<YOUR_PUBLIC_KEY>"
+```
+
+This deposits 10,000 test XLM into your account instantly — enough to run all local tests many thousands of times over.
+
+### Freighter browser wallet — install and create a testnet account
+
+[Freighter](https://chromewebstore.google.com/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk) is the recommended browser wallet for AI-Net's frontend:
+
+1. Install **Freighter** from the [Chrome Web Store](https://chromewebstore.google.com/detail/freighter/bcacfldlkkdogcmkkibnjlakofdplcbk).
+2. Open Freighter → click **Create New Wallet** → save your recovery phrase somewhere safe.
+3. Go to **Settings → Network** → select **Test Net**.
+4. Copy your public key (`G...`) from the main screen.
+5. Fund it with Friendbot: `curl "https://friendbot.stellar.org?addr=<YOUR_PUBLIC_KEY>"`
+
+Your Freighter wallet is now ready to connect to the local frontend.
 
 ---
 
@@ -68,6 +113,20 @@ cd backend && npm install && cd ../frontend && npm install && cd ..
 cd backend && npm run db:migrate && cd ..
 ```
 
+#### Rolling back a migration
+
+Each migration in `backend/src/db/migrations/` may end with a `-- migrate:down` section holding the SQL that reverses it. `db:rollback` reverts the newest applied migration of the consolidated database (the one `db:migrate:status` reports on); pass `--steps N` to revert more:
+
+```bash
+cd backend
+npm run db:rollback               # revert the newest migration
+npm run db:rollback -- --steps 2  # revert the newest two
+```
+
+A migration without a `-- migrate:down` section is irreversible. If any migration a rollback would revert is irreversible, the command exits with an error naming it and reverts nothing. Applied-state tracking lives in the `schema_migrations` table: a reverted migration's row is removed, so `npm run db:migrate:status` shows it as pending again.
+
+The migration test suite rehearses `up -> down -> up` on a scratch in-memory database and asserts the schema is identical afterwards; it runs with the rest of the backend tests in CI (`npm run test:coverage`).
+
 ### Step 5: Start Development Servers
 
 ```bash
@@ -131,15 +190,11 @@ cargo test
 
 ## 4. Wallet Setup (Freighter Browser Extension)
 
-To test the frontend with on-chain payments:
+See **Section 0** for Freighter installation steps. Once installed and connected to testnet:
 
-1. Install the **[Freighter Wallet Extension](https://www.freighter.app/)** for Chrome / Firefox / Brave.
-2. In Freighter Settings, toggle the network to **Testnet**.
-3. Copy your public key (`G...`) and fund it using Friendbot:
-   ```bash
-   curl "https://friendbot.stellar.org?addr=<YOUR_FREIGHTER_PUBLIC_KEY>"
-   ```
-4. Connect Freighter to the frontend at `http://localhost:3001`.
+1. Open the frontend at `http://localhost:3001`.
+2. Click **Connect Wallet** — Freighter will prompt for permission.
+3. Approve the connection; your `G...` public key appears in the top-right corner.
 
 ---
 
@@ -161,6 +216,22 @@ cd smart-contracts && cargo test
 cd backend && npm run test:e2e
 ```
 
+### Regenerating Soroban TypeScript clients
+
+After changing a contract entrypoint, build the contracts and regenerate the
+typed clients in one command:
+
+```bash
+cd smart-contracts
+cargo build --locked --target wasm32v1-none --release
+npm run codegen
+```
+
+The generator reads the exported contract spec from each built Wasm file and
+writes marked generated files under `smart-contracts/src/generated/`. Do not
+edit those files by hand. CI regenerates the clients and fails if the
+committed output differs from the contract specs.
+
 ---
 
 ## 6. Operating System Quirks & Troubleshooting
@@ -180,158 +251,139 @@ cd backend && npm run test:e2e
 
 ### 🪟 Windows (WSL2 Required)
 
-All development on Windows must run inside **WSL2**. Native CMD or PowerShell will produce path, symlink, and permission errors that are not supported.
+- **Always run inside WSL2 (Ubuntu)**: Avoid running Node/Rust in native Windows CMD/PowerShell to prevent path and symlink issues.
+- **Git Line Endings**: Configure autocrlf to prevent newline mismatches in bash scripts:
+  ```bash
+  git config --global core.autocrlf input
+  ```
 
-#### Step 1 — Enable WSL2 and Install Ubuntu
+---
 
-Open **PowerShell as Administrator** and run:
+## 7. First Contribution Checklist
 
-```powershell
-# Enable WSL and Virtual Machine Platform features
-wsl --install
+Work through this list top-to-bottom. Every item is a prerequisite for the next.
 
-# If wsl --install is unavailable on older Windows 10 builds, enable manually:
-dism.exe /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart
-dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+- [ ] **Install Node.js 20 LTS** — `node --version` prints `v20.x`
+- [ ] **Install Docker and Docker Compose v2** — `docker compose version` prints `v2.x`
+- [ ] **Install Rust 1.80+** — `rustc --version` prints `1.80.0` or higher
+- [ ] **Add the WASM target** — `rustup target add wasm32-unknown-unknown`
+- [ ] **Install Stellar CLI** — `cargo install --locked stellar-cli --features opt`
+- [ ] **Clone the repo** — `git clone https://github.com/Epta-Node/ai-net.git && cd ai-net`
+- [ ] **Create a testnet keypair**:
+  ```bash
+  stellar keys generate mydev --network testnet
+  stellar keys show mydev        # prints G... public key
+  stellar keys show --show-secret mydev   # prints S... secret key — keep this private
+  ```
+- [ ] **Fund your testnet account via Friendbot**:
+  ```bash
+  curl "https://friendbot.stellar.org?addr=$(stellar keys address mydev --network testnet)"
+  # Response: {"hash":"..."} — your account now has 10 000 test XLM
+  ```
+- [ ] **Copy `.env.example` to `.env`** and fill in your keypair:
+  ```bash
+  cp .env.example .env
+  # Edit .env:
+  #   STELLAR_SECRET_KEY=S<your-56-char-secret-key>
+  #   STELLAR_PUBLIC_KEY=G<your-56-char-public-key>
+  #   STELLAR_COORDINATOR_SECRET=S<your-56-char-secret-key>
+  #   STELLAR_COORDINATOR_PUBLIC_KEY=G<your-56-char-public-key>
+  ```
+- [ ] **Start Docker infrastructure** — `docker compose up -d` — wait for all containers to show `healthy`
+- [ ] **Install npm dependencies** — `npm install`
+- [ ] **Run the full test suite** — `npm test` — all tests green
+- [ ] **Run the quality gate** — `npm run gate` — passes with zero errors
+- [ ] **Make a small change** (e.g. add a comment) and open a draft PR — confirm CI goes green
 
-# After reboot, set WSL 2 as default
-wsl --set-default-version 2
+Once every box is checked you are ready to pick up a `good first issue` from the issue tracker.
 
-# Install Ubuntu 22.04 LTS
-wsl --install -d Ubuntu-22.04
-```
+---
 
-After installation, launch **Ubuntu** from the Start Menu and complete the initial user setup (username + password). Verify WSL2 is active:
+## 8. Annotated Environment Variables
 
-```powershell
-wsl -l -v
-# Expected output:
-#   NAME            STATE           VERSION
-#   Ubuntu-22.04    Running         2
-```
+Every variable in `.env.example` is documented below with its purpose, valid values, and a note on whether it is required for local development.
 
-#### Step 2 — Install Docker Desktop with WSL2 Backend
+### Runtime mode
 
-1. Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/).
-2. During installation, ensure **"Use WSL 2 based engine"** is checked.
-3. After installation, open Docker Desktop → **Settings → Resources → WSL Integration**.
-4. Enable integration for your Ubuntu distribution.
-5. Verify from inside WSL2:
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `NODE_ENV` | `development` | Yes | `development`, `test`, or `production` |
+| `PORT` | `3000` | Yes | HTTP port for the backend server |
+| `LOG_LEVEL` | `info` | No | `debug`, `info`, `warn`, `error` |
 
-```bash
-docker --version
-docker compose version
-```
+### Database
 
-> **Important**: Never run `docker` from PowerShell for this project. Always use the WSL2 terminal.
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `DATABASE_URL` | `./data/ai-net.db` | Yes | SQLite path for local dev; PostgreSQL connection string for production |
 
-#### Step 3 — Install Node.js inside WSL2
+### CORS and security
 
-Install Node.js v20 LTS using `nvm` inside the WSL2 Ubuntu shell:
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `ALLOWED_ORIGINS` | `http://localhost:3000` | Yes | Comma-separated list of allowed CORS origins |
+| `API_KEYS` | _(empty)_ | No | Comma-separated bearer tokens for API access; empty = no auth |
+| `ADMIN_API_KEY` | _(empty)_ | No | Token required for `/api/admin/*` routes |
 
-```bash
-# Install nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+### Stellar network
 
-# Reload shell
-source ~/.bashrc
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `STELLAR_NETWORK` | `testnet` | Yes | `testnet`, `futurenet`, or `public`. Use `testnet` for local dev. |
+| `STELLAR_HORIZON_URL` | `https://horizon-testnet.stellar.org` | Yes | Horizon REST API endpoint; leave default for testnet |
+| `SOROBAN_RPC_URL` | `https://soroban-testnet.stellar.org` | Yes | Soroban RPC endpoint for contract deploys |
 
-# Install and use Node.js 20 LTS
-nvm install 20
-nvm use 20
-nvm alias default 20
+### Stellar keys
 
-# Verify
-node --version   # v20.x.x
-npm --version    # 10.x.x
-```
+| Variable | Required | Notes |
+|---|---|---|
+| `STELLAR_COORDINATOR_SECRET` | Yes | `S...` 56-char secret key — the coordinator's signing key. **Never commit.** |
+| `STELLAR_COORDINATOR_PUBLIC_KEY` | Yes | `G...` 56-char public key matching the coordinator secret |
+| `STELLAR_SECRET_KEY` | Yes (tests) | Alias used by the payment test suite; same value as `STELLAR_COORDINATOR_SECRET` |
+| `STELLAR_PUBLIC_KEY` | Yes (tests) | Alias used by the payment test suite; same as `STELLAR_COORDINATOR_PUBLIC_KEY` |
+| `STELLAR_TEST_SECRET` | No | Additional throwaway key used in testnet integration tests |
 
-#### Step 4 — Install Rust and Stellar CLI inside WSL2
+### Venice AI
 
-```bash
-# Install Rust toolchain
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `VENICE_API_KEY` | _(empty)_ | Yes | Your Venice AI API key from [venice.ai](https://venice.ai). Tests use a mock when `RUN_VENICE_INTEGRATION_TESTS=false`. |
+| `VENICE_KEY_COOLDOWN_MS` | `60000` | No | How long (ms) a rate-limited key is skipped before being retried |
+| `VENICE_KEY_ERROR_RATE_THRESHOLD` | `0.2` | No | Error rate (0–1) above which a key is placed into cooldown |
+| `VENICE_BASE_URL` | `https://api.venice.ai/api/v1` | No | Override to point at a local Venice mock |
+| `VENICE_CACHE_TTL_MS` | `86400000` | No | How long general Venice responses are cached (24 h default) |
 
-# Add WASM compilation target
-rustup target add wasm32-unknown-unknown
+### Caching
 
-# Install Stellar CLI
-cargo install --locked stellar-cli --features opt
+| Variable | Default | Required | Notes |
+|---|---|---|---|
+| `CACHE_DRIVER` | `lru` | No | `lru` for in-process cache; `redis` for distributed |
+| `REDIS_URL` | `redis://localhost:6379` | No | Only used when `CACHE_DRIVER=redis` |
 
-# Verify
-stellar --version
-```
+### Rate limits
 
-#### Step 5 — Clone and Configure the Repository
+| Variable | Default | Notes |
+|---|---|---|
+| `MAX_PROMPT_LENGTH` | `10000` | Maximum character length of a task prompt |
+| `DAILY_TASK_LIMIT_PER_WALLET` | `100` | Maximum tasks a single wallet can submit per day |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Sliding window (ms) for request rate limiting |
+| `RATE_LIMIT_MAX_REQUESTS` | `20` | Maximum requests per window per IP |
 
-Work entirely within the WSL2 filesystem. Cloning into a Windows-mounted path (e.g. `/mnt/c/...`) causes severe I/O performance degradation and inotify watch failures.
+### Payment reconciliation
 
-```bash
-# Clone into the WSL2 home directory — not under /mnt/c
-cd ~
-git clone https://github.com/Epta-Node/ai-net.git
-cd ai-net
-```
+| Variable | Default | Notes |
+|---|---|---|
+| `RECONCILIATION_INTERVAL_MS` | `60000` | How often the reconciliation daemon runs (60 s) |
+| `RECONCILIATION_REMEDIATION_ENABLED` | `true` | Enables automatic refund of expired locked escrows |
+| `RECONCILIATION_ESCROW_EXPIRY_MS` | `86400000` | Age (ms) after which a locked escrow on a failed task is refunded (24 h) |
+| `RECONCILIATION_WARNING_DRIFT_PERCENT` | `1` | Drift percentage that triggers a warning alert |
+| `RECONCILIATION_CRITICAL_DRIFT_PERCENT` | `5` | Drift percentage that triggers a critical alert and webhook call |
+| `RECONCILIATION_WEBHOOK_URL` | _(empty)_ | URL that receives a POST when a critical drift is detected |
 
-Configure Git line endings to prevent CRLF corruption in shell scripts:
+### Feature flags (opt-in integration tests)
 
-```bash
-git config --global core.autocrlf input
-git config --global core.eol lf
-```
-
-#### Step 6 — Fix Windows Path Length Limits
-
-Windows enforces a 260-character path limit that breaks deep `node_modules` trees. Enable long paths in PowerShell (run as Administrator):
-
-```powershell
-# Enable long path support in Windows registry
-New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
-  -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
-
-# Enable long paths in Git
-git config --system core.longpaths true
-```
-
-#### Step 7 — Run the Full Setup
-
-From inside WSL2:
-
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
-
-npm install
-cd backend && npm install && npm run db:migrate && cd ..
-cd frontend && npm install && cd ..
-
-# Start infrastructure
-docker compose up -d postgres redis
-
-# Start dev servers
-cd backend && npm run dev &
-cd frontend && npm run dev
-```
-
-#### Common Windows / WSL2 Issues
-
-| Symptom                               | Cause                               | Fix                                                                                             |
-| ------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `ENOENT` or `EACCES` on `npm install` | Running from `/mnt/c/` Windows path | Re-clone into WSL2 home (`~/ai-net`)                                                            |
-| `inotify` watch limit exceeded        | Low default limit                   | Run `echo fs.inotify.max_user_watches=524288 \| sudo tee -a /etc/sysctl.conf && sudo sysctl -p` |
-| Docker commands not found in WSL2     | WSL integration disabled            | Enable Ubuntu integration in Docker Desktop → Settings → WSL Integration                        |
-| `\r` or `^M` characters in scripts    | CRLF line endings                   | Run `git config --global core.autocrlf input` and re-checkout files                             |
-| Rust/cargo slow on `/mnt/c/`          | Windows filesystem overhead         | Always build from the WSL2 native filesystem (`~/`)                                             |
-| Port `3000` already in use            | Windows process occupying port      | From PowerShell: `netstat -ano \| findstr :3000` then `taskkill /PID <pid> /F`                  |
-
-#### Using VS Code with WSL2
-
-Install the **[Remote — WSL](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl)** extension. Then open the project from inside WSL2:
-
-```bash
-cd ~/ai-net
-code .
-```
-
-VS Code will attach to the WSL2 environment and use the Linux toolchain automatically. All terminal sessions in the integrated terminal will run inside WSL2.
+| Variable | Default | Notes |
+|---|---|---|
+| `RUN_STELLAR_E2E_TESTS` | `false` | Set `true` to run tests that hit the live Stellar testnet |
+| `RUN_STELLAR_INTEGRATION_TESTS` | `false` | Set `true` to run Horizon integration tests |
+| `RUN_VENICE_INTEGRATION_TESTS` | `false` | Set `true` to run Venice AI integration tests (requires a valid `VENICE_API_KEY`) |
