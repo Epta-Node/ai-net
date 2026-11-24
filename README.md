@@ -165,16 +165,32 @@ cd smart-contracts
 For detailed upgrade procedures and storage migration guidance, see [STORAGE_MIGRATION.md](smart-contracts/docs/STORAGE_MIGRATION.md).
 
 ### Database migration
-This branch does not include an automated migration runner. To apply the backend index migration, run the SQL script directly against your PostgreSQL database:
+
+The backend includes an automated migration runner (issue #1000). Run all pending migrations across all three databases:
 
 ```bash
-psql "$DATABASE_URL" -f backend/src/db/migrations/001_add_stats_indexes.sql
+cd backend
+npm run db:migrate
 ```
 
-If you need an explicit connection, use:
+Roll back the last migration:
 
 ```bash
-psql -h <host> -U <user> -d <database> -f backend/src/db/migrations/001_add_stats_indexes.sql
+npm run db:rollback
+# or roll back N steps:
+npx ts-node scripts/migrate.ts --db tasks --direction down --steps 2
+```
+
+Seed sample data (runs migrations first):
+
+```bash
+npm run db:seed
+```
+
+To apply migrations for a specific database only:
+
+```bash
+npx ts-node scripts/migrate.ts --db tasks --direction up
 ```
 
 ### Run (testnet)
