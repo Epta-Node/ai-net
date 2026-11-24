@@ -369,8 +369,8 @@ const envSchema = z.object({
   // ── Database observability (#807) ───────────────────────────────────────────
   /** Comma-separated query-latency histogram bounds in milliseconds. Default: 1,5,10,50,100,500,1000 */
   DB_LATENCY_BUCKETS: z.string().optional(),
-  /** Statements at or above this duration are logged as `slow_query`. Default: 200 */
-  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(200),
+  /** Statements at or above this duration are logged as `slow_query`, with their SQL text. Default: 100 (#923) */
+  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(100),
 
   // ── Agent ownership proof (#557, #558) ───────────────────────────────────────
   /**
@@ -415,7 +415,7 @@ const envSchema = z.object({
   /** Ceiling for a single job retry delay, in ms. */
   JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
   /** Attempts before a job is moved to the dead-letter queue. */
-  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;

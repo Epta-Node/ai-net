@@ -1,5 +1,12 @@
 # AI-Net API Reference
 
+## API Version Header
+
+Every response, including `400`, `404` and CORS preflight responses, carries `X-API-Version` with the version that
+handled the request (for example `2.0`). A request that asks for a version the server does not support gets `400`
+with `UNSUPPORTED_API_VERSION`, and the header then names the latest supported version. Clients can send `API-Version`
+to choose a version; when they omit it, the configured default applies.
+
 ## Standard Error Schema
 
 All API endpoints return errors in a consistent JSON format when a request fails.

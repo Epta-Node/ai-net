@@ -12,8 +12,9 @@
  * This module is deliberately a leaf: `pool.ts` imports it, so it must not
  * import anything that imports the pool back.
  *
- * Log lines carry a short hash of the SQL text, never the bound values, so a
- * slow query can be grouped without leaking data into the logs.
+ * A slow-query log line carries the statement text as written, with its `?`
+ * placeholders, and a short hash of that text for grouping (#923). Bound values
+ * are never passed to the logger, so they cannot appear in the log.
  */
 
 import { createHash } from "crypto";
@@ -27,8 +28,8 @@ export type DbOperation = "select" | "insert" | "update" | "delete" | "other";
 
 /** Histogram upper bounds in seconds when `DB_LATENCY_BUCKETS` is unset. */
 export const DEFAULT_DB_LATENCY_BUCKETS_SECONDS = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0];
-/** Slow-query threshold when `SLOW_QUERY_THRESHOLD_MS` is unavailable. */
-export const DEFAULT_SLOW_QUERY_THRESHOLD_MS = 200;
+/** Slow-query threshold when `SLOW_QUERY_THRESHOLD_MS` is unavailable (#923). */
+export const DEFAULT_SLOW_QUERY_THRESHOLD_MS = 100;
 /** Recent durations kept per database for p99 estimates. */
 const LATENCY_WINDOW_SIZE = 1024;
 
@@ -169,7 +170,14 @@ export function recordDbQuery(dbName: string, sql: string, durationMs: number): 
     if (durationMs >= slowMs) {
       series.slowQueries += 1;
       logger.warn(
-        { event: "slow_query", db: dbName, operation, durationMs: Math.round(durationMs * 100) / 100, queryHash: queryHashOf(sql) },
+        {
+          event: "slow_query",
+          db: dbName,
+          operation,
+          durationMs: Math.round(durationMs * 100) / 100,
+          queryHash: queryHashOf(sql),
+          sql,
+        },
         "slow query",
       );
     }
