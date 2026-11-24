@@ -110,7 +110,7 @@ export function createIdempotencyMiddleware(store?: IdempotencyStore) {
         ),
       );
     }
-
+    req.idempotencyKey = key;
     const wallet = resolveWallet(req);
 
     // ── Reserve before dispatch ─────────────────────────────────────────────
@@ -127,14 +127,14 @@ export function createIdempotencyMiddleware(store?: IdempotencyStore) {
     if (reservation.status === 'replay' && reservation.entry) {
       log.debug({ key, wallet }, 'replaying idempotent response');
       const entry = reservation.entry;
-      res.status(entry.statusCode ?? 200);
+      res.status(200);
       res.setHeader('Idempotency-Key', key);
       res.setHeader('X-Idempotent-Replay', 'true');
       try {
         res.json(JSON.parse(entry.responseBody ?? 'null'));
       } catch {
         // Fallback: send raw string if JSON parsing fails.
-        res.status(entry.statusCode ?? 200).send(entry.responseBody ?? '');
+        res.status(200).send(entry.responseBody ?? '');
       }
       return;
     }

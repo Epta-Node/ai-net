@@ -16,15 +16,16 @@ import type { Task } from "../types/task";
 function makeDb(): Database.Database {
   const db = new Database(":memory:");
   db.exec(`
-    CREATE TABLE IF NOT EXISTS tasks (
-      id              TEXT PRIMARY KEY,
-      prompt          TEXT NOT NULL,
-      walletPublicKey TEXT NOT NULL DEFAULT '',
-      status          TEXT NOT NULL DEFAULT 'queued',
-      dagJson         TEXT NOT NULL DEFAULT '[]',
-      createdAt       TEXT NOT NULL,
-      updatedAt       TEXT NOT NULL
-    );
+   CREATE TABLE IF NOT EXISTS tasks (
+  id              TEXT PRIMARY KEY,
+  prompt          TEXT NOT NULL,
+  walletPublicKey TEXT NOT NULL DEFAULT '',
+  status          TEXT NOT NULL DEFAULT 'queued',
+  dagJson         TEXT NOT NULL DEFAULT '[]',
+  createdAt       TEXT NOT NULL,
+  updatedAt       TEXT NOT NULL,
+  idempotencyKey  TEXT
+);
     CREATE TABLE IF NOT EXISTS task_events (
       global_seq  INTEGER PRIMARY KEY AUTOINCREMENT,
       task_seq    INTEGER NOT NULL,
@@ -83,6 +84,39 @@ describe("createTaskDb — insert / findById", () => {
     expect(found!.id).toBe("task_001");
     expect(found!.prompt).toBe("Test prompt");
     expect(found!.status).toBe("queued");
+  });
+
+    it("stores and retrieves a task by idempotency key", () => {
+    const db = createTaskDb(makeDb());
+    const task = makeTask({ idempotencyKey: "key-123" });
+    db.insert(task);
+
+    const found = db.findByIdempotencyKey(WALLET, "key-123");
+
+    expect(found).toBeDefined();
+    expect(found!.id).toBe(task.id);
+    expect(found!.idempotencyKey).toBe("key-123");
+  });
+    it("ignores expired keys and keys belonging to another wallet", () => {
+    const db = createTaskDb(makeDb());
+
+    const expiredTask = makeTask({
+      id: "task_expired",
+      idempotencyKey: "old-key",
+      createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+    });
+
+    const otherWalletTask = makeTask({
+      id: "task_other_wallet",
+      walletPublicKey: "OTHER_WALLET",
+      idempotencyKey: "other-key",
+    });
+
+    db.insert(expiredTask);
+    db.insert(otherWalletTask);
+
+    expect(db.findByIdempotencyKey(WALLET, "old-key")).toBeUndefined();
+    expect(db.findByIdempotencyKey(WALLET, "other-key")).toBeUndefined();
   });
 
   it("returns undefined for unknown id", () => {
@@ -321,6 +355,10 @@ describe("closeTaskDb", () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), "ai-net-task-pool-"));
     const dbPath = path.join(directory, "tasks.db");
     const pool = getTaskPool(dbPath);
+        const columns = await pool.read((db) =>
+      db.pragma("table_info(tasks)") as Array<{ name: string }>
+    );
+    expect(columns.some((column) => column.name === "idempotencyKey")).toBe(true);
     let finishRead!: () => void;
     const readPromise = pool.read(async () => {
       await new Promise<void>((resolve) => { finishRead = resolve; });
