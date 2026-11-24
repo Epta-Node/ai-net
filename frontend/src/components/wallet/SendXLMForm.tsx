@@ -23,6 +23,7 @@ import {
 import styles from "./SendXLMForm.module.css";
 
 const HORIZON_URL = "https://horizon-testnet.stellar.org";
+const TRANSACTION_FEE_XLM = (Number(BASE_FEE) / 10_000_000).toFixed(7);
 
 interface ConfirmationData {
   destination: string;
@@ -362,6 +363,14 @@ export function SendXLMForm() {
                 </span>
                 <span className={styles.confirmValue}>
                   {confirmation.amount} XLM
+                </span>
+              </div>
+              <div className={styles.confirmRow}>
+                <span className={styles.confirmLabel}>
+                  {t("wallet.send.fee", { defaultValue: "Network fee" })}
+                </span>
+                <span className={styles.confirmValue}>
+                  {TRANSACTION_FEE_XLM} XLM
                 </span>
               </div>
               {confirmation.memo && (
