@@ -165,7 +165,7 @@ describe("task event SSE backpressure and stale connections (#813)", () => {
     jest.advanceTimersByTime(10_000);
 
     expect(res.ended).toBe(false);
-    expect(res.chunks.filter((chunk) => chunk === ": keep-alive\n\n").length).toBeGreaterThan(0);
+    expect(res.chunks.filter((chunk) => chunk === ": ping\n\n").length).toBeGreaterThan(0);
     expect(getSseMetricsSnapshot()).toMatchObject({ connectionsTimedOut: 0, activeConnections: 1 });
   });
 

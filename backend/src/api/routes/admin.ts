@@ -1080,6 +1080,10 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
     const stats = jobQueue.getStats();
     const worker = jobQueue.getWorker();
     res.json({
+      pending: stats.pending,
+      leased: stats.active,
+      completed: stats.completed,
+      failed: stats.deadLetter + stats.failed,
       status: "healthy",
       stats,
       worker: worker
@@ -1090,7 +1094,6 @@ export function createAdminQueueRouter(queue?: JobQueue): Router {
             concurrency: 0,
             pollIntervalMs: 0,
           },
-      // Redacted (keyId-only) health of the Venice fallback keys — issue #741.
       veniceKeyHealth: getVeniceKeyHealthStore().snapshot(),
     });
   });

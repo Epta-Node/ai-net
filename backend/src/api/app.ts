@@ -207,7 +207,7 @@ export function createApp(opts: AppOptions = {}): {
   // SSE event stream lives for as long as the task does (#751).
   const readBudgetExempt = (req: Request): boolean => {
     const p = req.path;
-    if (p.includes('/events/stream')) return true;
+    if (p.includes('/events/stream') || /\/events$/.test(p)) return true;
     return [
       '/health',
       '/metrics',
@@ -231,6 +231,7 @@ export function createApp(opts: AppOptions = {}): {
     new JobWorker({
       jobStore: jobQueue.getStore(),
       handler: createTaskJobHandler(dispatch, releasePayment),
+      concurrency: config.WORKER_CONCURRENCY,
       // Leases (#648): a claimed job stays owned for JOB_LEASE_TTL_MS unless
       // this worker renews it every JOB_LEASE_HEARTBEAT_MS. Startup recovery
       // only reclaims jobs whose lease has lapsed, so a second instance coming
@@ -410,15 +411,13 @@ export function createApp(opts: AppOptions = {}): {
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
 
-  // SSE task event stream (#751). Shares one TaskStreamHub with the WebSocket
-  // stream so both transports use a single bus subscription and bounded read
-  // per task. Mounted ahead of the versioned dispatcher below.
+  // SSE task event stream (#751/#1006). Shares one TaskStreamHub with the
+  // WebSocket stream so both transports use a single bus subscription and
+  // bounded read per task. Mounted ahead of the versioned dispatcher below.
   const taskStreamHub = new TaskStreamHub({ store: eventStore, bus: eventBus });
-  app.get(
-    '/api/tasks/:id/events/stream',
-    authedLimiter.middleware,
-    createTaskEventsSseHandler({ hub: taskStreamHub })
-  );
+  const taskEventsSseHandler = createTaskEventsSseHandler({ hub: taskStreamHub });
+  app.get('/api/tasks/:id/events', authedLimiter.middleware, taskEventsSseHandler);
+  app.get('/api/tasks/:id/events/stream', authedLimiter.middleware, taskEventsSseHandler);
 
   // The v1/v2 implementation is picked from the negotiated API version, so the
   // mount is a dispatcher function rather than a sub-router. That would make the

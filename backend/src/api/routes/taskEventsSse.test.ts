@@ -177,7 +177,7 @@ describe("GET /api/tasks/:id/events/stream", () => {
 
   it("sends keep-alive comments while idle", async () => {
     const client = await connect();
-    await client.waitFor(": keep-alive");
+    await client.waitFor(": ping");
   });
 
   it("ends the stream after a terminal event", async () => {
@@ -193,7 +193,8 @@ describe("GET /api/tasks/:id/events/stream", () => {
     await connect();
     const third = await connect();
     await third.closed;
-    expect(third.status).toBe(429);
+    expect(third.status).toBe(503);
+    expect(third.headers["retry-after"]).toBe("5");
 
     first.destroy();
     await first.closed;
@@ -205,7 +206,7 @@ describe("GET /api/tasks/:id/events/stream", () => {
 
   it("unsubscribes from the bus when the client disconnects", async () => {
     const client = await connect();
-    await client.waitFor(": keep-alive");
+    await client.waitFor(": ping");
     expect(bus.emitter.listenerCount(TASK.id)).toBe(1);
 
     client.destroy();
@@ -217,8 +218,8 @@ describe("GET /api/tasks/:id/events/stream", () => {
   it("notifies all SSE clients and closes their streams on graceful shutdown", async () => {
     const first = await connect();
     const second = await connect();
-    await first.waitFor(": keep-alive");
-    await second.waitFor(": keep-alive");
+    await first.waitFor(": ping");
+    await second.waitFor(": ping");
     expect(hub.activeTaskCount()).toBe(1);
 
     await hub.shutdown(2_000);

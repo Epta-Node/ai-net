@@ -89,6 +89,8 @@ const envSchema = z.object({
   STELLAR_COORDINATOR_SECRET: z.string().optional().superRefine(rejectPlaceholder),
   STELLAR_TEST_SECRET: z.string().optional().superRefine(rejectPlaceholder),
   ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
+  /** Primary frontend origin allowed by CORS for public API routes. */
+  FRONTEND_ORIGIN: z.string().url().optional(),
   NPM_PACKAGE_VERSION: z.string().default(pkg.version ?? '0.1.0'),
   GRACEFUL_SHUTDOWN_TIMEOUT: z.coerce.number().int().positive().default(30),
   HEALTH_PROBE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
@@ -172,6 +174,8 @@ const envSchema = z.object({
    * `0` disables the budget.
    */
   DAILY_COST_BUDGET_USD: z.coerce.number().min(0).default(0),
+  /** Max estimated inference cost per request for Venice router model selection. */
+  MAX_INFERENCE_COST_USD: z.coerce.number().min(0).default(0.05),
 
   HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
   HEARTBEAT_STALE_THRESHOLD_MINUTES: z.coerce.number().int().positive().default(5),
@@ -309,7 +313,7 @@ const envSchema = z.object({
   WS_PONG_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
   // ── SSE task event stream (#751) ────────────────────────────────────────────
-  SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(5),
+  SSE_MAX_CONNECTIONS_PER_CLIENT: z.coerce.number().int().positive().default(50),
   SSE_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().positive().default(15_000),
   /** Socket write-buffer size above which task events are dropped for a slow client (#813). */
   SSE_HIGH_WATER_MARK_BYTES: z.coerce.number().int().positive().default(65_536),
@@ -422,6 +426,8 @@ const envSchema = z.object({
   JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
   /** Attempts before a job is moved to the dead-letter queue. */
   JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  /** Concurrent background task workers. */
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(3),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;
