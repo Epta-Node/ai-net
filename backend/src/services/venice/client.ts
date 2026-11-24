@@ -19,6 +19,7 @@ import {
 } from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
 import { currentPropagationHeaders } from '../tracing.js';
+import { getVeniceRouter } from '../veniceRouter.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -414,7 +415,11 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   getModelFor(agentType: AgentType): string {
-    return MODEL_MAP[agentType];
+    try {
+      return getVeniceRouter().selectModel(agentType, 1000).id;
+    } catch {
+      return MODEL_MAP[agentType];
+    }
   }
 
   /** Current breaker state: `CLOSED` | `OPEN` | `HALF_OPEN`. */
@@ -537,23 +542,16 @@ export class VeniceClient implements VeniceClientLike {
     };
 
     try {
-      try {
-        this.breaker.assertClosed();
-        probeHeld = true;
-      } catch (e) {
-        if (this.enableCacheFallback && !options?.force) {
-          const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
-          if (stale !== null) {
-            log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
-            // A cache read costs no upstream tokens; report zero so the ledger
-            // does not charge the task for a lookup.
-            this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
-            return stale;
-          }
+      this.breaker.assertClosed();
+      probeHeld = true;
+    } catch (e) {
+      if (this.enableCacheFallback && !options?.force) {
+        const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
+        if (stale !== null) {
+          log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
+          this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+          return stale;
         }
-        // No stale entry to fall back on: the open circuit must still shed
-        // the call rather than let it through.
-        throw e;
       }
       throw e;
     }
@@ -675,6 +673,7 @@ export class VeniceClient implements VeniceClientLike {
       }
       attempted += 1;
 
+      const attemptStart = Date.now();
       try {
         const response = await this.fetchWithRetryForProvider(
           body,
@@ -687,14 +686,11 @@ export class VeniceClient implements VeniceClientLike {
           throw new Error('Venice response missing expected content field');
         }
 
-        // Prefer the provider's own counts. If the payload has no usage block
-        // (some deployments omit it), fall back to estimating rather than
-        // reporting zero — under-counting is how a budget stops meaning
-        // anything.
         const usage = parseUsage(data) ?? estimateUsage(promptForLogging, content);
 
         this.keyPool.recordResult(provider.apiKey, true);
         settleSuccess();
+        try { getVeniceRouter().recordCall(model, Date.now() - attemptStart, true); } catch { /* best effort */ }
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'ok', retries, provider.name, usage);
         return { content, usage };
       } catch (err) {
@@ -702,6 +698,7 @@ export class VeniceClient implements VeniceClientLike {
           throw err;
         }
         lastError = err instanceof Error ? err : new Error(String(err));
+        try { getVeniceRouter().recordCall(model, Date.now() - attemptStart, false); } catch { /* best effort */ }
         this.keyHealth.recordFailure(
           provider.name ?? 'primary',
           classifyVeniceFailure(lastError),

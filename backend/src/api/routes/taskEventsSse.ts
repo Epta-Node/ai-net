@@ -2,7 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from "express";
 import type { StoredEvent } from "../../events/eventStore";
 import { getTask as defaultGetTask } from "../../coordinator/taskStore";
 import { getConfig } from "../../config";
-import { AppError, ForbiddenError, NotFoundError, RateLimitError } from "../../errors";
+import { AppError, ForbiddenError, NotFoundError } from "../../errors";
 import { isEnabled } from "../../services/featureFlags";
 import {
   recordSseConnectionClosed,
@@ -56,17 +56,14 @@ function parseResumeCursor(req: Request): number | undefined {
 
 /**
  * @openapi
- * /api/tasks/{id}/events/stream:
+ * /api/tasks/{id}/events:
  *   get:
  *     summary: Server-Sent Events stream of task execution events
  *     description: >
  *       Replays stored events after the resume cursor, then streams live ones.
  *       Each message carries `id: <seq>`, so `EventSource` resumes through the
- *       `Last-Event-ID` header on reconnect. A `: keep-alive` comment is sent
- *       periodically and the stream ends after `task_completed` / `task_failed`.
- *       A client that stops accepting writes stops receiving events once its
- *       buffer passes the high-water mark, and is closed with a `stream_timeout`
- *       event after `SSE_STALE_CONNECTION_TIMEOUT_MS` without progress.
+ *       `Last-Event-ID` header on reconnect. A `: ping` comment is sent every
+ *       15s by default and the stream ends after `task_completed` / `task_failed`.
  *       Returns 404 while the `streaming_responses` feature flag is off.
  *     tags: [Tasks]
  *     parameters:
@@ -91,8 +88,35 @@ function parseResumeCursor(req: Request): number | undefined {
  *         description: Wallet does not own the task
  *       404:
  *         description: Task not found, or streaming responses are disabled
- *       429:
- *         description: Too many concurrent streams for this client
+ *       503:
+ *         description: Too many concurrent SSE connections
+ * /api/tasks/{id}/events/stream:
+ *   get:
+ *     summary: Server-Sent Events stream of task execution events (legacy alias)
+ *     description: Alias of `/api/tasks/{id}/events`.
+ *     tags: [Tasks]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: header
+ *         name: walletpublickey
+ *         required: true
+ *         schema: { type: string }
+ *       - in: header
+ *         name: Last-Event-ID
+ *         required: false
+ *         schema: { type: integer, minimum: 0 }
+ *     responses:
+ *       200:
+ *         description: text/event-stream of task events
+ *       403:
+ *         description: Wallet does not own the task
+ *       404:
+ *         description: Task not found, or streaming responses are disabled
+ *       503:
+ *         description: Too many concurrent SSE connections
  */
 export function createTaskEventsSseHandler(options: TaskEventsSseOptions): RequestHandler {
   const { hub, getTask = defaultGetTask } = options;
@@ -125,8 +149,14 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
       const clientIp = req.ip ?? req.socket.remoteAddress ?? "unknown";
       const open = connectionsByClient.get(clientIp) ?? 0;
       if (open >= maxConnections) {
-        logger.warn({ clientIp, taskId }, "SSE connection limit exceeded");
-        throw new RateLimitError("Too many concurrent event streams");
+        logger.warn({ clientIp, taskId, maxConnections }, "SSE connection limit exceeded");
+        res.set("Retry-After", "5");
+        throw new AppError(
+          "Too many concurrent event streams",
+          503,
+          "SSE_CONNECTION_LIMIT_EXCEEDED",
+          { maxConnections, retryAfterSeconds: 5 },
+        );
       }
       connectionsByClient.set(clientIp, open + 1);
       recordSseConnectionOpened();
@@ -185,7 +215,7 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
             timeOut();
             return;
           }
-          if (res.write(": keep-alive\n\n")) lastProgressAt = Date.now();
+          if (res.write(": ping\n\n")) lastProgressAt = Date.now();
         }, heartbeatMs),
       );
 
