@@ -14,21 +14,23 @@ export const useNodeState = (_taskId: string) => {
             n.nodeId === event.nodeId ? { ...n, status: 'running' } : n
           );
 
-        case 'node_completed':
+        case 'node_completed': {
           const payload = event.payload as any;
           return prev.map(n => 
             n.nodeId === event.nodeId 
               ? { ...n, status: 'completed', result: payload } 
               : n
           );
+        }
 
-        case 'node_failed':
+        case 'node_failed': {
           const errMessage = (event.payload as any)?.error || 'Node execution failed';
           return prev.map(n => 
             n.nodeId === event.nodeId 
               ? { ...n, status: 'failed', error: errMessage } 
               : n
           );
+        }
 
         default:
           return prev;

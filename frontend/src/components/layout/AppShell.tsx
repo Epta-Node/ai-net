@@ -1,43 +1,116 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { AnimatePresence } from 'framer-motion'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
+import { useWallet } from '../../context/WalletContext'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import MobileDrawer from './MobileDrawer'
 import Breadcrumb from './Breadcrumb'
+import Footer from '../landing/Footer'
 import './AppShell.css'
 
 interface AppShellProps {
   children: React.ReactNode
 }
 
+/**
+ * Below this width the sidebar gives way to the slide-over drawer. 1024px is
+ * where the sidebar rail plus a readable content column stops fitting.
+ */
+export const MOBILE_BREAKPOINT_QUERY = '(max-width: 1023px)'
+
+const SIDEBAR_STATE_KEY = 'sidebar_collapsed'
+
+/**
+ * Storage key for the sidebar's collapsed state, scoped to the connected
+ * wallet.
+ *
+ * Two people sharing a browser profile each keep their own preference, and a
+ * signed-out visitor gets the unscoped key — which is also the key the app used
+ * before scoping existed, so nobody's existing preference is silently dropped.
+ */
+function sidebarStateKey(publicKey: string | null): string {
+  return publicKey ? `${SIDEBAR_STATE_KEY}:${publicKey}` : SIDEBAR_STATE_KEY
+}
+
+function readSidebarState(publicKey: string | null): boolean {
+  try {
+    return localStorage.getItem(sidebarStateKey(publicKey)) === 'true'
+  } catch {
+    // Private-mode browsers can throw on access; an expanded sidebar is the
+    // safe default.
+    return false
+  }
+}
+
+/**
+ * The single application shell.
+ *
+ * Every in-app route renders inside this component, so the top nav, sidebar,
+ * drawer, and breadcrumb behave identically on every page rather than being
+ * assembled differently per route.
+ */
 const AppShell: React.FC<AppShellProps> = ({ children }) => {
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const { t } = useTranslation()
+  const isMobile = useMediaQuery(MOBILE_BREAKPOINT_QUERY)
+  const { publicKey } = useWallet()
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(
-    localStorage.getItem('sidebar_collapsed') === 'true'
-  )
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarState(publicKey))
   const location = useLocation()
   const navigate = useNavigate()
   const drawerRef = useRef<HTMLDivElement>(null)
+  const mainRef = useRef<HTMLElement>(null)
+  const lastPathname = useRef(location.pathname)
+  const [routeAnnouncement, setRouteAnnouncement] = useState('')
+
+  // Re-read when the identity changes, so connecting a wallet adopts that
+  // wallet's saved preference instead of carrying over the anonymous one.
+  useEffect(() => {
+    setSidebarCollapsed(readSidebarState(publicKey))
+  }, [publicKey])
 
   useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768)
-      if (window.innerWidth >= 768) {
-        setIsDrawerOpen(false)
-      }
+    if (!isMobile) {
+      setIsDrawerOpen(false)
     }
-
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
+  }, [isMobile])
 
   useEffect(() => {
-    localStorage.setItem('sidebar_collapsed', sidebarCollapsed.toString())
-  }, [sidebarCollapsed])
+    try {
+      localStorage.setItem(sidebarStateKey(publicKey), String(sidebarCollapsed))
+    } catch {
+      // Persistence is a convenience; losing it must not break the shell.
+    }
+  }, [sidebarCollapsed, publicKey])
 
   useEffect(() => {
+    setIsDrawerOpen(false)
+  }, [location.pathname])
+
+  // Client-side navigation never moves focus or fires a page load, so screen
+  // reader and keyboard users are left on the clicked link. Move focus to the
+  // main landmark and announce the new page title (Issue #726). Keyed on the
+  // last pathname, not a first-render flag, so a fresh page load keeps the
+  // browser's own focus order even under StrictMode's double effect run.
+  useEffect(() => {
+    if (lastPathname.current === location.pathname) return
+    lastPathname.current = location.pathname
+    mainRef.current?.focus({ preventScroll: true })
+    // Read the title after the new route has painted its heading.
+    const frame = window.requestAnimationFrame(() => {
+      const title = document.getElementById('page-title')?.textContent?.trim()
+      if (title) setRouteAnnouncement(t('a11y.navigatedTo', { page: title }))
+    })
+    return () => window.cancelAnimationFrame(frame)
+    // `t` is left out on purpose: a language switch is not a navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
+  useEffect(() => {
+    if (!isDrawerOpen) return
+
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsDrawerOpen(false)
@@ -50,10 +123,8 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
       }
     }
 
-    if (isDrawerOpen) {
-      document.addEventListener('keydown', handleEscape)
-      document.addEventListener('mousedown', handleClickOutside)
-    }
+    document.addEventListener('keydown', handleEscape)
+    document.addEventListener('mousedown', handleClickOutside)
 
     return () => {
       document.removeEventListener('keydown', handleEscape)
@@ -61,29 +132,41 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
     }
   }, [isDrawerOpen])
 
-  const toggleSidebar = () => {
-    setSidebarCollapsed(!sidebarCollapsed)
-  }
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => !prev)
+  }, [])
 
-  const toggleDrawer = () => {
-    setIsDrawerOpen(!isDrawerOpen)
-  }
+  const toggleDrawer = useCallback(() => {
+    setIsDrawerOpen((prev) => !prev)
+  }, [])
+
+  const handleNavigate = useCallback(
+    (path: string) => {
+      navigate(path)
+      setIsDrawerOpen(false)
+    },
+    [navigate],
+  )
 
   return (
-    <div className="app-shell">
-      <TopNav 
+    <div className={`app-shell ${isMobile ? 'is-mobile' : ''}`}>
+      <a href="#main-content" className="skip-to-content">
+        {t('a11y.skipToContent')}
+      </a>
+
+      <TopNav
         onMenuClick={toggleDrawer}
         onToggleSidebar={toggleSidebar}
         sidebarCollapsed={sidebarCollapsed}
         isMobile={isMobile}
         isDrawerOpen={isDrawerOpen}
       />
-      
+
       {!isMobile && (
-        <Sidebar 
+        <Sidebar
           collapsed={sidebarCollapsed}
           currentPath={location.pathname}
-          onNavigate={navigate}
+          onNavigate={handleNavigate}
         />
       )}
 
@@ -93,17 +176,26 @@ const AppShell: React.FC<AppShellProps> = ({ children }) => {
             ref={drawerRef}
             onClose={() => setIsDrawerOpen(false)}
             currentPath={location.pathname}
-            onNavigate={(path) => {
-              navigate(path)
-              setIsDrawerOpen(false)
-            }}
+            onNavigate={handleNavigate}
           />
         )}
       </AnimatePresence>
 
-      <main className={`main-content ${!isMobile && sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="route-announcer">
+        {routeAnnouncement}
+      </div>
+
+      <main
+        ref={mainRef}
+        id="main-content"
+        className={`main-content ${!isMobile && sidebarCollapsed ? 'sidebar-collapsed' : ''}`}
+        tabIndex={-1}
+      >
         <Breadcrumb />
-        {children}
+        <div className="main-content-body">
+          {children}
+        </div>
+        <Footer />
       </main>
     </div>
   )

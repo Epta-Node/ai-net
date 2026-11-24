@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, sign, and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust build artefacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            smart-contracts/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('smart-contracts/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build WASM artefacts
+        working-directory: smart-contracts
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Generate SHA-256 sidecar files for each WASM artefact
+        run: |
+          set -euo pipefail
+          WASM_DIR=smart-contracts/target/wasm32-unknown-unknown/release
+          for wasm_file in "$WASM_DIR"/*.wasm; do
+            [ -f "$wasm_file" ] || continue
+            sha256sum "$wasm_file" > "${wasm_file}.sha256"
+            echo "Signed: $(basename "$wasm_file")"
+          done
+
+      - name: Generate changelog with git-cliff
+        uses: orhun/git-cliff-action@v3
+        id: git-cliff
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+        env:
+          OUTPUT: CHANGELOG.md
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Create GitHub Release with WASM artefacts
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.md
+          files: |
+            smart-contracts/target/wasm32-unknown-unknown/release/*.wasm
+            smart-contracts/target/wasm32-unknown-unknown/release/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

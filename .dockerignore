@@ -1,0 +1,7 @@
+# Keep host-built artifacts out of image builds: native modules compiled
+# for the host (glibc) break inside the alpine images.
+**/node_modules
+**/dist
+**/coverage
+.git
+smart-contracts/target

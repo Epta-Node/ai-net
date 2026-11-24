@@ -1,152 +1,244 @@
-import express, { Request, Response, NextFunction } from "express";
-import { createServer, Server as HttpServer } from "http";
-import { randomUUID } from "crypto";
-import swaggerUi from "swagger-ui-express";
+/**
+ * Express application factory.
+ *
+ * Wires up middleware, routes, the WebSocket task stream, background
+ * services (job queue/worker, heartbeat cleanup, metrics), and the global
+ * error handler. Called by tests (`opts.disableCompression`, custom
+ * dispatch/queue, etc.) and by the server entry-point (`src/index.ts`).
+ */
+
+import express, { Request, Response, NextFunction, Router } from 'express';
+import { createServer, Server as HttpServer } from 'http';
+import swaggerUi from 'swagger-ui-express';
 
 import {
+  createTaskJobHandler,
   type DispatchFn,
   type PaymentReleaseFn,
-} from "../coordinator/coordinator";
-import { httpDispatch } from "../coordinator/dispatch";
-import type { AgentRegistry } from "../types/agent";
-import { getTask } from "../coordinator/taskStore";
-import { eventBus } from "../coordinator/eventBus";
-import type { EventStore } from "../events/eventStore";
-import { attachTaskStream, type TaskStreamOptions } from "./routes/stream";
-import type { DAGNode } from "../types/task";
+} from '../coordinator/coordinator';
+import { httpDispatch } from '../coordinator/dispatch';
+import { eventBus } from '../coordinator/eventBus';
+import { getTask } from '../coordinator/taskStore';
+import { createTaskDb, getTaskDb } from '../db/tasks';
+import { createPaymentReleaseFn, type StellarReleasePaymentFn } from '../payment';
+import { getGlobalJobQueue, JobWorker, type JobQueue } from '../queue';
+import { createHeartbeatService, type HeartbeatServiceOptions } from '../services/heartbeat';
+import { metricsMiddleware, metricsService } from '../services/metrics';
+import { getEventStore } from '../events/eventStore';
+import type { EventStore } from '../events/eventStore';
 import {
-  createPaymentReleaseFn,
-  type StellarReleasePaymentFn,
-} from "../payment";
-import { agentsRouter } from "./routes/agents";
-import { healthRouter } from "./routes/health";
-import { createStatsRouter } from "./routes/stats";
-import { createTasksRouter } from "./routes/tasks";
-import { createReconciliationRouter, type ReconciliationRouterOptions } from "./routes/reconciliation";
-import { rateLimitMiddleware, registerRateLimitMiddleware } from "./middleware/rateLimit";
-import { authMiddleware } from "./middleware/auth";
-import { createCorsMiddleware } from "./middleware/cors";
-import { compressionMiddleware } from "./middleware/compression";
-import { requestId } from "./middleware/requestId";
-import { requestLogger } from "./middleware/requestLogger";
-import { errorHandler } from "./middleware/errorHandler";
-import { versioningMiddleware } from "./middleware/versioning";
-import { createV1TasksRouter } from "./routes/v1/tasks";
-import { createV2TasksRouter } from "./routes/v2/tasks";
-import { createLogger } from "../utils/logger";
-import { createTaskDb, getTaskDb } from "../db/tasks";
-import { createHeartbeatService, type HeartbeatServiceOptions } from "../services/heartbeat";
-import { openapiSpec } from "./docs/openapi";
-import { createTaskJobHandler } from "../coordinator/coordinator";
+  attachTaskStream,
+  getStreamConnectionCount,
+  type TaskStreamOptions,
+} from './routes/stream';
+import { TaskStreamHub } from './routes/taskStreamHub';
+import { createTaskEventsSseHandler } from './routes/taskEventsSse';
+import type { DAGNode } from '../types/task';
+import { agentsRouter } from './routes/agents';
+import { healthRouter, migrationsRouter } from './routes/health';
+import { metricsRouter } from './routes/metrics';
+import { createStatsRouter } from './routes/stats';
 import {
-  getGlobalJobQueue,
-  createJobStore,
-  getJobDb,
-  closeJobDb,
-  JobWorker,
-  type JobQueue,
-} from "../queue";
-import { createAdminQueueRouter } from "./routes/admin";
-import { traceMiddleware } from "./middleware/traceMiddleware";
+  createReconciliationRouter,
+  type ReconciliationRouterOptions,
+} from './routes/reconciliation';
 import {
-  walletTaskRateLimitMiddleware,
-  walletApiRateLimitMiddleware,
-} from "./middleware/walletRateLimit";
-import { adminAuthMiddleware } from "./middleware/adminAuth";
-import { createAdminAuthRouter } from "./routes/adminAuth";
-import { walletQuotaRouter, adminQuotaRouter } from "./routes/walletQuota";
-import { adminAuditRouter } from "./routes/adminAudit";
+  rateLimitMiddleware,
+  registerRateLimitMiddleware,
+  publicLimiter,
+  authedLimiter,
+  adminLimiter,
+} from './middleware/rateLimit';
+import { adminAuthMiddleware } from './middleware/auth';
+import { createCorsMiddleware } from './middleware/cors';
+import { compressionMiddleware } from './middleware/compression';
+import { errorHandler } from './middleware/errorHandler';
+import { readOnlyMiddleware } from './middleware/readOnly';
+import { requestId } from './middleware/requestId';
+import { requestLogger } from './middleware/requestLogger';
+import { versioningMiddleware } from './middleware/versioning';
+import { timeoutBudget } from './middleware/timeoutBudget';
+import { getOpenapiJson, getOpenapiYaml, openapiSpec, swaggerUiOptions } from './docs';
+import { createCostRouter } from './routes/costs';
+import { createAgentWatchdogRouter } from './routes/agentWatchdog';
+import { createAgentWatchdog } from '../services/agentWatchdog';
+import { invalidateAgentsCache } from '../cache/invalidation';
+import { flushActiveCosts, setPricingOverrides } from '../services/budget';
+import { createAdminRouter, createAdminQueueRouter } from './routes/admin';
+import { createFlagsRouter } from './routes/flags';
+import { createRateLimitRouter } from './routes/ratelimit';
+import { createVersionsRouter } from './routes/versions';
+import { createV1TasksRouter } from './routes/v1/tasks';
+import { createV2TasksRouter } from './routes/v2/tasks';
+import { createAuthRouter } from './routes/auth';
+import { type AuthService } from '../services/auth';
+import { createLogger } from '../utils/logger';
+import { ValidationError, UnauthorizedError, NotFoundError, AppError } from '../errors';
+import { getConfig } from '../config';
+import type { AgentRegistry } from '../types/agent';
 
 export interface AppOptions {
-  /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
   dispatch?: DispatchFn;
-  /** Called after each node completes; defaults to no-op (returns 'mock-hash') */
   releasePayment?: PaymentReleaseFn;
-  /**
-   * Override the EventStore used for stream replay.  When omitted, the store
-   * owned by `eventBus` is used — which is the canonical single store that the
-   * EventBus persists to.  Only provide this in tests that need an isolated
-   * store; production code should leave it unset.
-   *
-   * @deprecated Pass a custom EventBus instance (with its own store) instead.
-   */
   eventStore?: EventStore;
-  /** Heartbeat / auth timing for the WebSocket stream */
   stream?: TaskStreamOptions;
-  /**
-   * Agent registry used to resolve endpoint URLs for HTTP dispatch.
-   * Required when `dispatch` is not provided; ignored when `dispatch` is set.
-   */
   agentRegistry?: AgentRegistry;
-  /** Enable background heartbeat cleanup service (defaults to true in non-test envs) */
   enableHeartbeatCleanup?: boolean;
-  /** Custom options for heartbeat cleanup service */
   heartbeatOptions?: HeartbeatServiceOptions;
-  /** Options for the payment reconciliation router */
   reconciliation?: ReconciliationRouterOptions;
-  /** Disable response compression (useful in tests). Default: false. */
   disableCompression?: boolean;
-  /** Custom job queue instance */
   queue?: JobQueue;
-  /** Custom job worker instance */
   jobWorker?: JobWorker;
+  /** Custom auth service instance */
+  authService?: AuthService;
   /** Enable background queue worker (default: true) */
   enableQueueWorker?: boolean;
+  /**
+   * How long close() waits before the worker logs that jobs remain active.
+   * Default: 10000 (10s). The server and database connections stay open until
+   * those jobs finish so their final task/event writes are not interrupted.
+   */
+  jobWorkerStopTimeoutMs?: number;
 }
 
-/**
- * Attempt to load smart-contracts releasePayment at runtime via dynamic require.
- * Returns undefined when the module is unavailable (e.g. backend CI without
- * smart-contracts compiled). Using require() instead of a static import keeps
- * TypeScript's rootDir constraint intact.
- */
 function tryLoadStellarRelease(): StellarReleasePaymentFn | undefined {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("../../../smart-contracts/src/payment/payment")
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    return require('../../../smart-contracts/src/payment/payment')
       .releasePayment as StellarReleasePaymentFn;
   } catch {
     return undefined;
   }
 }
 
+/**
+ * Reconcile a watchdog eviction against the agent registry (Issue #379).
+ *
+ * Read-only on purpose. `deregister_agent` is a `require_auth`'d on-chain
+ * mutation, and silently issuing it from a heartbeat timer would both bypass the
+ * contract's authorization model and remove a registration without an operator
+ * having chosen to. So this only *detects* divergence — an agent the watchdog
+ * just dropped locally that is still present in the registry — and reports it
+ * through the eviction alert as `deregisterRequired`, leaving the actual
+ * deregistration to an authorized operator or job.
+ */
+function tryLoadRegistryLookup(): { getAgent: (id: string) => unknown } | undefined {
+  if (!getConfig().REGISTRY_CONTRACT_ID) return undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    return require('../../../smart-contracts/src/registry/registry') as {
+      getAgent: (id: string) => unknown;
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Route descriptor for endpoints that live behind an `API-Version` dispatcher.
+ *
+ * The task endpoints dispatch on the negotiated `API-Version` header, so they
+ * live behind a dispatcher function and cannot be recovered by walking the
+ * Express router stack. They are published here so route-introspection tooling
+ * (the OpenAPI parity test) can see the same routers the server dispatches to,
+ * instead of re-deriving the mount path and re-instantiating the factories.
+ */
+export interface VersionDispatchedRoutes {
+  /** Path the dispatching middleware is mounted at. */
+  mountPath: string;
+  /** Every router the dispatcher can route to, for the given mount path. */
+  routers: Router[];
+}
+
 export function createApp(opts: AppOptions = {}): {
   httpServer: HttpServer;
   close: (callback?: () => void) => void;
+  versionDispatchedRoutes: VersionDispatchedRoutes;
 } {
+  const config = getConfig();
+  const logger = createLogger({ module: 'api-app' });
   const app = express();
+  const httpServer = createServer(app);
+  const eventStore = opts.eventStore ?? getEventStore();
+
+  app.set('trust proxy', config.TRUST_PROXY);
+  const trustProxy = app.get('trust proxy fn');
+
   app.use(express.json());
-  // ── Global middleware ────────────────────────────────────────────────────────
   app.use((_req, res, next) => {
-    if (process.env.NODE_ENV === "production") {
-      res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+    if (config.NODE_ENV === 'production') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
     }
     next();
   });
-  app.use(createCorsMiddleware());
+  // Pass `app` so `Access-Control-Allow-Methods` is derived from the routes
+  // that actually get registered below, rather than a hand-maintained list
+  // (issue #659). The derivation is per-request, so the mount order here is
+  // fine.
+  app.use(createCorsMiddleware(app));
   app.use(requestId);
   app.use(requestLogger);
-  app.use(traceMiddleware);
+  app.use(metricsMiddleware);
+  // Rate limiting is an edge concern: the limiter itself is covered directly by
+  // its unit suite, so the app-level mount is skipped under NODE_ENV=test (the
+  // same convention compression uses below) — otherwise integration suites
+  // throttle their own second request and assert against a 429.
+  if (config.NODE_ENV !== 'test') {
+    app.use(rateLimitMiddleware);
+  }
   app.use(versioningMiddleware);
+  app.use(
+    readOnlyMiddleware({
+      exemptPaths: ['/api/admin', '/api/reconciliation'],
+    })
+  );
 
-  // ── Response compression ────────────────────────────────────────────────────
-  // Applied early so that all downstream route handlers benefit automatically.
-  // Disabled in tests (disableCompression: true) to keep assertions simple.
-  if (!opts.disableCompression && process.env.NODE_ENV !== "test") {
+  if (!opts.disableCompression && config.NODE_ENV !== 'test') {
     app.use(...compressionMiddleware());
   }
+
+  // ── Per-endpoint timeout budgets (#742) ─────────────────────────────────────
+  // The read class is a global GET budget armed before every router below.
+  // Health probes and metrics carry their own deadlines (and answer for
+  // dependencies, so a read budget would race HEALTH_PROBE_TIMEOUT_MS); admin
+  // paths are exempt here and claim the admin class at their own mounts; the
+  // SSE event stream lives for as long as the task does (#751).
+  const readBudgetExempt = (req: Request): boolean => {
+    const p = req.path;
+    if (p.includes('/events/stream')) return true;
+    return [
+      '/health',
+      '/metrics',
+      '/api/metrics',
+      '/migrations',
+      '/api/admin',
+      '/api/ratelimit',
+      '/api/reconciliation',
+    ].some((prefix) => p === prefix || p.startsWith(`${prefix}/`));
+  };
+  app.use(timeoutBudget('read', { methods: ['GET'], exempt: readBudgetExempt }));
 
   const dispatch: DispatchFn = opts.dispatch ?? makeHttpDispatch(opts.agentRegistry);
   const releasePayment: PaymentReleaseFn =
     opts.releasePayment ?? createPaymentReleaseFn(tryLoadStellarRelease());
 
-  // ── Background Job Queue & Worker ──────────────────────────────────────────
   const jobQueue = opts.queue ?? getGlobalJobQueue();
+  jobQueue.setDefaultMaxAttempts(config.JOB_MAX_ATTEMPTS);
   const jobWorker =
     opts.jobWorker ??
     new JobWorker({
       jobStore: jobQueue.getStore(),
       handler: createTaskJobHandler(dispatch, releasePayment),
+      // Leases (#648): a claimed job stays owned for JOB_LEASE_TTL_MS unless
+      // this worker renews it every JOB_LEASE_HEARTBEAT_MS. Startup recovery
+      // only reclaims jobs whose lease has lapsed, so a second instance coming
+      // up alongside this one cannot re-queue work that is still running.
+      leaseTtlMs: config.JOB_LEASE_TTL_MS,
+      leaseHeartbeatMs: config.JOB_LEASE_HEARTBEAT_MS,
+      // Retry policy (#752): full-jitter backoff, then the dead-letter queue.
+      baseBackoffMs: config.JOB_BACKOFF_BASE_MS,
+      maxBackoffMs: config.JOB_BACKOFF_MAX_MS,
+      maxAttempts: config.JOB_MAX_ATTEMPTS,
     });
   jobQueue.setWorker(jobWorker);
 
@@ -154,96 +246,296 @@ export function createApp(opts: AppOptions = {}): {
     jobWorker.start();
   }
 
-  // ── Heartbeat Background Cleanup Service ────────────────────────────────────
-  const heartbeatService = createHeartbeatService(opts.heartbeatOptions);
-  if (opts.enableHeartbeatCleanup || (opts.enableHeartbeatCleanup !== false && process.env.NODE_ENV !== "test")) {
+  // The watchdog owns liveness detection from here on, so the heartbeat
+  // service's own stale→offline sweep is disabled: it would flip an agent
+  // offline on a shorter timer, without a grace clock or an alert, leaving the
+  // agent invisible to the watchdog and unalerted until the 24h delete.
+  const heartbeatService = createHeartbeatService({
+    ...opts.heartbeatOptions,
+    enableMarkStale: false,
+  });
+  if (
+    opts.enableHeartbeatCleanup ||
+    (opts.enableHeartbeatCleanup !== false && config.NODE_ENV !== 'test')
+  ) {
     heartbeatService.start();
   }
 
+  // ── Token budget + cost accounting (Issue #390) ───────────────────────────
+  // Install env pricing overrides once, so every ledger and every reprice uses
+  // the same rates.
+  setPricingOverrides(config.VENICE_PRICING);
+
+  // Flush in-flight costs on a timer. Without this, a crash mid-task loses the
+  // spend for every task that never reached a terminal state — which are
+  // exactly the runs an operator wants to see.
+  const costFlushMs = config.COST_FLUSH_INTERVAL_MS;
+  const costFlushTimer =
+    config.NODE_ENV === 'test'
+      ? null
+      : setInterval(() => {
+          try {
+            flushActiveCosts();
+          } catch (err) {
+            logger.error({ err }, 'cost flush failed');
+          }
+        }, costFlushMs);
+  // Do not hold the event loop open on this timer alone.
+  costFlushTimer?.unref?.();
+
+  // ── Agent heartbeat watchdog (Issue #379) ─────────────────────────────────
+  const registryLookup = tryLoadRegistryLookup();
+  const watchdog = createAgentWatchdog({
+    intervalMs: config.AGENT_WATCHDOG_INTERVAL_MS,
+    gracePeriodMinutes: config.AGENT_WATCHDOG_GRACE_MINUTES,
+    // Evicted agents must not be served from cached listings (#804).
+    invalidateCache: () => invalidateAgentsCache(),
+    onEvict: registryLookup
+      ? async (agent) => {
+          const stillRegistered = registryLookup.getAgent(agent.id) !== undefined;
+          logger.warn(
+            {
+              agentId: agent.id,
+              stillRegistered,
+              deregisterRequired: stillRegistered,
+            },
+            'agent evicted locally but still present in the registry; authorized deregistration required'
+          );
+        }
+      : undefined,
+  });
+  if (config.NODE_ENV !== 'test') {
+    watchdog.start();
+  }
+
   // ── Health routes ───────────────────────────────────────────────────────────
-  app.use("/health", healthRouter);
+  app.use('/health', publicLimiter.middleware, healthRouter);
+
+  // Schema migration status (Issue #274). Admin-guarded and rate limited like
+  // the other operational endpoints rather than the public health probes.
+  app.use('/migrations', timeoutBudget('admin'), adminLimiter.middleware, migrationsRouter);
+
+  // ── Metrics routes (Issue #499) ───────────────────────────────────────────
+  app.use('/metrics', metricsRouter);
+  app.use('/api/metrics', metricsRouter);
 
   // ── Stats routes ───────────────────────────────────────────────────────────
-  app.use("/api/stats", createStatsRouter(getTaskDb()));
+  app.use('/api/stats', publicLimiter.middleware, createStatsRouter(getTaskDb()));
+
+  // Cost routes (Issue #390): /api/costs (operator rollup) and
+  // /api/tasks/:id/cost (wallet-scoped, ownership-checked in the handler).
+  // Mounted before the task router so the cost path is matched first; the two
+  // do not actually collide, because the task router's `/:id` matches a single
+  // path segment and `/:id/cost` is two.
+  app.use('/api', publicLimiter.middleware, createCostRouter());
+
+  // ── Auth routes ────────────────────────────────────────────────────────────
+  app.use('/api/auth', createAuthRouter(opts.authService));
 
   // ── Agent routes ───────────────────────────────────────────────────────────
-  // Apply a stricter rate limit specifically to the register endpoint to
-  // prevent registration floods (the full agentsRouter handles GET/DELETE etc.).
-  app.post("/api/agents/register", registerRateLimitMiddleware);
-  app.use("/api/agents", agentsRouter);
+  // Public reads use the public limiter; registration uses the stricter
+  // per-legacy register limiter (kept for backward compatibility).
+  app.use('/api/agents', publicLimiter.middleware);
+  app.post('/api/agents/register', registerRateLimitMiddleware);
+  app.use('/api/agents', agentsRouter);
 
-  // ── API docs ─────────────────────────────────────────────────────────────────
-  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
-  app.get("/openapi.json", (_req: Request, res: Response) => {
-    res.json(openapiSpec);
+  // ── Agent watchdog alerts (Issue #379) ─────────────────────────────────────
+  app.use(
+    '/api/agent-watchdog',
+    publicLimiter.middleware,
+    createAgentWatchdogRouter({ tick: () => watchdog.tick() })
+  );
+
+  /**
+   * @openapi
+   * /openapi.json:
+   *   get:
+   *     summary: Machine-readable OpenAPI specification (JSON)
+   *     operationId: getOpenapiJson
+   *     description: >
+   *       Serves the same OpenAPI 3.1.0 document that backs /api-docs, in
+   *       JSON form, for codegen and client tooling. Public: the spec is not
+   *       operational data, so it opts out of the spec-wide WalletAuth default.
+   *     tags: [System]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: OpenAPI 3.1.0 specification
+   *         content:
+   *           application/json:
+   *             schema:
+   *               type: object
+   */
+  app.get('/openapi.json', (_req: Request, res: Response) => {
+    res.json(getOpenapiJson());
   });
+
+  /**
+   * @openapi
+   * /openapi.yaml:
+   *   get:
+   *     summary: Machine-readable OpenAPI specification (YAML)
+   *     operationId: getOpenapiYaml
+   *     description: >
+   *       The OpenAPI 3.1.0 document in YAML form. Semantically equivalent to
+   *       `GET /openapi.json`. Public: opts out of the spec-wide WalletAuth default.
+   *     tags: [System]
+   *     security: []
+   *     responses:
+   *       200:
+   *         description: OpenAPI 3.1.0 specification (YAML)
+   *         content:
+   *           text/yaml:
+   *             schema:
+   *               type: string
+   */
+  app.get('/openapi.yaml', (_req: Request, res: Response) => {
+    res.type('text/yaml').send(getOpenapiYaml());
+  });
+
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(getOpenapiJson(), swaggerUiOptions));
 
   // ── Task routes ────────────────────────────────────────────────────────────
-  // Create version-specific routers
+  // Authenticated task creation uses the tighter authed limiter.
   const v1TasksRouter = createV1TasksRouter(dispatch, releasePayment, jobQueue);
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
-  
-  // Version-specific task routing based on negotiated API version
-  app.use("/api/tasks", walletTaskRateLimitMiddleware, (req, res, next) => {
-    const apiVersion = res.locals.apiVersion || "1.0";
-    
-    // Route to version-specific handler based on negotiated version
-    if (apiVersion.startsWith("1.")) {
+
+  // SSE task event stream (#751). Shares one TaskStreamHub with the WebSocket
+  // stream so both transports use a single bus subscription and bounded read
+  // per task. Mounted ahead of the versioned dispatcher below.
+  const taskStreamHub = new TaskStreamHub({ store: eventStore, bus: eventBus });
+  app.get(
+    '/api/tasks/:id/events/stream',
+    authedLimiter.middleware,
+    createTaskEventsSseHandler({ hub: taskStreamHub })
+  );
+
+  // The v1/v2 implementation is picked from the negotiated API version, so the
+  // mount is a dispatcher function rather than a sub-router. That would make the
+  // task routes invisible to router-walking tooling, so both implementations
+  // are published on the returned handle for the OpenAPI parity test to
+  // introspect. Semantics are unchanged: 1.x → v1, everything else → v2.
+  app.use('/api/tasks', timeoutBudget('llm_submit', { methods: ['POST'] }));
+  app.use('/api/tasks', authedLimiter.middleware, (req, res, next) => {
+    const apiVersion = res.locals.apiVersion || '1.0';
+    if (apiVersion.startsWith('1.')) {
       return v1TasksRouter(req, res, next);
-    } else {
-      // Default to v2 for version 2.0 and above
-      return v2TasksRouter(req, res, next);
     }
+    return v2TasksRouter(req, res, next);
   });
 
-  // ── Wallet quota routes ────────────────────────────────────────────────────
-  app.use("/api/wallet", walletApiRateLimitMiddleware, walletQuotaRouter);
+  // ── Admin Queue routes ─────────────────────────────────────────────────────
+  app.use(
+    '/api/admin/queue',
+    timeoutBudget('admin'),
+    adminLimiter.middleware,
+    createAdminQueueRouter(jobQueue)
+  );
+  app.use(
+    '/api/admin',
+    timeoutBudget('admin'),
+    adminLimiter.middleware,
+    createAdminRouter({ queue: jobQueue, reconciliation: opts.reconciliation, watchdog })
+  );
 
-  // ── Admin auth routes (public — no JWT required) ───────────────────────────
-  app.use("/api/admin/auth", createAdminAuthRouter());
+  // ── Feature-flag admin routes (#425) ───────────────────────────────────────
+  app.use('/api/admin/flags', createFlagsRouter());
 
-  // ── Admin Queue routes (JWT protected) ────────────────────────────────────
-  app.use("/api/admin/queue", adminAuthMiddleware, createAdminQueueRouter(jobQueue));
-  app.use("/api/admin/quota", adminAuthMiddleware, adminQuotaRouter);
-  app.use("/api/admin/audit", adminAuthMiddleware, adminAuditRouter);
-  app.use("/api/admin", adminAuthMiddleware, createAdminQueueRouter(jobQueue));
+  // ── Rate limit status endpoint ─────────────────────────────────────────────
+  app.use('/api/ratelimit', timeoutBudget('admin'), adminAuthMiddleware, createRateLimitRouter());
+
+  // ── Versioning lifecycle endpoint (#426) ───────────────────────────────────
+  app.use('/api/versions', createVersionsRouter());
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
-  app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
+  app.use(
+    '/api/reconciliation',
+    timeoutBudget('admin'),
+    createReconciliationRouter(opts.reconciliation)
+  );
 
-  // ── HTTP server ────────────────────────────────────────────────────
-  const httpServer = createServer(app);
+  app.use((req: Request, res: Response) => {
+    const correlationId =
+      (res.locals.traceId as string | undefined) ??
+      (res.locals.correlationId as string | undefined) ??
+      'unknown';
+    res.status(404).json({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Not found',
+        path: req.path,
+        correlationId,
+        timestamp: new Date().toISOString(),
+      },
+      statusCode: 404,
+      path: req.path,
+      requestId: res.locals.requestId ?? 'unknown',
+    });
+  });
 
-  // ── Event persistence ──────────────────────────────────────────────────────
-  // The EventBus already persists every event to its own EventStore (wired in
-  // the EventBus constructor).  We use that same store as the single canonical
-  // source for stream replay so there is exactly one DB and one writer.
-  // opts.eventStore is kept for backward compatibility with tests that inject
-  // a custom store; in production it will always be undefined here.
-  const eventStore = opts.eventStore ?? eventBus.store;
+  app.use(errorHandler);
 
-  // ── WebSocket: /tasks/:id/stream ───────────────────────────────────────────
   const detachStream = attachTaskStream({
     httpServer,
     eventStore,
     eventBus,
     getTask,
+    trustProxy,
+    streamHub: taskStreamHub,
+    heartbeatIntervalMs: config.WS_HEARTBEAT_INTERVAL_MS,
+    pongTimeoutMs: config.WS_PONG_TIMEOUT_MS,
+    inactivityTimeoutMs: config.WS_INACTIVITY_TIMEOUT_MS,
     ...opts.stream,
   });
 
-  // ── Error handler (must be last) ───────────────────────────────────────────
-  app.use(errorHandler);
+  metricsService.startGcObserver();
+  metricsService.setWebSocketProbe(() => ({
+    listening: httpServer.listening,
+    connections: getStreamConnectionCount(),
+  }));
 
   function close(callback?: () => void): void {
-    jobWorker.stop();
-    heartbeatService.stop();
-    detachStream();
-    httpServer.close(callback);
+    // Stop new claims, then keep database handles available until active jobs settle.
+    const drainWorker = async () => {
+      await jobWorker.stop(opts.jobWorkerStopTimeoutMs ?? 10_000);
+      while (jobWorker.getActiveCount() > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    };
+    drainWorker().finally(() => {
+      heartbeatService.stop();
+      // Stop the watchdog before the server goes away, and clear the cost flush
+      // timer last so any final in-flight spend still gets written.
+      watchdog.stop();
+      metricsService.setWebSocketProbe(null);
+      detachStream();
+      if (httpServer.listening) {
+        httpServer.close(callback);
+      } else if (callback) {
+        callback();
+      }
+      if (costFlushTimer) {
+        clearInterval(costFlushTimer);
+        try {
+          flushActiveCosts();
+        } catch (err) {
+          logger.error({ err }, 'final cost flush failed');
+        }
+      }
+    });
   }
 
-  return { httpServer, close };
+  const routeCount = (app as unknown as { _router?: { stack?: unknown[] } })._router?.stack?.length;
+  logger.debug({ routeCount }, 'api app initialized');
+  return {
+    httpServer,
+    close,
+    versionDispatchedRoutes: {
+      mountPath: '/api/tasks',
+      routers: [v1TasksRouter, v2TasksRouter],
+    },
+  };
 }
-
 
 /**
  * Build a DispatchFn that looks up the cheapest agent for a node's type in the
@@ -254,19 +546,18 @@ export function createApp(opts: AppOptions = {}): {
  * runtime rather than producing a silent no-op.
  */
 function makeHttpDispatch(registry?: AgentRegistry): DispatchFn {
-  return async (taskId: string, node: DAGNode, context: string): Promise<unknown> => {
+  return async (_taskId: string, node: DAGNode, context: string): Promise<unknown> => {
     if (!registry) {
       throw new Error(
-        `No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.`,
+        'No agent registry configured. Provide agentRegistry in AppOptions or supply a custom dispatch function.'
       );
     }
 
     const agents = await registry.getAgents(node.type);
     if (!agents || agents.length === 0) {
-      throw new Error(`No agent registered for type: ${node.type}`);
+      throw new AppError(`No agent registered for type: ${node.type}`, 500, 'AGENT_NOT_FOUND');
     }
 
-    // Pick cheapest available agent.
     const agent = [...agents].sort((a, b) => a.cost - b.cost)[0];
     return httpDispatch(agent, node.nodeId, node, context);
   };

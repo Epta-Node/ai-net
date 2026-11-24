@@ -9,10 +9,10 @@ async function prepareApp() {
   // translation keys.
   await i18nReady
 
-  // Always prepare MSW if we're in dev or test mode.
-  // We can check if mockServiceWorker.js is present or just import mocks.
+  // Guard the import itself so the module is excluded from the production graph.
   if (import.meta.env.DEV || import.meta.env.MODE === 'test' || window.location.hostname === 'localhost') {
     try {
+      // Dynamic import with dev guard ensures Rollup can tree-shake this.
       const { worker } = await import('./mocks/browser')
       await worker.start({
         onUnhandledRequest: 'bypass',

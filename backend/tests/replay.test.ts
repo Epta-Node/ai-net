@@ -8,10 +8,22 @@
  */
 
 import { eventBus } from '../src/coordinator/eventBus';
-import { createEventStore } from '../src/coordinator/eventStore';
+import { createEventStore } from '../src/events/eventStore';
+import type { AppEvent } from '../src/events/eventTypes';
 import type { DAGEvent } from '../src/types/task';
 
-function makeEvent(taskId: string, seq?: number): DAGEvent {
+function makeEvent(taskId: string, seq?: number): AppEvent {
+  return {
+    type: 'NodeStarted',
+    taskId,
+    nodeId: `node_${seq ?? 0}`,
+    occurredAt: new Date().toISOString(),
+    version: 1,
+    taskSeq: seq ?? 0,
+  } as AppEvent;
+}
+
+function makeDAGEvent(taskId: string, seq?: number): DAGEvent {
   return {
     type: 'node_started',
     taskId,
@@ -28,7 +40,7 @@ describe('EventBus seq assignment', () => {
     const unsub = eventBus.subscribe(taskId, e => seen.push(e.seq));
 
     for (let i = 0; i < 4; i++) {
-      eventBus.emit(taskId, makeEvent(taskId));
+      eventBus.emit(taskId, makeDAGEvent(taskId));
     }
     unsub();
 
@@ -43,11 +55,11 @@ describe('EventBus seq assignment', () => {
     const unsubA = eventBus.subscribe(a, e => seenA.push(e.seq));
     const unsubB = eventBus.subscribe(b, e => seenB.push(e.seq));
 
-    eventBus.emit(a, makeEvent(a)); // a:0
-    eventBus.emit(b, makeEvent(b)); // b:0
-    eventBus.emit(a, makeEvent(a)); // a:1
-    eventBus.emit(b, makeEvent(b)); // b:1
-    eventBus.emit(a, makeEvent(a)); // a:2
+    eventBus.emit(a, makeDAGEvent(a)); // a:0
+    eventBus.emit(b, makeDAGEvent(b)); // b:0
+    eventBus.emit(a, makeDAGEvent(a)); // a:1
+    eventBus.emit(b, makeDAGEvent(b)); // b:1
+    eventBus.emit(a, makeDAGEvent(a)); // a:2
     unsubA();
     unsubB();
 
@@ -62,7 +74,7 @@ describe('EventStore cursor replay', () => {
     const taskId = 'task_full_replay';
     for (let seq = 0; seq <= 9; seq++) store.append(makeEvent(taskId, seq));
 
-    expect(store.listByTask(taskId).map(e => e.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(store.listByTask(taskId).map(e => e.taskSeq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     store.close();
   });
 
@@ -72,7 +84,7 @@ describe('EventStore cursor replay', () => {
     for (let seq = 0; seq <= 9; seq++) store.append(makeEvent(taskId, seq));
 
     // Connect with lastEventId=5 → only events 6 onwards.
-    expect(store.listByTaskSince(taskId, 5).map(e => e.seq)).toEqual([6, 7, 8, 9]);
+    expect(store.listByTaskSince(taskId, 5).map(e => e.taskSeq)).toEqual([6, 7, 8, 9]);
     store.close();
   });
 
@@ -81,8 +93,8 @@ describe('EventStore cursor replay', () => {
     for (let seq = 0; seq <= 2; seq++) store.append(makeEvent('task_x', seq));
     for (let seq = 0; seq <= 2; seq++) store.append(makeEvent('task_y', seq));
 
-    expect(store.listByTaskSince('task_x', 0).map(e => e.seq)).toEqual([1, 2]);
-    expect(store.listByTask('task_y').map(e => e.seq)).toEqual([0, 1, 2]);
+    expect(store.listByTaskSince('task_x', 0).map(e => e.taskSeq)).toEqual([1, 2]);
+    expect(store.listByTask('task_y').map(e => e.taskSeq)).toEqual([0, 1, 2]);
     store.close();
   });
 });

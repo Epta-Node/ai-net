@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Coins, Bot, Bell, ChevronRight } from 'lucide-react';
+import { CheckCircle2, AlertCircle, Coins, Bot, Bell, ChevronRight } from 'lucide-react';
 import type { AppNotification, NotificationType } from '../../types/notification';
 import { formatRelativeTime } from '../../utils/time';
 
@@ -13,10 +13,15 @@ interface NotificationItemProps {
 
 const getNotificationIcon = (type: NotificationType) => {
   switch (type) {
+    case 'task_completed':
     case 'task':
       return <CheckCircle2 className="notification-icon-task" size={18} />;
+    case 'task_failed':
+      return <AlertCircle className="notification-icon-error" size={18} />;
+    case 'payment_received':
     case 'payment':
       return <Coins className="notification-icon-payment" size={18} />;
+    case 'agent_registered':
     case 'agent':
       return <Bot className="notification-icon-agent" size={18} />;
     case 'system':
@@ -49,6 +54,8 @@ export const NotificationItem: React.FC<NotificationItemProps> = ({
     }
   };
 
+  const messageText = notification.message || notification.description || '';
+
   return (
     <motion.div
       layout
@@ -61,7 +68,7 @@ export const NotificationItem: React.FC<NotificationItemProps> = ({
       onKeyDown={handleKeyDown}
       tabIndex={0}
       role="button"
-      aria-label={`${notification.title}: ${notification.description}`}
+      aria-label={`${notification.title}: ${messageText}`}
       data-testid={`notification-item-${notification.id}`}
     >
       <div className={`notification-icon-wrapper ${notification.type}`}>
@@ -76,7 +83,7 @@ export const NotificationItem: React.FC<NotificationItemProps> = ({
           </span>
         </div>
 
-        <p className="notification-description">{notification.description}</p>
+        {messageText && <p className="notification-description">{messageText}</p>}
 
         {notification.link && (
           <div className="notification-link-hint">

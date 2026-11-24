@@ -172,6 +172,69 @@ describe('ImageLightbox', () => {
     fireEvent.click(screen.getByTestId('thumb-2'));
     expect(handleSelect).toHaveBeenCalledWith(2);
   });
+
+  it('lazy-loads the main image and thumbnails with a blur-up placeholder', () => {
+    render(
+      <ImageLightbox
+        isOpen={true}
+        images={mockImages}
+        currentIndex={0}
+        onClose={vi.fn()}
+        onPrev={vi.fn()}
+        onNext={vi.fn()}
+        onSelectIndex={vi.fn()}
+      />
+    );
+
+    const mainImg = screen.getByTestId('lightbox-image');
+    expect(mainImg).toHaveAttribute('loading', 'lazy');
+    expect(screen.getByTestId('lightbox-image-placeholder')).toBeInTheDocument();
+
+    fireEvent.load(mainImg);
+    expect(screen.queryByTestId('lightbox-image-placeholder')).not.toBeInTheDocument();
+
+    const thumbImg = screen.getByTestId('thumb-img-1');
+    expect(thumbImg).toHaveAttribute('loading', 'lazy');
+  });
+
+  it('shows an error state when the main image fails to load', () => {
+    render(
+      <ImageLightbox
+        isOpen={true}
+        images={mockImages}
+        currentIndex={0}
+        onClose={vi.fn()}
+        onPrev={vi.fn()}
+        onNext={vi.fn()}
+        onSelectIndex={vi.fn()}
+      />
+    );
+
+    fireEvent.error(screen.getByTestId('lightbox-image'));
+
+    expect(screen.getByTestId('lightbox-image-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('lightbox-image')).not.toBeInTheDocument();
+  });
+
+  it('shows a per-thumbnail error state when a thumb fails to load', () => {
+    render(
+      <ImageLightbox
+        isOpen={true}
+        images={mockImages}
+        currentIndex={0}
+        onClose={vi.fn()}
+        onPrev={vi.fn()}
+        onNext={vi.fn()}
+        onSelectIndex={vi.fn()}
+      />
+    );
+
+    fireEvent.error(screen.getByTestId('thumb-img-1'));
+
+    expect(screen.getByTestId('thumb-error-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('thumb-img-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('thumb-img-0')).toBeInTheDocument();
+  });
 });
 
 describe('DesignRenderer with ImageLightbox integration', () => {

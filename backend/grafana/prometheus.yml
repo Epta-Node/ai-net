@@ -1,0 +1,21 @@
+# Prometheus scrape configuration for the ai-net monitoring profile (Issue #853).
+#
+# Used by the `prometheus` service in docker-compose.yml (mounted at
+# /etc/prometheus/prometheus.yml). Targets use compose service names.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: ai-net-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['backend:3000']
+        labels:
+          service: 'ai-net-backend'
+
+  # Reconciliation drift/remediation counters live behind admin auth on
+  # `GET /api/reconciliation/metrics` and are served as JSON (not Prometheus
+  # exposition), so they are intentionally not scraped here — view them
+  # directly or via the dashboard's Payment Health row note:
+  #   curl -H "X-Admin-API-Key: $ADMIN_API_KEY" http://localhost:3000/api/reconciliation/metrics

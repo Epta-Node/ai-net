@@ -7,7 +7,15 @@ import {
   handleAgentFailure,
   CyclicDAGError,
   DAGNode,
+  getTaskMetadata,
+  getTaskStatus,
+  storeTaskMetadata,
+  TaskMetadataContractClient,
+  TaskStatus,
+  updateTaskStatus,
 } from '../src/coordinator/coordinator';
+import { createHash } from 'crypto';
+import { deflateSync, inflateSync } from 'zlib';
 import { registerAgent, clearRegistry } from '../src/registry/registry';
 
 jest.mock('axios');
@@ -29,6 +37,79 @@ function makeFiveNodeDAG(): DAGNode[] {
 }
 
 beforeEach(() => clearRegistry());
+
+describe('on-chain task metadata', () => {
+  const dag = makeFiveNodeDAG();
+  const taskId = 'task-247';
+  const taskIdHash = createHash('sha256').update(taskId).digest();
+  const promptHash = createHash('sha256').update('Build a report').digest();
+  let client: jest.Mocked<TaskMetadataContractClient>;
+
+  beforeEach(() => {
+    client = {
+      store_task_metadata: jest.fn(() => ({ signAndSend: jest.fn(), simulate: jest.fn() })),
+      get_task_metadata: jest.fn(() => ({ signAndSend: jest.fn(), simulate: jest.fn() })),
+      get_task_status: jest.fn(() => ({ signAndSend: jest.fn(), simulate: jest.fn() })),
+      update_task_status: jest.fn(() => ({ signAndSend: jest.fn(), simulate: jest.fn() })),
+    } as unknown as jest.Mocked<TaskMetadataContractClient>;
+  });
+
+  it('hashes identifiers and stores a compressed DAG', async () => {
+    await storeTaskMetadata(client, {
+      taskId,
+      prompt: 'Build a report',
+      submitter: 'GCOORDINATOR',
+      assignedAgents: ['GAGENT1', 'GAGENT2'],
+      dag,
+    });
+
+    expect(client.store_task_metadata).toHaveBeenCalledTimes(1);
+    const call = client.store_task_metadata.mock.calls[0][0];
+    expect(Buffer.from(call.task_id)).toEqual(taskIdHash);
+    expect(Buffer.from(call.prompt_hash)).toEqual(promptHash);
+    expect(JSON.parse(inflateSync(call.compressed_dag).toString('utf8'))).toEqual(dag);
+    expect(call.ttl_days).toBe(0);
+  });
+
+  it('retrieves and decompresses full task metadata', async () => {
+    const compressedDag = deflateSync(Buffer.from(JSON.stringify(dag)));
+    client.get_task_metadata.mockReturnValue({
+      signAndSend: jest.fn(),
+      simulate: jest.fn().mockResolvedValue({
+        taskId: taskIdHash,
+        promptHash,
+        assignedAgents: ['GAGENT1'],
+        compressedDag,
+        status: TaskStatus.Running,
+        createdAt: 100n,
+        expiresAt: 200n,
+      }),
+    });
+
+    const metadata = await getTaskMetadata(client, taskId);
+
+    expect(client.get_task_metadata).toHaveBeenCalledWith(taskIdHash);
+    expect(metadata.dag).toEqual(dag);
+    expect(metadata.status).toBe(TaskStatus.Running);
+  });
+
+  it('gets and updates task status using the hashed task ID', async () => {
+    client.get_task_status.mockReturnValue({
+      signAndSend: jest.fn(),
+      simulate: jest.fn().mockResolvedValue(TaskStatus.Assigned),
+    });
+
+    await expect(getTaskStatus(client, taskId)).resolves.toBe(TaskStatus.Assigned);
+    await updateTaskStatus(client, taskId, 'GAGENT1', TaskStatus.Running);
+
+    expect(client.get_task_status).toHaveBeenCalledWith(taskIdHash);
+    expect(client.update_task_status).toHaveBeenCalledWith({
+      task_id: taskIdHash,
+      agent: 'GAGENT1',
+      new_status: TaskStatus.Running,
+    });
+  });
+});
 
 // ── decomposeTask ─────────────────────────────────────────────────────────────
 
@@ -54,8 +135,8 @@ describe('decomposeTask', () => {
 
 describe('assignAgents', () => {
   it('assigns cheapest agent matching taskType', () => {
-    registerAgent({ id: 'expensive', name: 'E', capability: 'research', priceXLM: 10, stellarAddress: '' });
-    registerAgent({ id: 'cheap',     name: 'C', capability: 'research', priceXLM: 2,  stellarAddress: '' });
+    registerAgent({ id: 'expensive', name: 'E', capability: 'research', priceXLM: 10, stellarAddress: '', reputationScore: 1 });
+    registerAgent({ id: 'cheap',     name: 'C', capability: 'research', priceXLM: 2,  stellarAddress: '', reputationScore: 1 });
 
     const dag: DAGNode[] = [{ id: 'n1', taskType: 'research', dependsOn: [], status: 'pending' }];
     assignAgents(dag);
@@ -70,7 +151,7 @@ describe('executeDAG — topological order', () => {
     const order: string[] = [];
     const dag = makeFiveNodeDAG();
     ['research', 'risk', 'coding', 'design', 'report'].forEach((cap) =>
-      registerAgent({ id: cap, name: cap, capability: cap, priceXLM: 1, stellarAddress: '' }),
+      registerAgent({ id: cap, name: cap, capability: cap, priceXLM: 1, stellarAddress: '', reputationScore: 1 }),
     );
     assignAgents(dag);
 
@@ -89,8 +170,8 @@ describe('executeDAG — topological order', () => {
 
 describe('handleAgentFailure', () => {
   it('retries with next-cheapest agent, not a hard crash', async () => {
-    registerAgent({ id: 'a1', name: 'A1', capability: 'research', priceXLM: 1, stellarAddress: '' });
-    registerAgent({ id: 'a2', name: 'A2', capability: 'research', priceXLM: 2, stellarAddress: '' });
+    registerAgent({ id: 'a1', name: 'A1', capability: 'research', priceXLM: 1, stellarAddress: '', reputationScore: 1 });
+    registerAgent({ id: 'a2', name: 'A2', capability: 'research', priceXLM: 2, stellarAddress: '', reputationScore: 1 });
 
     const node: DAGNode = { id: 'n1', taskType: 'research', dependsOn: [], status: 'running' };
     let calls = 0;
@@ -106,9 +187,9 @@ describe('handleAgentFailure', () => {
   });
 
   it('marks node failed after 3 failures', async () => {
-    registerAgent({ id: 'b1', name: 'B1', capability: 'risk', priceXLM: 1, stellarAddress: '' });
-    registerAgent({ id: 'b2', name: 'B2', capability: 'risk', priceXLM: 2, stellarAddress: '' });
-    registerAgent({ id: 'b3', name: 'B3', capability: 'risk', priceXLM: 3, stellarAddress: '' });
+    registerAgent({ id: 'b1', name: 'B1', capability: 'risk', priceXLM: 1, stellarAddress: '', reputationScore: 1 });
+    registerAgent({ id: 'b2', name: 'B2', capability: 'risk', priceXLM: 2, stellarAddress: '', reputationScore: 1 });
+    registerAgent({ id: 'b3', name: 'B3', capability: 'risk', priceXLM: 3, stellarAddress: '', reputationScore: 1 });
 
     const node: DAGNode = { id: 'n1', taskType: 'risk', dependsOn: [], status: 'running' };
     const runNode = async () => { throw new Error('always fails'); };
@@ -143,7 +224,7 @@ describe('executeDAG — cyclic detection', () => {
 describe('executeDAG — trace persistence', () => {
   it('writes execution trace JSON to logs/tasks/<taskId>.json', async () => {
     const dag: DAGNode[] = [{ id: 'n1', taskType: 'research', dependsOn: [], status: 'pending' }];
-    registerAgent({ id: 'r1', name: 'R1', capability: 'research', priceXLM: 1, stellarAddress: '' });
+    registerAgent({ id: 'r1', name: 'R1', capability: 'research', priceXLM: 1, stellarAddress: '', reputationScore: 1 });
     assignAgents(dag);
 
     await executeDAG(dag, 'trace-test', async () => ({}));
@@ -163,8 +244,8 @@ describe('executeDAG — merged result', () => {
       { id: 'n1', taskType: 'research', dependsOn: [],     status: 'pending' },
       { id: 'n2', taskType: 'report',   dependsOn: ['n1'], status: 'pending' },
     ];
-    registerAgent({ id: 'r', name: 'R', capability: 'research', priceXLM: 1, stellarAddress: '' });
-    registerAgent({ id: 'p', name: 'P', capability: 'report',   priceXLM: 1, stellarAddress: '' });
+    registerAgent({ id: 'r', name: 'R', capability: 'research', priceXLM: 1, stellarAddress: '', reputationScore: 1 });
+    registerAgent({ id: 'p', name: 'P', capability: 'report',   priceXLM: 1, stellarAddress: '', reputationScore: 1 });
     assignAgents(dag);
 
     const results = await executeDAG(dag, 'merge-test', async (node) => ({ value: node.id }));

@@ -1,0 +1,92 @@
+/* Report heading and TOC styles */
+
+.report-heading {
+  scroll-margin-top: 80px;
+  position: relative;
+  padding-right: 28px;
+}
+
+.heading-anchor {
+  position: absolute;
+  right: 0;
+  opacity: 0;
+  transition: opacity 200ms ease;
+  text-decoration: none;
+  font-size: 0.9em;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.report-heading:hover .heading-anchor {
+  opacity: 1;
+}
+
+.heading-anchor:hover {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+.toc-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.toc-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.toc-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.toc-sidebar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.toc-sidebar::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Print styles */
+@media print {
+  .toc-sidebar {
+    display: none;
+  }
+
+  .report-heading {
+    padding-right: 0;
+    break-after: avoid;
+  }
+
+  .heading-anchor {
+    display: none;
+  }
+
+  .markdown-body {
+    font-size: 12pt;
+    line-height: 1.6;
+  }
+
+  .markdown-body h1,
+  .markdown-body h2,
+  .markdown-body h3,
+  .markdown-body h4,
+  .markdown-body h5,
+  .markdown-body h6 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .markdown-body p {
+    orphans: 3;
+    widows: 3;
+  }
+}
+
+/* Mobile responsive for TOC */
+@media (max-width: 1024px) {
+  .toc-sidebar {
+    display: none;
+  }
+}

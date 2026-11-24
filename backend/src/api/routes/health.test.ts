@@ -1,5 +1,5 @@
 /**
- * Unit tests for GET /health, GET /health/deep, and GET /health/ready routes.
+ * Unit tests for GET /health, GET /health/deep, GET /health/ready and GET /health/queue routes.
  *
  * Strategy:
  *  - Load config once at the top of the file.
@@ -18,6 +18,7 @@ beforeAll(() => {
 
   // Initialise config singleton if not already done
   try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { loadConfig } = require("../../config");
     loadConfig();
   } catch {
@@ -28,6 +29,7 @@ beforeAll(() => {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildApp() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { healthRouter } = require("./health");
   const app = express();
   app.use(express.json());
@@ -67,27 +69,71 @@ describe("GET /health", () => {
 // ── GET /health/deep ─────────────────────────────────────────────────────────
 
 describe("GET /health/deep", () => {
+  /* eslint-disable @typescript-eslint/no-var-requires */
+  const Database = require("better-sqlite3");
+  const tasksModule = require("../../db/tasks");
+  const adminControl = require("../../services/adminControl");
+  const jobStoreModule = require("../../queue/jobStore");
+  const breakers = require("../../services/circuitBreaker");
+  /* eslint-enable @typescript-eslint/no-var-requires */
+
   let fetchSpy: jest.SpyInstance;
+  let queueStats: { pending: number; active: number; completed: number; failed: number; deadLetter: number; total: number };
+  let db: InstanceType<typeof Database>;
 
   beforeEach(() => {
-    // Spy on global fetch — the router uses the global fetch internally
-    fetchSpy = jest.spyOn(global, "fetch" as any);
+    // Spy on global fetch — the probe uses the global fetch internally
+    fetchSpy = jest.spyOn(global, "fetch" as any).mockResolvedValue({ ok: true } as Response);
+    db = new Database(":memory:");
+    jest.spyOn(tasksModule, "getTaskDb").mockReturnValue(db);
+    jest.spyOn(adminControl, "isReadOnly").mockReturnValue(false);
+    queueStats = { pending: 0, active: 0, completed: 0, failed: 0, deadLetter: 0, total: 0 };
+    jest.spyOn(jobStoreModule, "getJobDb").mockReturnValue({});
+    jest.spyOn(jobStoreModule, "createJobStore").mockImplementation(() => ({ getStats: () => queueStats }));
+    breakers._resetCircuitBreakerRegistry();
   });
 
   afterEach(() => {
-    fetchSpy.mockRestore();
+    jest.restoreAllMocks();
+    breakers._resetCircuitBreakerRegistry();
+    db.close();
   });
 
-  it("returns 200 with both ok when all dependencies reachable", async () => {
-    fetchSpy.mockResolvedValue({ ok: true } as Response);
+  it("returns 200 with structured per-dependency results when all dependencies are healthy", async () => {
     const app = buildApp();
     const res = await request(app).get("/health/deep");
     expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    for (const name of ["venice", "horizon", "database", "queue"]) {
+      const dep = res.body.dependencies[name];
+      expect(dep.status).toBe("ok");
+      expect(typeof dep.critical).toBe("boolean");
+      expect(typeof dep.latencyMs).toBe("number");
+      expect(typeof dep.detail).toBe("string");
+    }
+    // Legacy flat fields are preserved.
     expect(res.body.venice).toBe("ok");
     expect(res.body.horizon).toBe("ok");
+    expect(res.body.services).toEqual({ venice: "ok", horizon: "ok" });
   });
 
-  it("reports venice as unreachable when Venice fetch rejects", async () => {
+  it("returns 503 when the Venice circuit breaker is OPEN, even if the probe succeeds", async () => {
+    const breaker = new breakers.CircuitBreaker({ name: "venice", failureThreshold: 1 });
+    breakers.trackCircuitBreaker(breaker);
+    breaker.recordSuccess();
+    breaker.recordFailure();
+
+    const app = buildApp();
+    const res = await request(app).get("/health/deep");
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe("fail");
+    expect(res.body.failing).toContain("venice");
+    expect(res.body.dependencies.venice.breaker.state).toBe("OPEN");
+    expect(typeof res.body.dependencies.venice.lastSuccessAt).toBe("string");
+    expect(res.body.venice).toBe("unreachable");
+  });
+
+  it("returns 503 and reports venice as unreachable when Venice fetch rejects", async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes("venice.ai")) {
         return Promise.reject(new Error("network error"));
@@ -96,12 +142,13 @@ describe("GET /health/deep", () => {
     });
     const app = buildApp();
     const res = await request(app).get("/health/deep");
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(res.body.venice).toBe("unreachable");
     expect(res.body.horizon).toBe("ok");
+    expect(res.body.failing).toEqual(["venice"]);
   });
 
-  it("reports horizon as unreachable when Horizon fetch rejects", async () => {
+  it("returns 503 and reports horizon as unreachable when Horizon fetch rejects", async () => {
     fetchSpy.mockImplementation((url: string) => {
       if (url.includes("venice.ai")) {
         return Promise.resolve({ ok: true } as Response);
@@ -110,16 +157,25 @@ describe("GET /health/deep", () => {
     });
     const app = buildApp();
     const res = await request(app).get("/health/deep");
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(res.body.venice).toBe("ok");
     expect(res.body.horizon).toBe("unreachable");
+  });
+
+  it("returns 503 when the Stellar Horizon breaker is OPEN", async () => {
+    const breaker = breakers.getCircuitBreaker({ name: "stellar-horizon", failureThreshold: 1 });
+    breaker.recordFailure();
+    const app = buildApp();
+    const res = await request(app).get("/health/deep");
+    expect(res.status).toBe(503);
+    expect(res.body.failing).toEqual(["horizon"]);
   });
 
   it("reports both unreachable when both dependencies return non-ok status", async () => {
     fetchSpy.mockResolvedValue({ ok: false } as Response);
     const app = buildApp();
     const res = await request(app).get("/health/deep");
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(res.body.venice).toBe("unreachable");
     expect(res.body.horizon).toBe("unreachable");
   });
@@ -129,15 +185,77 @@ describe("GET /health/deep", () => {
     fetchSpy.mockRejectedValue(abortError);
     const app = buildApp();
     const res = await request(app).get("/health/deep");
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(503);
     expect(res.body.venice).toBe("unreachable");
     expect(res.body.horizon).toBe("unreachable");
+  });
+
+  it("returns 503 when the database write check fails", async () => {
+    tasksModule.getTaskDb.mockImplementation(() => {
+      throw new Error("SQLITE_CANTOPEN");
+    });
+    const app = buildApp();
+    const res = await request(app).get("/health/deep");
+    expect(res.status).toBe(503);
+    expect(res.body.failing).toEqual(["database"]);
+  });
+
+  it("stays 200 in read-only mode and skips the write check", async () => {
+    adminControl.isReadOnly.mockReturnValue(true);
+    const app = buildApp();
+    const res = await request(app).get("/health/deep");
+    expect(res.status).toBe(200);
+    expect(res.body.dependencies.database.readOnlyMode).toBe(true);
+    expect(res.body.dependencies.database.detail).toMatch(/write check skipped/);
+  });
+
+  it("returns 200 with degraded flags when only the queue is backlogged", async () => {
+    queueStats.pending = 5_000;
+    const app = buildApp();
+    const res = await request(app).get("/health/deep");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("degraded");
+    expect(res.body.degraded).toEqual(["queue"]);
+    expect(res.body.dependencies.queue.depth).toBe(5_000);
+    expect(res.body.dependencies.queue.critical).toBe(false);
+  });
+});
+
+// ── GET /health/live ──────────────────────────────────────────────────────────
+
+describe("GET /health/live", () => {
+  const app = buildApp();
+
+  it("returns the same shape as GET /health", async () => {
+    const res = await request(app).get("/health/live");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(typeof res.body.uptime).toBe("number");
+    expect(typeof res.body.version).toBe("string");
+    expect(typeof res.body.stellarNetwork).toBe("string");
   });
 });
 
 // ── GET /health/ready ─────────────────────────────────────────────────────────
 
 describe("GET /health/ready", () => {
+  let fetchSpy: jest.SpyInstance;
+  let wsSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    fetchSpy = jest.spyOn(global, "fetch" as any).mockResolvedValue({ ok: true } as Response);
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { metricsService } = require("../../services/metrics");
+    wsSpy = jest
+      .spyOn(metricsService, "getWebSocketStatus")
+      .mockReturnValue({ status: "unknown", error: "WebSocket server not attached" });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    wsSpy.mockRestore();
+  });
+
   it("returns 200 or 500 with structured checks response", async () => {
     // The /health/ready endpoint performs dynamic imports of DB modules and
     // runs SELECT 1 against them. In the test environment without real DB files
@@ -152,10 +270,358 @@ describe("GET /health/ready", () => {
     expect(["ok", "error"]).toContain(res.body.status);
   });
 
-  it("checks object always has tasks and payments keys", async () => {
+  it("checks object has tasks, payments, queue, venice, horizon, and websocket keys", async () => {
     const app = buildApp();
     const res = await request(app).get("/health/ready");
     expect(res.body.checks).toHaveProperty("tasks");
     expect(res.body.checks).toHaveProperty("payments");
+    expect(res.body.checks).toHaveProperty("queue");
+    expect(res.body.checks).toHaveProperty("venice");
+    expect(res.body.checks).toHaveProperty("horizon");
+    expect(res.body.checks).toHaveProperty("websocket");
+  });
+
+  it("fails readiness when Venice is unreachable, even if the databases are fine", async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes("venice.ai")) return Promise.reject(new Error("network error"));
+      return Promise.resolve({ ok: true } as Response);
+    });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.status).toBe(500);
+    expect(res.body.status).toBe("error");
+    expect(res.body.checks.venice).toBe("error");
+  });
+
+  it("fails readiness when Stellar Horizon is unreachable", async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (url.includes("venice.ai")) return Promise.resolve({ ok: true } as Response);
+      return Promise.reject(new Error("network error"));
+    });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.status).toBe(500);
+    expect(res.body.checks.horizon).toBe("error");
+  });
+
+  it("reports websocket as unknown (not a failure) when no probe is attached", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.body.checks.websocket).toBe("unknown");
+    // An "unknown" websocket alone must not drag down an otherwise-ready service.
+    if (res.body.checks.tasks === "ok" && res.body.checks.payments === "ok" && res.body.checks.queue === "ok") {
+      expect(res.status).toBe(200);
+    }
+  });
+
+  it("fails readiness when the websocket probe reports it is not listening", async () => {
+    wsSpy.mockReturnValue({ status: "unreachable", error: "not listening" });
+    const app = buildApp();
+    const res = await request(app).get("/health/ready");
+    expect(res.body.checks.websocket).toBe("error");
+    expect(res.status).toBe(500);
+  });
+});
+
+// ── GET /health/dashboard ────────────────────────────────────────────────────
+
+describe("GET /health/dashboard", () => {
+  const ADMIN_KEY = "test-admin-key";
+
+  /** A fully-populated snapshot, so route assertions never touch I/O. */
+  function fakeDashboard() {
+    return {
+      status: "healthy",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      version: "0.1.0",
+      stellarNetwork: "testnet",
+      cacheAgeMs: 0,
+      cacheTtlMs: 5000,
+      requests: {
+        totalRequests: 3,
+        windowMs: 60000,
+        requestRatePerSecond: 0.05,
+        avgResponseTimeMs: 12.5,
+        p95ResponseTimeMs: 30,
+        p99ResponseTimeMs: 40,
+        errorRate: 0.33,
+        serverErrorCount: 1,
+        clientErrorCount: 0,
+      },
+      dependencies: {
+        sqlite: { status: "ok", latencyMs: 1 },
+        venice: { status: "ok", latencyMs: 20 },
+        stellarHorizon: { status: "ok", latencyMs: 30 },
+        websocket: { status: "ok", details: { connections: 2 } },
+      },
+      system: {
+        uptimeSeconds: 120,
+        memory: {
+          rssBytes: 1000,
+          heapTotalBytes: 800,
+          heapUsedBytes: 400,
+          externalBytes: 100,
+          heapUsedPercent: 50,
+        },
+        cpu: {
+          userMs: 10,
+          systemMs: 5,
+          usagePercent: 1.5,
+          loadAverage: [0.1, 0.2, 0.3],
+          cpuCount: 8,
+        },
+        gc: {
+          available: true,
+          collections: 2,
+          totalPauseMs: 4,
+          avgPauseMs: 2,
+          lastPauseMs: 1,
+        },
+      },
+      agents: { total: 2, online: 1, offline: 1, avgResponseTimeMs: 42 },
+      tasks: { total: 4, active: 1, queued: 1, completed: 1, failed: 1, cancelled: 0 },
+      payments: {
+        locked: { count: 1, stroops: "10000000", xlm: 1 },
+        released: { count: 1, stroops: "20000000", xlm: 2 },
+        refunded: { count: 0, stroops: "0", xlm: 0 },
+      },
+    };
+  }
+
+  let dashboardSpy: jest.SpyInstance;
+  let originalKey: string | undefined;
+
+  beforeEach(() => {
+    originalKey = process.env.ADMIN_API_KEY;
+    process.env.ADMIN_API_KEY = ADMIN_KEY;
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { metricsService } = require("../../services/metrics");
+    dashboardSpy = jest
+      .spyOn(metricsService, "getDashboard")
+      .mockResolvedValue(fakeDashboard());
+  });
+
+  afterEach(() => {
+    dashboardSpy.mockRestore();
+    if (originalKey === undefined) delete process.env.ADMIN_API_KEY;
+    else process.env.ADMIN_API_KEY = originalKey;
+  });
+
+  // ── Admin API key protection ───────────────────────────────────────────────
+
+  it("returns 401 when no admin API key is supplied", async () => {
+    const res = await request(buildApp()).get("/health/dashboard");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe("Unauthorized");
+    expect(dashboardSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the admin API key is wrong", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", "wrong-key");
+    expect(res.status).toBe(401);
+    expect(dashboardSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when the key is a prefix of the configured key", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY.slice(0, 5));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 503 when ADMIN_API_KEY is not configured", async () => {
+    delete process.env.ADMIN_API_KEY;
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe("Admin API not configured");
+    expect(dashboardSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts the key via the X-Admin-API-Key header", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts the key via an Authorization Bearer header", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("Authorization", `Bearer ${ADMIN_KEY}`);
+    expect(res.status).toBe(200);
+  });
+
+  // ── Payload shape ──────────────────────────────────────────────────────────
+
+  it("returns every metric family in the payload", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("status", "healthy");
+    expect(res.body).toHaveProperty("timestamp");
+    expect(res.body).toHaveProperty("requests");
+    expect(res.body).toHaveProperty("dependencies");
+    expect(res.body).toHaveProperty("system");
+    expect(res.body).toHaveProperty("agents");
+    expect(res.body).toHaveProperty("tasks");
+    expect(res.body).toHaveProperty("payments");
+  });
+
+  it("reports request rate, latency percentiles and error rate", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(res.body.requests).toMatchObject({
+      requestRatePerSecond: 0.05,
+      avgResponseTimeMs: 12.5,
+      p95ResponseTimeMs: 30,
+      p99ResponseTimeMs: 40,
+      errorRate: 0.33,
+    });
+  });
+
+  it("reports the status of every tracked dependency", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(Object.keys(res.body.dependencies).sort()).toEqual([
+      "sqlite",
+      "stellarHorizon",
+      "venice",
+      "websocket",
+    ]);
+    expect(res.body.dependencies.websocket.details.connections).toBe(2);
+  });
+
+  it("reports memory, CPU, uptime and GC statistics", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(res.body.system.memory.heapUsedPercent).toBe(50);
+    expect(res.body.system.cpu.usagePercent).toBe(1.5);
+    expect(res.body.system.uptimeSeconds).toBe(120);
+    expect(res.body.system.gc.avgPauseMs).toBe(2);
+  });
+
+  it("reports agent, task and payment counters", async () => {
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(res.body.agents).toEqual({
+      total: 2,
+      online: 1,
+      offline: 1,
+      avgResponseTimeMs: 42,
+    });
+    expect(res.body.tasks.active).toBe(1);
+    expect(res.body.tasks.queued).toBe(1);
+    expect(res.body.tasks.completed).toBe(1);
+    expect(res.body.tasks.failed).toBe(1);
+    expect(res.body.payments.locked.xlm).toBe(1);
+    expect(res.body.payments.released.xlm).toBe(2);
+    expect(res.body.payments.refunded.xlm).toBe(0);
+  });
+
+  // ── Caching ────────────────────────────────────────────────────────────────
+
+  it("serves the cached snapshot by default", async () => {
+    await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+    expect(dashboardSpy).toHaveBeenCalledWith(false);
+  });
+
+  it("forces a refresh when ?refresh=true is supplied", async () => {
+    await request(buildApp())
+      .get("/health/dashboard?refresh=true")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+    expect(dashboardSpy).toHaveBeenCalledWith(true);
+  });
+
+  // ── Failure handling ───────────────────────────────────────────────────────
+
+  it("returns 500 with a structured body when collection fails", async () => {
+    dashboardSpy.mockRejectedValue(new Error("collection exploded"));
+
+    const res = await request(buildApp())
+      .get("/health/dashboard")
+      .set("X-Admin-API-Key", ADMIN_KEY);
+
+    expect(res.status).toBe(500);
+    expect(res.body.status).toBe("unhealthy");
+    expect(res.body.error).toBe("Failed to collect metrics");
+    expect(res.body.message).toBe("collection exploded");
+  });
+});
+
+// ── GET /health/queue ─────────────────────────────────────────────────────────
+
+describe("GET /health/queue", () => {
+  let getJobDbMock: jest.SpyInstance;
+  let createJobStoreMock: jest.SpyInstance;
+
+  const mockStats = {
+    pending: 3,
+    active: 2,
+    completed: 10,
+    failed: 1,
+    deadLetter: 0,
+    total: 16,
+  };
+
+  beforeEach(() => {
+    // Mock the queue/jobStore dynamic import used inside the route handler
+    jest.doMock("../../queue/jobStore", () => ({
+      getJobDb: jest.fn().mockReturnValue({}),
+      createJobStore: jest.fn().mockReturnValue({
+        getStats: jest.fn().mockReturnValue(mockStats),
+      }),
+    }));
+  });
+
+  afterEach(() => {
+    jest.resetModules();
+  });
+
+  it("returns 200 with queueDepth, activeJobs, and deadLetterCount", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/queue");
+    expect(res.status).toBe(200);
+    expect(typeof res.body.queueDepth).toBe("number");
+    expect(typeof res.body.activeJobs).toBe("number");
+    expect(typeof res.body.deadLetterCount).toBe("number");
+  });
+
+  it("queueDepth equals pending + failed counts", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/queue");
+    expect(res.status).toBe(200);
+    // queueDepth = pending + failed (retriable or terminal)
+    expect(res.body.queueDepth).toBe(mockStats.pending + mockStats.failed);
+  });
+
+  it("activeJobs reflects jobs currently being processed", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/queue");
+    expect(res.status).toBe(200);
+    expect(res.body.activeJobs).toBe(mockStats.active);
+  });
+
+  it("deadLetterCount reflects jobs that exceeded retry budget", async () => {
+    const app = buildApp();
+    const res = await request(app).get("/health/queue");
+    expect(res.status).toBe(200);
+    expect(res.body.deadLetterCount).toBe(mockStats.deadLetter);
   });
 });

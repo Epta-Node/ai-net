@@ -1,0 +1,6 @@
+{
+  "_comment": "Budgets are gzipped bytes. Update intentionally after reviewing the production manifest.",
+  "default": { "gzipBytes": 150000 },
+  "vendor-*.js": { "gzipBytes": 90000 },
+  "index-*.js": { "gzipBytes": 150000 }
+}

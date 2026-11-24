@@ -1,35 +1,43 @@
 // src/hooks/useAnimatedCounter.ts
-import { useSpring, useTransform, MotionValue } from 'framer-motion';
-import { useEffect } from 'react';
+import { useReducedMotion, useSpring, useMotionValueEvent } from 'framer-motion';
+import { useEffect, useState } from 'react';
 
 interface UseAnimatedCounterOptions {
   /** Spring stiffness (default 100) */
   stiffness?: number;
   /** Spring damping (default 20) */
   damping?: number;
-  /** Duration in ms (used with easeOut, default 800) */
-  duration?: number;
 }
 
 /**
- * Animates a numeric value using framer-motion spring animation.
- * Returns a MotionValue<number> that can be used in components.
+ * Animates a numeric value using a framer-motion spring, returning a
+ * plain React state number so it can be safely rendered as text.
+ * Starts from the previous value on updates, avoiding layout shift.
+ *
+ * Honours `prefers-reduced-motion` (#721): when reduced motion is
+ * requested the target is rendered immediately with no spring.
  */
 export function useAnimatedCounter(
   target: number,
   options: UseAnimatedCounterOptions = {}
-): MotionValue<number> {
-  const { stiffness = 100, damping = 20 } = options;
+): number {
+  const { stiffness = 80, damping = 18 } = options;
+  const reduceMotion = useReducedMotion() ?? false;
 
-  const spring = useSpring(0, {
-    stiffness,
-    damping,
-    duration: 800,
-  });
+  const spring = useSpring(reduceMotion ? target : 0, { stiffness, damping });
+  const [display, setDisplay] = useState(reduceMotion ? target : 0);
 
   useEffect(() => {
+    if (reduceMotion) {
+      setDisplay(target);
+      return;
+    }
     spring.set(target);
-  }, [target, spring]);
+  }, [target, spring, reduceMotion]);
 
-  return useTransform(spring, (v: number) => Math.round(v));
+  useMotionValueEvent(spring, 'change', (v) => {
+    setDisplay(Math.round(v));
+  });
+
+  return display;
 }

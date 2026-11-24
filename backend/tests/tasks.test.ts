@@ -78,8 +78,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: "", maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Validation failed");
-    expect(res.body.details.prompt).toBeDefined();
+    expect(res.body.error.message).toBe("Request validation failed");
+    expect(res.body.error.details.fieldErrors.body.prompt).toBeDefined();
   });
 
   it("returns 400 when prompt exceeds 10 000 characters", async () => {
@@ -90,8 +90,8 @@ describe("POST /api/tasks", () => {
       .send({ prompt: oversizedPrompt, maxBudgetXLM: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("Validation failed");
-    expect(res.body.details.prompt).toBeDefined();
+    expect(res.body.error.message).toBe("Request validation failed");
+    expect(res.body.error.details.fieldErrors.body.prompt).toBeDefined();
   });
 
   it("accepts a prompt of exactly 10 000 characters", async () => {
@@ -155,7 +155,7 @@ describe("GET /api/tasks/:id", () => {
       .get(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Access denied");
+    expect(res.body.error.message).toBe("Access denied");
   });
 
   it("returns 403 when wallet key header is missing", async () => {
@@ -168,7 +168,7 @@ describe("GET /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .get(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Access denied");
+    expect(res.body.error.message).toBe("Access denied");
   });
 });
 
@@ -222,7 +222,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", "WRONG_WALLET_KEY");
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Not authorized to cancel this task");
+    expect(res.body.error.message).toBe("Not authorized to cancel this task");
   });
 
   it("returns 403 when wallet key header is missing on cancel", async () => {
@@ -235,7 +235,7 @@ describe("DELETE /api/tasks/:id", () => {
     const res = await request(app.httpServer)
       .delete(`/api/tasks/${id}`);
     expect(res.status).toBe(403);
-    expect(res.body.error).toBe("Not authorized to cancel this task");
+    expect(res.body.error.message).toBe("Not authorized to cancel this task");
   });
 
   it("returns 409 when task is not queued (e.g. running)", async () => {
@@ -252,7 +252,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("Cannot cancel task in 'running' status");
+    expect(res.body.error.message).toBe("Cannot cancel task in 'running' status");
   });
 
   it("returns 409 when task is completed", async () => {
@@ -269,7 +269,7 @@ describe("DELETE /api/tasks/:id", () => {
       .delete(`/api/tasks/${id}`)
       .set("walletpublickey", WALLET);
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("Cannot cancel task in 'completed' status");
+    expect(res.body.error.message).toBe("Cannot cancel task in 'completed' status");
   });
 
   it("returns 404 for unknown task", async () => {
@@ -564,7 +564,7 @@ describe("POST /api/tasks — daily quota enforcement", () => {
       .run(quotaWallet);
   });
 
-  it("returns 429 with DAILY_LIMIT_EXCEEDED when wallet reaches the daily task limit", async () => {
+  it("returns 429 with RATE_LIMITED when wallet reaches the daily task limit", async () => {
     // Override DAILY_TASK_LIMIT_PER_WALLET before re-requiring the module so
     // the module-level constant is initialised to 2 for this test.
     const originalLimit = process.env.DAILY_TASK_LIMIT_PER_WALLET;
@@ -595,7 +595,7 @@ describe("POST /api/tasks — daily quota enforcement", () => {
       .send({ prompt: "One too many", maxBudgetXLM: 1 });
 
     expect(res.status).toBe(429);
-    expect(res.body.error.code).toBe("DAILY_LIMIT_EXCEEDED");
+    expect(res.body.error.code).toBe("RATE_LIMITED");
 
     freshApp.close();
     process.env.DAILY_TASK_LIMIT_PER_WALLET = originalLimit;

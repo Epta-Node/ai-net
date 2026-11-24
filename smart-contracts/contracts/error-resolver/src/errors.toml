@@ -34,3 +34,70 @@ fix_suggestion = "The smart contract encountered an invalid operation in its cur
 category = "contract"
 error_code = "InvalidInput"
 fix_suggestion = "The inputs passed to the contract function are invalid or out of bounds. Verify the arguments passed to the function call match the expected types and validate constraints."
+
+# ─── Contract-specific error codes ──────────────────────────────────────────
+#
+# Every `#[contracterror]` variant of a covered contract must have exactly one
+# entry here, keyed by (contract, code). `tests/registry_consistency.rs`
+# fails if a contract adds a code without an entry, or if an entry here
+# references a code (or name) the contract no longer defines.
+
+[[contract_errors]]
+contract = "error-registry"
+code = 1
+name = "AlreadyExists"
+fix_suggestion = "An error record with this error_id is already stored. Generate a fresh error_id (e.g. a hash including a nonce) instead of re-submitting the same one."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 2
+name = "InvalidTtl"
+fix_suggestion = "ttl_seconds must be greater than zero and no larger than MAX_TTL_SECONDS (90 days). Clamp the TTL before calling submit_error."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 3
+name = "TtlOverflow"
+fix_suggestion = "created_at + ttl_seconds overflowed u64. Use a TTL within MAX_TTL_SECONDS and verify the ledger timestamp is sane."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 4
+name = "ContractPaused"
+fix_suggestion = "The error registry is paused and rejects mutations. Wait for the admin to call unpause, or contact the operator."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 5
+name = "AlreadyInitialized"
+fix_suggestion = "initialize has already been called on this instance. Do not re-initialize; use the existing admin to manage the contract."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 6
+name = "NotInitialized"
+fix_suggestion = "The contract has no admin yet. Call initialize(admin) once after deployment before using admin entrypoints."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 7
+name = "Unauthorized"
+fix_suggestion = "The caller is not authorized for this admin action. Sign the transaction with the configured admin address."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 8
+name = "UpgradeFailed"
+fix_suggestion = "The Wasm upgrade could not be applied. Verify the new Wasm hash has been uploaded to the network and that pre-upgrade validation passes."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 9
+name = "RollbackNotAvailable"
+fix_suggestion = "No recent upgrade exists to roll back, or the rollback window (34,560 ledgers) has elapsed. Perform a forward upgrade instead."
+
+[[contract_errors]]
+contract = "error-registry"
+code = 10
+name = "MaxCapacityReached"
+fix_suggestion = "The per-code index for this error_code is full (MAX_CODE_INDEX_SIZE). Run cleanup_expired_errors to reclaim expired records, then retry."

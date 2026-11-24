@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 3,
+    "address": 4,
     "nonce": 0
   },
   "auth": [
@@ -12,28 +12,10 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "create_auction",
+              "function_name": "initialize",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "symbol": "bad_rep"
-                },
-                {
-                  "u64": 3600
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000000
-                  }
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 500000
-                  }
                 }
               ]
             }
@@ -42,6 +24,82 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "create_auction",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "symbol": "bad_rep"
+                },
+                {
+                  "map": [
+                    {
+                      "key": {
+                        "symbol": "bond"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 500000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "duration_secs"
+                      },
+                      "val": {
+                        "u64": 3600
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "max_price"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 0
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reserve_price"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 1000000
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reveal_duration_secs"
+                      },
+                      "val": {
+                        "u64": 3600
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [],
     []
   ],
   "ledger": {
@@ -93,6 +151,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "bid_count"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "config"
                       },
                       "val": {
@@ -118,6 +184,17 @@
                           },
                           {
                             "key": {
+                              "symbol": "max_price"
+                            },
+                            "val": {
+                              "i128": {
+                                "hi": 0,
+                                "lo": 100000000000000000
+                              }
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "reserve_price"
                             },
                             "val": {
@@ -125,6 +202,14 @@
                                 "hi": 0,
                                 "lo": 1000000
                               }
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "reveal_duration_secs"
+                            },
+                            "val": {
+                              "u64": 3600
                             }
                           }
                         ]
@@ -143,7 +228,7 @@
                         "symbol": "creator"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                       }
                     },
                     {
@@ -165,6 +250,22 @@
                     {
                       "key": {
                         "symbol": "phase"
+                      },
+                      "val": {
+                        "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "reveal_deadline"
+                      },
+                      "val": {
+                        "u64": 7200
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "revealed_count"
                       },
                       "val": {
                         "u32": 0
@@ -254,7 +355,44 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Admin"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Paused"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Version"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "string": "1.0.0"
+                        }
+                      }
+                    ]
                   }
                 }
               }
@@ -286,6 +424,39 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 801925984706572462
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5541220902715666415
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5541220902715666415
                   }
                 },
                 "durability": "temporary",

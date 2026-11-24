@@ -1,16 +1,12 @@
 // src/hooks/useNetworkStats.ts
 import { useEffect, useState, useCallback } from 'react';
 import { getStats } from '../services/api';
-import type { TimePoint } from '../types/api';
+import type { NetworkStats } from '../types/api';
 
-export interface NetworkStats {
-  totalAgents: number;
-  totalTasks: number;
-  totalXLMTransacted: number;
-  uptimePercent: number;
-  tasksLast24h?: TimePoint[];
-  xlmLast24h?: TimePoint[];
-}
+export type { NetworkStats };
+
+/** Same cadence as wallet balance polling, so new tasks show up within ~30s. */
+export const NETWORK_STATS_REFRESH_MS = 30_000;
 
 export const useNetworkStats = () => {
   const [data, setData] = useState<NetworkStats | null>(null);
@@ -34,8 +30,12 @@ export const useNetworkStats = () => {
     fetch();
     const onFocus = () => fetch();
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    const interval = setInterval(() => void fetch(), NETWORK_STATS_REFRESH_MS);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(interval);
+    };
   }, [fetch]);
 
-  return { data, loading, error };
+  return { data, loading, error, retry: fetch };
 };

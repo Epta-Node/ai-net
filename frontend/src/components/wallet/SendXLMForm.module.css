@@ -1,7 +1,7 @@
 .container {
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
-  border-radius: 12px;
+  border-radius: var(--radius-xl);
   padding: 24px;
   margin-bottom: 24px;
 }
@@ -35,7 +35,7 @@
   width: 100%;
   padding: 10px 12px;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   color: var(--text-primary);
   background: var(--bg-secondary);
@@ -45,8 +45,8 @@
 
 .input:focus {
   outline: none;
-  border-color: #6366f1;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  border-color: var(--accent-secondary);
+  box-shadow: 0 0 0 3px var(--accent-surface);
 }
 
 .input:disabled {
@@ -55,16 +55,16 @@
 }
 
 .inputError {
-  border-color: #ef4444;
+  border-color: var(--status-danger);
 }
 
 .inputError:focus {
-  border-color: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+  border-color: var(--status-danger);
+  box-shadow: 0 0 0 3px var(--status-danger-surface);
 }
 
 .error {
-  color: #dc2626;
+  color: var(--status-danger);
   font-size: 0.8125rem;
   margin: 4px 0 0;
 }
@@ -78,10 +78,10 @@
 .sendButton {
   width: 100%;
   padding: 10px 16px;
-  background: #6366f1;
-  color: #ffffff;
+  background: var(--accent-secondary);
+  color: var(--text-inverse);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
@@ -89,7 +89,17 @@
 }
 
 .sendButton:hover:not(:disabled) {
-  background: #4f46e5;
+  background: var(--accent-secondary-hover);
+}
+
+.sendButton:active:not(:disabled) {
+  background: #4338ca;
+  transform: scale(0.97);
+}
+
+.sendButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .sendButton:disabled {
@@ -100,10 +110,10 @@
 .successMessage {
   margin-top: 16px;
   padding: 12px;
-  background: #f0fdf4;
-  border: 1px solid #86efac;
-  border-radius: 8px;
-  color: #166534;
+  background: var(--status-success-surface-muted);
+  border: 1px solid var(--status-success-border);
+  border-radius: var(--radius-lg);
+  color: var(--status-success-text);
   font-size: 0.875rem;
 }
 
@@ -114,26 +124,41 @@
 }
 
 .txHash code {
-  background: #dcfce7;
+  background: var(--status-success-surface-strong);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .dismissButton {
   margin-top: 8px;
   padding: 6px 12px;
-  background: #16a34a;
-  color: #ffffff;
+  background: var(--status-success-strong);
+  color: var(--text-inverse);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 0.8125rem;
   cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.dismissButton:hover {
+  background: #15803d;
+}
+
+.dismissButton:active {
+  background: #166534;
+  transform: scale(0.96);
+}
+
+.dismissButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.5);
+  background: var(--surface-glass);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -142,11 +167,11 @@
 
 .modal {
   background: var(--bg-primary);
-  border-radius: 16px;
+  border-radius: var(--radius-2xl);
   padding: 24px;
   max-width: 440px;
   width: 90%;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .modalTitle {
@@ -199,7 +224,7 @@
   background: var(--bg-secondary);
   color: var(--text-secondary);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   cursor: pointer;
   transition: background 0.15s;
@@ -209,12 +234,22 @@
   background: var(--border-color);
 }
 
+.cancelButton:active:not(:disabled) {
+  background: var(--bg-surface-alt, #161b24);
+  transform: scale(0.96);
+}
+
+.cancelButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
+}
+
 .confirmButton {
   padding: 8px 16px;
-  background: #6366f1;
-  color: #ffffff;
+  background: var(--accent-secondary);
+  color: var(--text-inverse);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   font-size: 0.875rem;
   font-weight: 500;
   cursor: pointer;
@@ -222,7 +257,17 @@
 }
 
 .confirmButton:hover:not(:disabled) {
-  background: #4f46e5;
+  background: var(--accent-secondary-hover);
+}
+
+.confirmButton:active:not(:disabled) {
+  background: #4338ca;
+  transform: scale(0.97);
+}
+
+.confirmButton:focus-visible {
+  outline: 2px solid var(--accent, #38bdf8);
+  outline-offset: 2px;
 }
 
 .confirmButton:disabled,

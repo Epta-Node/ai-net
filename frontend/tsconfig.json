@@ -22,12 +22,7 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@components/*": ["src/components/*"],
-      "@pages/*": ["src/pages/*"],
-      "@hooks/*": ["src/hooks/*"],
       "@services/*": ["src/services/*"],
-      "@types/*": ["src/types/*"],
-      "@context/*": ["src/context/*"],
       "@utils/*": ["src/utils/*"]
     }
   },

@@ -1,5 +1,5 @@
 import { VeniceClient } from './client';
-import { CircuitBreaker } from '../../venice/circuitBreaker';
+import { CircuitBreaker } from './circuitBreaker';
 
 const mockFetch = jest.fn();
 (global as any).fetch = mockFetch;

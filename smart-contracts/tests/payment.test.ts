@@ -18,6 +18,10 @@ import {
   EscrowAlreadySettledError,
   xlmToStroops,
   stroopsToXlm,
+  lockMilestoneEscrow,
+  releaseMilestone,
+  getMilestoneStatus,
+  cancelMilestoneEscrow,
 } from '../src/payment/payment';
 
 jest.setTimeout(180000); // 3 minutes timeout for testnet network operations
@@ -572,5 +576,224 @@ describeIntegration('Stellar Payment Layer Escrow Integration Tests', () => {
         releasePayment(coordinatorKeypair, agentKeypair.publicKey(), refundTaskId)
       ).rejects.toThrow(EscrowAlreadySettledError);
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestone-based partial escrow release (issue #841)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('Milestone Escrow', () => {
+  const coordinatorKeypair = Keypair.random();
+  const agent1 = Keypair.random().publicKey();
+  const agent2 = Keypair.random().publicKey();
+  const agent3 = Keypair.random().publicKey();
+
+  const milestoneTaskId = 'ms-task-001';
+  const milestones = [
+    { milestoneId: 'm1', agentAddress: agent1, amountXLM: 1.0 },
+    { milestoneId: 'm2', agentAddress: agent2, amountXLM: 1.0 },
+    { milestoneId: 'm3', agentAddress: agent3, amountXLM: 1.0 },
+  ];
+
+  function setupMocksForMilestone() {
+    const fakeAccount = new Account(coordinatorKeypair.publicKey(), '100');
+    mockLoadAccount.mockResolvedValue(fakeAccount);
+    mockFetchBaseFee.mockResolvedValue(100);
+    mockSubmitTransaction.mockResolvedValue({ hash: 'ms-tx-hash-' + Math.random() });
+    mockTransactionsCall.mockResolvedValue({
+      records: [
+        {
+          memo_type: 'text',
+          memo: milestoneTaskId,
+          envelope_xdr: (() => {
+            const dummyAccount = new Account(coordinatorKeypair.publicKey(), '99');
+            const tx = new TransactionBuilder(dummyAccount, {
+              fee: '100',
+              networkPassphrase: Networks.TESTNET,
+            })
+              .addOperation(
+                Operation.createClaimableBalance({
+                  asset: Asset.native(),
+                  amount: '3.0000000',
+                  claimants: [
+                    new Claimant(coordinatorKeypair.publicKey(), Claimant.predicateUnconditional()),
+                  ],
+                })
+              )
+              .addMemo(Memo.text(milestoneTaskId))
+              .setTimeout(180)
+              .build();
+            tx.sign(coordinatorKeypair);
+            return tx.toEnvelope().toXDR('base64');
+          })(),
+        },
+      ],
+    });
+    mockClaimableBalanceCall.mockResolvedValue({ amount: '3.0000000' });
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    setupMocksForMilestone();
+  });
+
+  it('lockMilestoneEscrow locks the total of all milestone amounts', async () => {
+    const txHash = await lockMilestoneEscrow(coordinatorKeypair, milestoneTaskId, milestones);
+    expect(typeof txHash).toBe('string');
+    expect(txHash.length).toBeGreaterThan(0);
+
+    const status = getMilestoneStatus(milestoneTaskId);
+    expect(status).toHaveLength(3);
+    expect(status.every((m) => m.releasedAt === undefined)).toBe(true);
+  });
+
+  it('releaseMilestone releases only the specified milestone', async () => {
+    await lockMilestoneEscrow(coordinatorKeypair, milestoneTaskId + '-2', [
+      { milestoneId: 'm1', agentAddress: agent1, amountXLM: 1.0 },
+      { milestoneId: 'm2', agentAddress: agent2, amountXLM: 1.0 },
+      { milestoneId: 'm3', agentAddress: agent3, amountXLM: 1.0 },
+    ]);
+
+    // Update mock to return new taskId memo
+    mockTransactionsCall.mockResolvedValue({
+      records: [
+        {
+          memo_type: 'text',
+          memo: milestoneTaskId + '-2',
+          envelope_xdr: (() => {
+            const dummyAccount = new Account(coordinatorKeypair.publicKey(), '99');
+            const tx = new TransactionBuilder(dummyAccount, {
+              fee: '100',
+              networkPassphrase: Networks.TESTNET,
+            })
+              .addOperation(
+                Operation.createClaimableBalance({
+                  asset: Asset.native(),
+                  amount: '3.0000000',
+                  claimants: [
+                    new Claimant(coordinatorKeypair.publicKey(), Claimant.predicateUnconditional()),
+                  ],
+                })
+              )
+              .addMemo(Memo.text(milestoneTaskId + '-2'))
+              .setTimeout(180)
+              .build();
+            tx.sign(coordinatorKeypair);
+            return tx.toEnvelope().toXDR('base64');
+          })(),
+        },
+      ],
+    });
+
+    const { alreadyReleased } = await releaseMilestone(
+      coordinatorKeypair,
+      milestoneTaskId + '-2',
+      'm1'
+    );
+    expect(alreadyReleased).toBe(false);
+
+    const status = getMilestoneStatus(milestoneTaskId + '-2');
+    const m1 = status.find((m) => m.milestoneId === 'm1')!;
+    const m2 = status.find((m) => m.milestoneId === 'm2')!;
+    expect(m1.releasedAt).toBeDefined();
+    expect(m2.releasedAt).toBeUndefined();
+  });
+
+  it('releaseMilestone is idempotent — second call returns alreadyReleased=true', async () => {
+    const taskId = milestoneTaskId + '-idem';
+    await lockMilestoneEscrow(coordinatorKeypair, taskId, [
+      { milestoneId: 'm1', agentAddress: agent1, amountXLM: 1.0 },
+    ]);
+
+    mockTransactionsCall.mockResolvedValue({
+      records: [
+        {
+          memo_type: 'text',
+          memo: taskId,
+          envelope_xdr: (() => {
+            const dummyAccount = new Account(coordinatorKeypair.publicKey(), '99');
+            const tx = new TransactionBuilder(dummyAccount, {
+              fee: '100',
+              networkPassphrase: Networks.TESTNET,
+            })
+              .addOperation(
+                Operation.createClaimableBalance({
+                  asset: Asset.native(),
+                  amount: '1.0000000',
+                  claimants: [
+                    new Claimant(coordinatorKeypair.publicKey(), Claimant.predicateUnconditional()),
+                  ],
+                })
+              )
+              .addMemo(Memo.text(taskId))
+              .setTimeout(180)
+              .build();
+            tx.sign(coordinatorKeypair);
+            return tx.toEnvelope().toXDR('base64');
+          })(),
+        },
+      ],
+    });
+
+    await releaseMilestone(coordinatorKeypair, taskId, 'm1');
+    const second = await releaseMilestone(coordinatorKeypair, taskId, 'm1');
+    expect(second.alreadyReleased).toBe(true);
+  });
+
+  it('lockMilestoneEscrow rejects duplicate milestoneIds', async () => {
+    await expect(
+      lockMilestoneEscrow(coordinatorKeypair, 'dup-task', [
+        { milestoneId: 'same', agentAddress: agent1, amountXLM: 1.0 },
+        { milestoneId: 'same', agentAddress: agent2, amountXLM: 1.0 },
+      ])
+    ).rejects.toThrow('Duplicate milestoneIds');
+  });
+
+  it('getMilestoneStatus returns empty array for unknown taskId', () => {
+    expect(getMilestoneStatus('nonexistent-task')).toEqual([]);
+  });
+
+  it('cancelMilestoneEscrow refunds unreleased milestones', async () => {
+    const cancelTaskId = milestoneTaskId + '-cancel';
+    await lockMilestoneEscrow(coordinatorKeypair, cancelTaskId, [
+      { milestoneId: 'm1', agentAddress: agent1, amountXLM: 1.5 },
+      { milestoneId: 'm2', agentAddress: agent2, amountXLM: 1.5 },
+    ]);
+
+    mockTransactionsCall.mockResolvedValue({
+      records: [
+        {
+          memo_type: 'text',
+          memo: cancelTaskId,
+          envelope_xdr: (() => {
+            const dummyAccount = new Account(coordinatorKeypair.publicKey(), '99');
+            const tx = new TransactionBuilder(dummyAccount, {
+              fee: '100',
+              networkPassphrase: Networks.TESTNET,
+            })
+              .addOperation(
+                Operation.createClaimableBalance({
+                  asset: Asset.native(),
+                  amount: '3.0000000',
+                  claimants: [
+                    new Claimant(coordinatorKeypair.publicKey(), Claimant.predicateUnconditional()),
+                  ],
+                })
+              )
+              .addMemo(Memo.text(cancelTaskId))
+              .setTimeout(180)
+              .build();
+            tx.sign(coordinatorKeypair);
+            return tx.toEnvelope().toXDR('base64');
+          })(),
+        },
+      ],
+    });
+
+    const refundHash = await cancelMilestoneEscrow(coordinatorKeypair, cancelTaskId);
+    expect(typeof refundHash).toBe('string');
+    // Milestone store entry should be cleared
+    expect(getMilestoneStatus(cancelTaskId)).toEqual([]);
   });
 });

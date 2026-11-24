@@ -114,6 +114,9 @@ smart-contracts/backups/
 2. **Health Checks**: Tests contract responsiveness
 3. **Integrity Validation**: Verifies Wasm file format
 4. **Report Generation**: Creates detailed verification report
+5. **On-chain Checks**: Compares the Wasm hash fetched from the network with the
+   local build and the on-chain admin with the `admin` in the deployment file
+   (needs the `soroban` CLI and `STELLAR_SECRET_KEY`)
 
 ```bash
 # Verify all contracts
@@ -124,7 +127,14 @@ smart-contracts/backups/
 
 # Use custom deployment file
 ./scripts/verify.sh --deployment-file custom.json
+
+# Release check: exit non-zero on any mismatch or skipped check, and print
+# the report as JSON on stdout (human-readable logs go to stderr)
+./scripts/verify.sh --network mainnet --strict --json
 ```
+
+`./scripts/test-verify.sh` checks that `--strict` rejects a mismatched Wasm hash.
+Verification is **required after every mainnet deploy**.
 
 ## Deployment Metadata Format
 

@@ -2,7 +2,7 @@ import { http, HttpResponse } from 'msw'
 
 export const handlers = [
   http.get('/api/agents', () => {
-    return HttpResponse.json([
+    return HttpResponse.json({ data: { items: [
       {
         id: 'agent-1',
         name: 'Research Specialist',
@@ -27,7 +27,7 @@ export const handlers = [
         reputation: 4.2,
         status: 'inactive',
       },
-    ])
+    ], pagination: { limit: 100, nextCursor: null, hasNextPage: false } } })
   }),
 
   http.post('/api/tasks', async () => {
@@ -51,6 +51,16 @@ export const handlers = [
       ],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+    })
+  }),
+
+  // Dashboard KPIs. Mocks the stats endpoint for dev/test.
+  http.get('/api/stats/stats', () => {
+    return HttpResponse.json({
+      totalAgents: 12,
+      totalTasks: 48,
+      totalXLMTransacted: 156.75,
+      uptimePercent: 99.95,
     })
   }),
 ]

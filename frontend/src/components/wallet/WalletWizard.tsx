@@ -9,7 +9,7 @@ import styles from './WalletWizard.module.css'
 
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
-  const { balance } = useWalletBalance(publicKey)
+  const { balance, balances } = useWalletBalance(publicKey)
   const { currentStep, nextStep, prevStep } = useOnboarding(4)
 
   const [connecting, setConnecting] = useState(false)
@@ -49,7 +49,7 @@ export const WalletWizard: React.FC = () => {
             We use the Stellar network for fast, secure, and low-cost transactions.
           </p>
           <div className={styles.illustration}>
-            <Wallet size={64} color="var(--primary, #3b82f6)" />
+            <Wallet size={64} color="var(--primary)" />
           </div>
         </div>
         <div className={styles.buttonGroup}>
@@ -75,7 +75,7 @@ export const WalletWizard: React.FC = () => {
               </div>
             ) : (
               <div>
-                <Download size={48} color="var(--text-muted, #6b7280)" />
+                <Download size={48} color="var(--text-muted, var(--text-muted))" />
                 <p style={{ marginTop: '1rem' }}>
                   Freighter extension not detected.{' '}
                   <a href="https://freighter.app" target="_blank" rel="noreferrer" className={styles.link}>
@@ -148,8 +148,23 @@ export const WalletWizard: React.FC = () => {
           
           <div className={styles.illustration}>
             <div className={styles.walletInfo}>
-              <p>Current Balance: <strong>{balance ? parseFloat(balance).toFixed(2) : '0.00'} XLM</strong></p>
+              <p>Current Balance: <strong>{balance ? parseFloat(balance).toFixed(7) : '0.0000000'} XLM</strong></p>
+              {balances.length > 0 && (
+                <div className={styles.balanceChips}>
+                  {balances.map((entry) => {
+                    const code = entry.asset_type === 'native' ? 'XLM' : (entry.asset_code ?? '')
+                    return (
+                      <span key={code} className={styles.balanceChip}>
+                        {new Intl.NumberFormat(undefined, { maximumFractionDigits: 7 }).format(parseFloat(entry.balance) || 0)} {code}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
+            <p className={styles.stepDescription} style={{ marginBottom: '1rem' }}>
+              Once funded, you can send XLM to other agents from your wallet.
+            </p>
             <a 
               href={`https://laboratory.stellar.org/#create-account?network=test`}
               target="_blank" 

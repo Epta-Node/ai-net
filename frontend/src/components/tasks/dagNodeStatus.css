@@ -1,0 +1,31 @@
+/* Live DAG node status rings and edge states (#818). Colours come from tokens.css. */
+.dag-node[data-state='pending'] { outline: 2px dashed var(--text-muted); }
+.dag-node[data-state='running'] {
+  outline: 2px solid var(--accent-info);
+  animation: dag-node-pulse 1.2s ease-in-out infinite;
+}
+.dag-node[data-state='completed'] { outline: 2px solid var(--status-success); }
+.dag-node[data-state='failed'] { outline: 2px solid var(--status-danger); }
+.dag-node[data-state='skipped'] {
+  background: repeating-linear-gradient(135deg, var(--surface-muted) 0 6px, transparent 6px 12px);
+  color: var(--text-muted);
+}
+.dag-edge[data-state='completed'] { stroke: var(--status-success); }
+.dag-edge[data-state='failed'] { stroke: var(--status-danger); }
+.dag-edge[data-state='active'] {
+  stroke-dasharray: 4 8;
+  animation: dag-edge-travel 0.8s linear infinite;
+}
+
+@keyframes dag-node-pulse {
+  0%, 100% { outline-offset: 0; }
+  50% { outline-offset: 4px; }
+}
+@keyframes dag-edge-travel {
+  to { stroke-dashoffset: -12; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dag-node[data-state='running'],
+  .dag-edge[data-state='active'] { animation: none; }
+}

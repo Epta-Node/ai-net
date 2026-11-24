@@ -7,10 +7,21 @@
 
 import type { QualityScore } from "../services/qualityScorer.types";
 
-export type TaskStatus = "queued" | "running" | "completed" | "cancelled" | "failed";
+export type TaskStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  /**
+   * Terminal: every DAG node succeeded but an escrow release failed after the
+   * work was done (#852). Kept distinct from `failed` so operators and
+   * reconciliation can tell payment faults from agent faults.
+   */
+  | "payment_failed";
 
 /** Node-level statuses used by the coordinator during DAG execution. */
-export type NodeStatus = "pending" | "running" | "completed" | "failed";
+export type NodeStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 
 export interface DAGNode {
   nodeId: string;
@@ -37,6 +48,8 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   requestId?: string;
+  /** Trace identifier (correlationId) propagated from the triggering request. */
+  traceId?: string;
 }
 
 /** Events emitted by the coordinator */
@@ -47,7 +60,12 @@ export type DAGEventType =
   | "payment_locked"
   | "payment_released"
   | "task_completed"
-  | "task_failed";
+  | "task_failed"
+  /** A job exhausted its retry budget and was parked in the DLQ (issue #802). */
+  | "job.dead_lettered"
+  | "AgentFailedOver"
+  | "AgentRecovered"
+  | "AgentMarkedOffline";
 
 export interface DAGEvent {
   type: DAGEventType;

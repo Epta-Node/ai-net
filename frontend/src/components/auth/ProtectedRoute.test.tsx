@@ -104,6 +104,14 @@ function renderWithAuth({
             }
           />
           <Route
+            path="/tasks/history"
+            element={
+              <ProtectedRoute redirectTo={redirectTo}>
+                <div data-testid="task-history-content">Task History</div>
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/tasks/:id"
             element={
               <ProtectedRoute redirectTo={redirectTo}>
@@ -220,6 +228,11 @@ describe('ProtectedRoute — authenticated access', () => {
   it('renders /tasks/new content when authenticated', () => {
     renderWithAuth({ initialPath: '/tasks/new', walletConnected: true });
     expect(screen.getByTestId('new-task-content')).toBeInTheDocument();
+  });
+
+  it('renders /tasks/history content when authenticated', () => {
+    renderWithAuth({ initialPath: '/tasks/history', walletConnected: true });
+    expect(screen.getByTestId('task-history-content')).toBeInTheDocument();
   });
 
   it('renders /tasks/:id content when authenticated', () => {

@@ -4,6 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import Hero from './Hero';
 import { useTypingAnimation } from '../../hooks/useTypingAnimation';
 import { useParticles } from '../../hooks/useParticles';
+import { vi, describe, beforeEach, afterEach, it, expect } from 'vitest';
+import type { Mock } from 'vitest';
 
 vi.mock('../../hooks/useTypingAnimation');
 vi.mock('../../hooks/useParticles');
@@ -34,7 +36,9 @@ describe('Hero Component', () => {
 
   it('renders typing animation text', () => {
     renderComponent();
-    expect(screen.getByText('Research')).toBeInTheDocument();
+    expect(screen.getByText((_, element) => {
+      return element?.textContent?.includes('Research') ?? false;
+    })).toBeInTheDocument();
   });
 
   it('renders canvas when prefersReducedMotion is false', () => {
@@ -54,7 +58,7 @@ describe('Hero Component', () => {
     expect(canvas).not.toBeInTheDocument();
     
     // Fallback div should be rendered (we check by class or element type if specific)
-    const fallbackDiv = container.querySelector('.staticGradient');
-    expect(fallbackDiv).toBeInTheDocument();
+    const fallbackDiv = container.querySelector('div[class*="staticGradient"]');
+    expect(fallbackDiv).toBeTruthy();
   });
 });

@@ -9,5 +9,18 @@ target/
 
 coverage/
 .DS_Store
+
+# Rust build artifacts
+**/target/
 playwright-report/
+playwright-report-visual/
 test-results/
+
+# Testnet contract farm output (deploy + gas + report artifacts)
+smart-contracts/testnet-farm-output/
+
+# Property test snapshots (auto-generated, large fixtures)
+**/test_snapshots/property_tests/
+
+# Generated Wasm size report (baseline lives in smart-contracts/wasm-sizes.json)
+smart-contracts/wasm-size-report.md

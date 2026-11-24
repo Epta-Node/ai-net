@@ -184,6 +184,96 @@ describe('TracingService', () => {
   });
 });
 
+// ── Sampling & OTLP export (#856) ─────────────────────────────────────────────
+
+describe('TracingService sampling', () => {
+  const originalRate = process.env.OTEL_SAMPLING_RATE;
+
+  afterEach(() => {
+    if (originalRate === undefined) delete process.env.OTEL_SAMPLING_RATE;
+    else process.env.OTEL_SAMPLING_RATE = originalRate;
+  });
+
+  it('at rate 0, successful spans never reach the trace store', () => {
+    process.env.OTEL_SAMPLING_RATE = '0';
+    const svc = makeService();
+    const span = svc.startSpan('corr-s0', 'backend', 'http_request');
+    svc.endSpan(span.spanId, 'completed');
+
+    expect(svc.getTrace('corr-s0')).toBeUndefined();
+    expect(svc.size).toBe(0);
+  });
+
+  it('at rate 0, failed spans are promoted into the trace store on endSpan', () => {
+    process.env.OTEL_SAMPLING_RATE = '0';
+    const svc = makeService();
+    const span = svc.startSpan('corr-s0f', 'backend', 'http_request');
+    expect(svc.getTrace('corr-s0f')).toBeUndefined(); // dropped at start
+
+    svc.endSpan(span.spanId, 'failed', { error: 'boom' });
+
+    const trace = svc.getTrace('corr-s0f')!;
+    expect(trace).toBeDefined();
+    expect(trace.spans).toHaveLength(1);
+    expect(trace.spans[0].status).toBe('failed');
+    expect(trace.spans[0].metadata?.error).toBe('boom');
+  });
+
+  it('at rate 1, every span is recorded', () => {
+    process.env.OTEL_SAMPLING_RATE = '1';
+    const svc = makeService();
+    const span = svc.startSpan('corr-s1', 'backend', 'op');
+    expect(svc.getTrace('corr-s1')).toBeDefined();
+    svc.endSpan(span.spanId, 'completed');
+    expect(svc.getTrace('corr-s1')!.spans).toHaveLength(1);
+  });
+
+  it('does not export when OTEL_EXPORTER_ENDPOINT is unset', async () => {
+    delete process.env.OTEL_EXPORTER_ENDPOINT;
+    const svc = makeService();
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+    const span = svc.startSpan('corr-noexport', 'backend', 'op');
+    svc.endSpan(span.spanId, 'completed');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('exports an OTLP/HTTP JSON payload to the configured endpoint', async () => {
+    const prev = process.env.OTEL_EXPORTER_ENDPOINT;
+    process.env.OTEL_EXPORTER_ENDPOINT = 'http://127.0.0.1:4318';
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{}', { status: 200 }));
+
+    try {
+      const svc = makeService();
+      const span = svc.startSpan(
+        '12345678-1234-4234-8234-123456789abc',
+        'backend',
+        'http_request',
+        { method: 'GET', requestId: 'req-1' }
+      );
+      svc.endSpan(span.spanId, 'completed', { statusCode: 200 });
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe('http://127.0.0.1:4318/v1/traces');
+      expect(init?.method).toBe('POST');
+
+      const body = JSON.parse(String(init?.body));
+      const otlpSpan = body.resourceSpans[0].scopeSpans[0].spans[0];
+      expect(otlpSpan.traceId).toBe('12345678123442348234123456789abc');
+      expect(otlpSpan.spanId).toHaveLength(16);
+      expect(otlpSpan.name).toBe('http_request');
+      expect(otlpSpan.status.code).toBe(1);
+    } finally {
+      fetchSpy.mockRestore();
+      if (prev === undefined) delete process.env.OTEL_EXPORTER_ENDPOINT;
+      else process.env.OTEL_EXPORTER_ENDPOINT = prev;
+    }
+  });
+});
+
 // ── requestId middleware tests ────────────────────────────────────────────────
 
 describe('requestId middleware', () => {
