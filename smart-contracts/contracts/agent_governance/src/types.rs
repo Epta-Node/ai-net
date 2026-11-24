@@ -208,6 +208,55 @@ pub struct QueuedProposal {
     pub can_execute_at: u64,
 }
 
+/// Admin role change proposal for multi-admin governance (issue #940).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposal {
+    /// Monotonic proposal identifier.
+    pub id: u64,
+    /// Address that proposed the change.
+    pub proposer: Address,
+    /// Admin to add or remove.
+    pub target_admin: Address,
+    /// True if adding an admin, false if removing.
+    pub is_add: bool,
+    /// Timestamp when the proposal was created.
+    pub created_at: u64,
+    /// Admins who have approved this proposal.
+    pub approvals: Vec<Address>,
+    /// Whether the proposal has been executed.
+    pub executed: bool,
+}
+
+/// Event emitted when an admin role change is proposed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminChangeProposedEvent {
+    pub proposal_id: u64,
+    pub proposer: Address,
+    pub target_admin: Address,
+    pub is_add: bool,
+}
+
+/// Event emitted when an admin approves a role change.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminChangeApprovedEvent {
+    pub proposal_id: u64,
+    pub approver: Address,
+    pub approval_count: u32,
+    pub required: u32,
+}
+
+/// Event emitted when an admin role change is executed.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminChangeExecutedEvent {
+    pub proposal_id: u64,
+    pub target_admin: Address,
+    pub is_add: bool,
+}
+
 /// On-chain governance proposal record.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -265,6 +314,12 @@ pub struct VoteRecord {
 pub enum DataKey {
     /// The governance admin address.
     Admin,
+    /// Set of admin addresses (for multi-admin configuration).
+    Admins,
+    /// Admin change proposals requiring majority vote.
+    AdminProposal(u64),
+    /// Counter for admin proposals.
+    AdminProposalCount,
     /// Aggregate voting power of every registered agent.
     TotalPower,
     /// Monotonic proposal counter.
