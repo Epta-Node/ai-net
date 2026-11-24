@@ -47,6 +47,15 @@ import {
   type JobQueue,
 } from "../queue";
 import { createAdminQueueRouter } from "./routes/admin";
+import { traceMiddleware } from "./middleware/traceMiddleware";
+import {
+  walletTaskRateLimitMiddleware,
+  walletApiRateLimitMiddleware,
+} from "./middleware/walletRateLimit";
+import { adminAuthMiddleware } from "./middleware/adminAuth";
+import { createAdminAuthRouter } from "./routes/adminAuth";
+import { walletQuotaRouter, adminQuotaRouter } from "./routes/walletQuota";
+import { adminAuditRouter } from "./routes/adminAudit";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
@@ -117,6 +126,7 @@ export function createApp(opts: AppOptions = {}): {
   app.use(createCorsMiddleware());
   app.use(requestId);
   app.use(requestLogger);
+  app.use(traceMiddleware);
   app.use(versioningMiddleware);
 
   // ── Response compression ────────────────────────────────────────────────────
@@ -174,7 +184,7 @@ export function createApp(opts: AppOptions = {}): {
   const v2TasksRouter = createV2TasksRouter(dispatch, releasePayment, jobQueue);
   
   // Version-specific task routing based on negotiated API version
-  app.use("/api/tasks", (req, res, next) => {
+  app.use("/api/tasks", walletTaskRateLimitMiddleware, (req, res, next) => {
     const apiVersion = res.locals.apiVersion || "1.0";
     
     // Route to version-specific handler based on negotiated version
@@ -186,9 +196,17 @@ export function createApp(opts: AppOptions = {}): {
     }
   });
 
-  // ── Admin Queue routes ─────────────────────────────────────────────────────
-  app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
-  app.use("/api/admin", createAdminQueueRouter(jobQueue));
+  // ── Wallet quota routes ────────────────────────────────────────────────────
+  app.use("/api/wallet", walletApiRateLimitMiddleware, walletQuotaRouter);
+
+  // ── Admin auth routes (public — no JWT required) ───────────────────────────
+  app.use("/api/admin/auth", createAdminAuthRouter());
+
+  // ── Admin Queue routes (JWT protected) ────────────────────────────────────
+  app.use("/api/admin/queue", adminAuthMiddleware, createAdminQueueRouter(jobQueue));
+  app.use("/api/admin/quota", adminAuthMiddleware, adminQuotaRouter);
+  app.use("/api/admin/audit", adminAuthMiddleware, adminAuditRouter);
+  app.use("/api/admin", adminAuthMiddleware, createAdminQueueRouter(jobQueue));
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
