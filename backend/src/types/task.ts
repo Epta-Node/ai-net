@@ -47,6 +47,7 @@ export interface Task {
   dag: DAGNode[];
   createdAt: string;
   updatedAt: string;
+  idempotencyKey?: string;
   requestId?: string;
   /** Trace identifier (correlationId) propagated from the triggering request. */
   traceId?: string;

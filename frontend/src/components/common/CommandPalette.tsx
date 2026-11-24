@@ -195,6 +195,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   }, [safeIndex, isOpen, filtered.length]);
 
   useEffect(() => {
+    if (!isOpen || filtered.length === 0) return;
+    const activeEl = document.getElementById(`command-palette-option-${safeIndex}`);
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }, [safeIndex, isOpen, filtered.length]);
+
+  useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {

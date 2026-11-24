@@ -129,7 +129,13 @@ const envSchema = z.object({
   RATE_LIMIT_AUTHED_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_AUTHED_MAX_REQUESTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(10),
+  /**
+   * Comma-separated IPs exempt from admin rate limiting (trusted operators or
+   * internal proxies). Empty by default. IPv4-mapped IPv6 addresses are
+   * normalised, so `127.0.0.1` also matches `::ffff:127.0.0.1`.
+   */
+  ADMIN_IP_ALLOWLIST: z.string().default(''),
   DAILY_TASK_LIMIT_PER_WALLET: z.coerce.number().int().min(0).default(100),
 
   // ── Per-wallet abuse-control quota (issue #803) ─────────────────────────────
@@ -369,8 +375,8 @@ const envSchema = z.object({
   // ── Database observability (#807) ───────────────────────────────────────────
   /** Comma-separated query-latency histogram bounds in milliseconds. Default: 1,5,10,50,100,500,1000 */
   DB_LATENCY_BUCKETS: z.string().optional(),
-  /** Statements at or above this duration are logged as `slow_query`. Default: 200 */
-  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(200),
+  /** Statements at or above this duration are logged as `slow_query`, with their SQL text. Default: 100 (#923) */
+  SLOW_QUERY_THRESHOLD_MS: z.coerce.number().int().positive().default(100),
 
   // ── Agent ownership proof (#557, #558) ───────────────────────────────────────
   /**
@@ -415,7 +421,7 @@ const envSchema = z.object({
   /** Ceiling for a single job retry delay, in ms. */
   JOB_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(300_000),
   /** Attempts before a job is moved to the dead-letter queue. */
-  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(3),
+  JOB_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
 });
 
 export type RawConfig = z.infer<typeof envSchema>;

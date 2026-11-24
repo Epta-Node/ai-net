@@ -5,6 +5,7 @@ declare namespace Express {
     requestId?: string;
     /** End-to-end trace ID, propagated via X-Trace-Id. */
     traceId?: string;
+    idempotencyKey?: string;
     /** Backward-compatible alias for traceId. */
     correlationId?: string;
   }

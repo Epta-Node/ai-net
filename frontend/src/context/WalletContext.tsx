@@ -1,5 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Keypair, Networks, StrKey } from '@stellar/stellar-sdk'
+import i18n from 'i18next'
+import type { ToastType } from './ToastContext'
 import {
   isFreighterAvailable as checkFreighterAvailable,
   isFreighterAuthorized,
@@ -100,6 +102,29 @@ function keypairFromSecret(secret: string): Keypair {
   return Keypair.fromRawEd25519Seed(seed)
 }
 
+/**
+ * Raise a toast for a wallet lifecycle event (#885).
+ *
+ * `WalletProvider` sits *outside* `ToastProvider` in the tree (see App.tsx), so
+ * it cannot call `useToast()`. It goes through the same `app-toast` window
+ * event that `ToastProvider` already listens for (also used by
+ * services/api.ts), which works whatever the provider order is and is a no-op
+ * when no `ToastProvider` is mounted.
+ *
+ * Messages are resolved with `i18n.t` at dispatch time so they follow the
+ * active language.
+ */
+function notifyWalletToast(key: string, type: ToastType, options?: Record<string, unknown>) {
+  if (typeof window === 'undefined') return
+  const message = i18n.t(key, options)
+  window.dispatchEvent(new CustomEvent('app-toast', { detail: { message, type } }))
+}
+
+/** `GABC…WXYZ`: enough of the address to recognise it in a toast. */
+function shortAddress(publicKey: string): string {
+  return publicKey.length > 12 ? `${publicKey.slice(0, 4)}…${publicKey.slice(-4)}` : publicKey
+}
+
 export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<WalletSession | null>(() => readWalletSession())
   const [keypair, setKeypair] = useState<Keypair | null>(null)
@@ -132,6 +157,11 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const disconnect = useCallback(() => {
     clearAllState()
+    // Only a user-initiated disconnect toasts here. Sessions dropped by the
+    // page-load probe stay silent, and the API client's 401 path raises its
+    // own "session expired" warning before dispatching `wallet_disconnected`,
+    // which the listener below handles without toasting.
+    notifyWalletToast('wallet.toast.disconnected', 'info')
     // Announce the teardown for listeners that need to react (route changes,
     // toast notifications). Deliberately dispatched *after* state is cleared
     // so a listener reading the context already sees a disconnected wallet.
@@ -224,6 +254,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setKeypair(null)
       setSession({ publicKey: address, method: 'freighter', network: liveNetwork })
       setFreighterAvailable(true)
+      notifyWalletToast('wallet.toast.connectedFreighter', 'success', {
+        address: shortAddress(address),
+      })
     } catch (err) {
       // A declined popup is an expected outcome, not a failure worth surfacing
       // as an error banner — the user already saw the extension's own prompt.
@@ -235,6 +268,9 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             : 'Failed to connect to Freighter'
       if (!(err instanceof WalletConnectionError && err.isRejection)) {
         setError(message)
+        // Same rule as the banner: a declined popup is not a failure, so it
+        // gets no error toast either.
+        notifyWalletToast('wallet.toast.connectFailed', 'error', { reason: message })
       }
       throw err
     } finally {
@@ -251,6 +287,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           'Manual secret key entry is only available on testnet. Use Freighter instead.',
         )
         setError(err.message)
+        notifyWalletToast('wallet.toast.connectFailed', 'error', { reason: err.message })
         throw err
       }
 
@@ -260,11 +297,17 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const kp = keypairFromSecret(secretKey.trim())
         setKeypair(kp)
         setSession({ publicKey: kp.publicKey(), method: 'secret-key', network: expected })
+        notifyWalletToast('wallet.toast.connectedSecretKey', 'success', {
+          address: shortAddress(kp.publicKey()),
+        })
       } catch {
         // StrKey already produced a precise reason; the UI only needs a stable,
         // translatable headline, so the specific cause is not leaked through.
         const message = 'Invalid secret key'
         setError(message)
+        notifyWalletToast('wallet.toast.connectFailed', 'error', {
+          reason: i18n.t('validation.invalidSecretKey'),
+        })
         // Rethrow so the form can render the message inline — the caller owns
         // the UI, this context only owns the state.
         throw new InvalidKeypairError(message)

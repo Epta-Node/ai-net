@@ -60,7 +60,34 @@ export function createV2TasksRouter(
       (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
+    if (req.idempotencyKey) {
+      const existingTask = createTaskDb(getTaskDb()).findByIdempotencyKey(
+        walletPublicKey,
+        req.idempotencyKey,
+      );
 
+      if (existingTask) {
+        const now = new Date().toISOString();
+        res.status(200).json({
+          data: {
+            taskId: existingTask.id,
+            dagPreview: existingTask.dag,
+            status: existingTask.status,
+          },
+          _meta: {
+            version: "2.0",
+            timestamp: now,
+            requestId: res.locals.requestId || null,
+            apiVersion: res.locals.apiVersion || "2.0",
+          },
+          _links: {
+            self: `/api/tasks/${existingTask.id}`,
+            stream: taskStreamUrl(existingTask.id),
+          },
+        });
+        return;
+      }
+    }
     // Throws a 429 RateLimitError and counts the rejection in the quota metrics
     // when the wallet has spent its DAILY_TASK_LIMIT_PER_WALLET.
     assertDailyTaskQuota(walletPublicKey, {
@@ -79,6 +106,7 @@ export function createV2TasksRouter(
       dag,
       createdAt: now,
       updatedAt: now,
+      idempotencyKey: req.idempotencyKey,
       requestId: res.locals.requestId,
       traceId,
     };

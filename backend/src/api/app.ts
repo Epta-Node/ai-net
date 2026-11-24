@@ -164,6 +164,9 @@ export function createApp(opts: AppOptions = {}): {
   app.set('trust proxy', config.TRUST_PROXY);
   const trustProxy = app.get('trust proxy fn');
 
+  // The version header goes first so that every response carries it, including
+  // the ones the body parser, CORS preflight and rate limiter answer (#922).
+  app.use(versioningMiddleware);
   app.use(express.json());
   app.use((_req, res, next) => {
     if (config.NODE_ENV === 'production') {
@@ -186,7 +189,6 @@ export function createApp(opts: AppOptions = {}): {
   if (config.NODE_ENV !== 'test') {
     app.use(rateLimitMiddleware);
   }
-  app.use(versioningMiddleware);
   app.use(
     readOnlyMiddleware({
       exemptPaths: ['/api/admin', '/api/reconciliation'],
@@ -509,11 +511,15 @@ export function createApp(opts: AppOptions = {}): {
       watchdog.stop();
       metricsService.setWebSocketProbe(null);
       detachStream();
-      if (httpServer.listening) {
-        httpServer.close(callback);
-      } else if (callback) {
-        callback();
-      }
+      // Notify SSE clients (event: close) and give their streams up to 10s to
+      // drain before the HTTP server stops accepting/keeping connections (#901).
+      void taskStreamHub.shutdown().finally(() => {
+        if (httpServer.listening) {
+          httpServer.close(callback);
+        } else if (callback) {
+          callback();
+        }
+      });
       if (costFlushTimer) {
         clearInterval(costFlushTimer);
         try {

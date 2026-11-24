@@ -188,4 +188,141 @@ describe('ThemeContext & Anti-FOUC Synchronization (#392)', () => {
     expect(screen.getByTestId('effective').textContent).toBe('dark')
     expect(document.documentElement.classList.contains('theme-light')).toBe(false)
   })
+
+  describe('persistence edge cases (#874)', () => {
+    test('restores the saved theme after the provider is unmounted and remounted', () => {
+      const first = render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      act(() => {
+        screen.getByTestId('set-light').click()
+      })
+      expect(localStorage.getItem('ainet.theme')).toBe('light')
+
+      // Simulates a page refresh: tear everything down, then mount fresh
+      first.unmount()
+      document.documentElement.className = ''
+
+      render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      expect(screen.getByTestId('mode').textContent).toBe('light')
+      expect(screen.getByTestId('effective').textContent).toBe('light')
+      expect(document.documentElement.classList.contains('theme-light')).toBe(true)
+    })
+
+    test('stored explicit choice wins over the system preference', () => {
+      systemDarkMatches = true
+      localStorage.setItem('ainet.theme', 'light')
+
+      render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      expect(screen.getByTestId('mode').textContent).toBe('light')
+      expect(screen.getByTestId('effective').textContent).toBe('light')
+    })
+
+    test('persists switching back to system mode', () => {
+      localStorage.setItem('ainet.theme', 'dark')
+
+      render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      act(() => {
+        screen.getByTestId('set-system').click()
+      })
+
+      expect(screen.getByTestId('mode').textContent).toBe('system')
+      expect(localStorage.getItem('ainet.theme')).toBe('system')
+    })
+
+    test('falls back to system preference when the stored value is invalid', () => {
+      systemDarkMatches = false
+      localStorage.setItem('ainet.theme', 'solarized')
+
+      render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      expect(screen.getByTestId('mode').textContent).toBe('system')
+      expect(screen.getByTestId('effective').textContent).toBe('light')
+    })
+
+    test('falls back to system preference when reading localStorage throws', () => {
+      systemDarkMatches = false
+      const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new Error('SecurityError')
+      })
+
+      try {
+        render(
+          <ThemeProvider>
+            <TestComponent />
+          </ThemeProvider>
+        )
+
+        expect(screen.getByTestId('mode').textContent).toBe('system')
+        expect(screen.getByTestId('effective').textContent).toBe('light')
+      } finally {
+        getItem.mockRestore()
+      }
+    })
+
+    test('keeps working when writing to localStorage throws', () => {
+      const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new Error('QuotaExceededError')
+      })
+
+      try {
+        render(
+          <ThemeProvider>
+            <TestComponent />
+          </ThemeProvider>
+        )
+
+        act(() => {
+          screen.getByTestId('set-light').click()
+        })
+
+        expect(screen.getByTestId('mode').textContent).toBe('light')
+        expect(document.documentElement.classList.contains('theme-light')).toBe(true)
+      } finally {
+        setItem.mockRestore()
+      }
+    })
+
+    test('ignores storage events for other keys and invalid values', () => {
+      render(
+        <ThemeProvider>
+          <TestComponent />
+        </ThemeProvider>
+      )
+
+      act(() => {
+        window.dispatchEvent(
+          new StorageEvent('storage', { key: 'some.other.key', newValue: 'light' })
+        )
+        window.dispatchEvent(
+          new StorageEvent('storage', { key: 'ainet.theme', newValue: 'solarized' })
+        )
+        window.dispatchEvent(new StorageEvent('storage', { key: 'ainet.theme', newValue: null }))
+      })
+
+      expect(screen.getByTestId('mode').textContent).toBe('system')
+    })
+  })
 })

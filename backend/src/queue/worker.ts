@@ -11,6 +11,7 @@ import {
   type RandomFn,
 } from "./backoff";
 import { DeadLetterQueue } from "./dlq";
+import { recordJobProcessed } from "./metrics";
 
 const logger = createLogger({ component: "job-worker" });
 
@@ -343,8 +344,9 @@ export class JobWorker {
       this.store.updateProgress(job.id, clamped);
       this.onJobProgress?.(job, clamped);
     };
-
+      const startedAt = Date.now();
     try {
+
       const result = await this.handler(job, updateProgress);
 
       const now = new Date().toISOString();
@@ -414,6 +416,7 @@ export class JobWorker {
         this.onJobDeadLetter?.(job, error);
       }
     } finally {
+      recordJobProcessed(Date.now() - startedAt);
       // Completed, failed, retried and thrown jobs all stop heartbeating here;
       // `updateStatus` has already cleared the lease columns on every path that
       // takes the job out of 'active', and a thrown job's lease simply lapses.

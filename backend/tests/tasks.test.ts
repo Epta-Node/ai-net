@@ -82,6 +82,31 @@ describe("POST /api/tasks", () => {
     expect(res.body.error.details.fieldErrors.body.prompt).toBeDefined();
   });
 
+  // One request on purpose: this suite shares a single rate-limit window under
+  // fake timers, so per-field route tests live in the schema unit tests instead.
+  it("returns 400 with a descriptive message for every invalid field at once", async () => {
+    const res = await request(app.httpServer)
+      .post("/api/tasks")
+      .send({
+        prompt: "   ",
+        walletPublicKey: "not-a-wallet",
+        maxBudgetXLM: 0.01,
+        agentPreferences: ["research-agent-v1", "  "],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe("VALIDATION_ERROR");
+    const body = res.body.error.details.fieldErrors.body;
+    expect(body.prompt).toContain("Prompt is required");
+    expect(body.walletPublicKey).toContain("Must be a valid Stellar public key");
+    expect(body.maxBudgetXLM).toContain("maxBudgetXLM must be at least 0.1");
+    expect(
+      res.body.error.details.flatErrors.some((e: { field: string }) =>
+        e.field.endsWith("agentPreferences.1"),
+      ),
+    ).toBe(true);
+  });
+
   it("returns 400 when prompt exceeds 10 000 characters", async () => {
     const oversizedPrompt = "a".repeat(10_001);
     const res = await request(app.httpServer)
