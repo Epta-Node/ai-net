@@ -149,8 +149,41 @@ docker compose up -d
 
 - Node.js >= 20
 - Docker & Docker Compose
-- A Stellar testnet account ([create one](https://laboratory.stellar.org/#account-creator))
+- A funded Stellar testnet account (see [Fund a Stellar testnet account](#fund-a-stellar-testnet-account))
 - Venice AI API key ([get one](https://venice.ai))
+
+### Fund a Stellar testnet account
+
+Testnet XLM has no real value. Generate a keypair, then use Friendbot to fund
+the public address (`G...`) before deploying contracts or running testnet E2E tests.
+
+With the [Stellar CLI](https://developers.stellar.org/docs/tools/developer-tools/cli/install-cli):
+
+```bash
+stellar keys generate mydev --network testnet
+stellar keys address mydev
+stellar keys fund mydev --network testnet
+```
+
+Or with `curl`:
+
+```bash
+curl "https://friendbot.stellar.org?addr=<YOUR_PUBLIC_KEY>"
+```
+
+Check the balance through the Horizon API, the
+[Stellar Laboratory account explorer](https://laboratory.stellar.org/#explorer?resource=accounts&endpoint=detail),
+or your wallet:
+
+```bash
+curl "https://horizon-testnet.stellar.org/accounts/$(stellar keys address mydev)" | jq '.balances'
+```
+
+Friendbot funds a new account with 10,000 test XLM. The Stellar testnet is
+reset periodically; when that happens, balances and accounts are cleared, so
+generate a new keypair (or fund the existing address again) before retrying.
+
+See the [Developer Setup Guide](docs/DEVELOPER_SETUP.md#why-testnet-how-friendbot-works) for a beginner-friendly walkthrough.
 
 ### Manual Install
 
