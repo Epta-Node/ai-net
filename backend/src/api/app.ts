@@ -47,6 +47,10 @@ import {
   type JobQueue,
 } from "../queue";
 import { createAdminQueueRouter } from "./routes/admin";
+import { metricsRouter } from "./routes/metrics";
+import { auditRouter } from "./routes/audit";
+import { exportRouter } from "./routes/export";
+import { idempotencyMiddleware } from "./middleware/idempotency";
 
 export interface AppOptions {
   /** Called to execute a single DAG node; defaults to HTTP dispatch via agent registry */
@@ -153,6 +157,14 @@ export function createApp(opts: AppOptions = {}): {
   // ── Health routes ───────────────────────────────────────────────────────────
   app.use("/health", healthRouter);
 
+  // ── Prometheus metrics ──────────────────────────────────────────────────────
+  app.use("/metrics", metricsRouter);
+
+  // ── Idempotency middleware for state-mutating POST endpoints ────────────────
+  app.post("/api/tasks", idempotencyMiddleware);
+  app.post("/api/agents/register", idempotencyMiddleware);
+  app.post("/api/admin/dlq/:id/replay", idempotencyMiddleware);
+
   // ── Stats routes ───────────────────────────────────────────────────────────
   app.use("/api/stats", createStatsRouter(getTaskDb()));
 
@@ -189,6 +201,12 @@ export function createApp(opts: AppOptions = {}): {
   // ── Admin Queue routes ─────────────────────────────────────────────────────
   app.use("/api/admin/queue", createAdminQueueRouter(jobQueue));
   app.use("/api/admin", createAdminQueueRouter(jobQueue));
+
+  // ── Audit log verify route — Issue #1004 ───────────────────────────────────
+  app.use("/api/admin/audit", auditRouter);
+
+  // ── Task export routes — Issue #1005 ──────────────────────────────────────
+  app.use("/api/tasks/:id/export", exportRouter);
 
   // ── Payment reconciliation routes ──────────────────────────────────────────
   app.use("/api/reconciliation", createReconciliationRouter(opts.reconciliation));
