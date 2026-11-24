@@ -20,6 +20,7 @@ import type Database from 'better-sqlite3';
 import { summarizeCircuitBreakers, type CircuitBreakerSummary } from './circuitBreaker.js';
 import { getDatabaseMetrics, type DatabaseMetricsSnapshot } from '../db/metrics.js';
 import { deepHealthMetricsRegistry, millisToSeconds } from './deepHealthMetrics.js';
+import { pingVeniceApi } from './venice/client.js';
 
 export type DependencyStatus = 'ok' | 'degraded' | 'fail';
 
@@ -58,6 +59,8 @@ export interface DeepHealthDeps {
   /** Queue depth at or above which the queue reports `degraded`. */
   queueDepthWarn: number;
   fetchFn?: typeof fetch;
+  /** Injectable Venice connectivity probe. */
+  pingVenice?: (apiKey: string, timeoutMs: number) => Promise<void>;
   now?: () => number;
   getBreaker?: (name: string) => CircuitBreakerSummary | null;
   getWriteDb?: () => Database.Database | Promise<Database.Database>;
@@ -70,7 +73,7 @@ export interface DeepHealthDeps {
 export const VENICE_BREAKER = 'venice';
 export const HORIZON_BREAKER = 'stellar-horizon';
 
-const VENICE_MODELS_URL = 'https://api.venice.ai/api/v1/models';
+const VENICE_TIMEOUT_MS = 3_000;
 
 /** Queue depth counts work still waiting to run: pending plus retriable failures. */
 export function queueDepthOf(stats: QueueStats): number {
@@ -149,20 +152,27 @@ function combine(
 }
 
 async function checkVenice(deps: Required<DeepHealthDeps>): Promise<DependencyResult> {
-  const { value: probe, latencyMs } = await timed(deps.now, () =>
-    probeUrl(
-      deps.fetchFn,
-      VENICE_MODELS_URL,
-      deps.timeoutMs,
-      { headers: { Authorization: `Bearer ${deps.veniceApiKey}` } },
-      // 401 still proves the upstream is reachable; a bad key is a config issue.
-      (res) => res.ok || res.status === 401
-    )
-  );
+  const start = deps.now();
+  let probe: { reachable: boolean; detail: string };
+  try {
+    await deps.pingVenice(deps.veniceApiKey, VENICE_TIMEOUT_MS);
+    probe = { reachable: true, detail: 'reachable' };
+  } catch (err) {
+    const name = err instanceof Error ? err.name : '';
+    probe = {
+      reachable: false,
+      detail: name === 'AbortError' ? `timed out after ${VENICE_TIMEOUT_MS}ms` : 'unreachable',
+    };
+  }
+  const latencyMs = Math.max(0, deps.now() - start);
   const breaker = deps.getBreaker(VENICE_BREAKER);
   const breakerStatus = breakerView(breaker);
+  const breakerResult = combine(probe.reachable, probe.detail, breaker);
   return {
-    ...combine(probe.reachable, probe.detail, breaker),
+    ...breakerResult,
+    // A direct connectivity failure degrades the dependency. An OPEN breaker
+    // remains a failure because callers are actively being rejected by it.
+    status: !probe.reachable && breaker?.state !== 'OPEN' ? 'degraded' : breakerResult.status,
     critical: true,
     latencyMs,
     breaker: breakerStatus,
@@ -330,6 +340,7 @@ function defaultDatabaseMetrics(): DatabaseMetricsSnapshot {
 export async function runDeepHealthCheck(input: DeepHealthDeps): Promise<DeepHealthReport> {
   const deps: Required<DeepHealthDeps> = {
     fetchFn: (...args) => fetch(...args),
+    pingVenice: pingVeniceApi,
     now: () => Date.now(),
     getBreaker: summarizeCircuitBreakers,
     getWriteDb: defaultWriteDb,

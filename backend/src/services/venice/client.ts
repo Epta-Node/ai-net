@@ -107,6 +107,24 @@ const RETRYABLE_STATUS_CODES = new Set([429, 503, 500, 502, 504]);
 const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 422]);
 const DEFAULT_CHAT_MODEL = 'llama-3.3-70b';
 
+/** Lightweight connectivity probe used by `/health/deep` (does not call the LLM). */
+export async function pingVeniceApi(apiKey: string, timeoutMs = 3_000): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch('https://api.venice.ai/api/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    // A 401 still confirms connectivity; credentials are configured separately.
+    if (!response.ok && response.status !== 401) {
+      throw new Error(`Venice API responded ${response.status}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Whether a failure is worth retrying against a *different* provider.
  *
