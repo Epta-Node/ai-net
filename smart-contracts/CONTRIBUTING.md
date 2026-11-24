@@ -37,7 +37,7 @@ cp .env.example .env
 
 ### 2. Set up your environment
 
-Fill in `.env`:
+The Rust integration suite in step 3 needs only the Rust toolchain. For application flows that use Stellar signing and live Venice inference, configure the corresponding package environment.
 
 ```
 STELLAR_SECRET_KEY=your_testnet_secret_key
@@ -50,9 +50,14 @@ Get a Venice AI key at [venice.ai](https://venice.ai).
 
 ### 3. Run tests
 
+From the repository root, select the contract workspace and run the cross-contract flows on the local Soroban host. This suite uses Rust and Cargo and requires no wallet or API key.
+
 ```bash
-npm test
+cd smart-contracts
+cargo test --locked -p integration-tests
 ```
+
+For the live Testnet market report or contract deployment farm, use the commands, environment variables, runtime budgets, and CI job names in the [smart contract E2E guide](../docs/e2e-testing.md#smart-contract-integration-tests).
 
 ---
 
