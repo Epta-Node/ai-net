@@ -1,5 +1,15 @@
 {
-  "list": { "p50": 25, "p95": 50, "p99": 80 },
-  "submit": { "p50": 40, "p95": 80, "p99": 120 },
-  "stream": { "p50": 30, "p95": 60, "p99": 100 }
+  "api": {
+    "POST /api/tasks": { "throughputRps": 100, "p95LatencyMs": 200 },
+    "GET /api/agents": { "throughputRps": 100, "p95LatencyMs": 100 },
+    "GET /api/tasks/:id": { "throughputRps": 100, "p95LatencyMs": 100 }
+  },
+  "queue": {
+    "enqueue100DurationMs": 30000,
+    "dlq20DurationMs": 5000
+  },
+  "database": {
+    "listAgentsP99Ms": 10,
+    "getTaskP99Ms": 5
+  }
 }

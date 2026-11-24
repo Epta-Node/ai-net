@@ -1,0 +1,15 @@
+{
+  "generatedAt": "2026-11-24T00:00:00.000Z",
+  "measurements": {
+    "POST /api/tasks throughputRps": 100,
+    "POST /api/tasks p95LatencyMs": 200,
+    "GET /api/agents throughputRps": 100,
+    "GET /api/agents p95LatencyMs": 100,
+    "GET /api/tasks/:id throughputRps": 100,
+    "GET /api/tasks/:id p95LatencyMs": 100,
+    "queue enqueue100 durationMs": 30000,
+    "queue dlq20 durationMs": 5000,
+    "database listAgents(limit=50) p99Ms": 10,
+    "database getTask(id) p99Ms": 5
+  }
+}
