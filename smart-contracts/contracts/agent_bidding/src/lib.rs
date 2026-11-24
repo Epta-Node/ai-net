@@ -843,6 +843,87 @@ impl AgentBiddingContract {
         Ok(())
     }
 
+    // ── Withdraw Bid ──────────────────────────────────────────────────────
+
+    /// Withdraw a sealed bid before the auction is finalized.
+    ///
+    /// Allows a bidder to withdraw their sealed bid and retrieve their bond
+    /// **before the reveal phase ends**. After `reveal_bids` is called, the
+    /// auction is finalized and withdrawal is no longer possible.
+    ///
+    /// * `bidder` — must authorise the call and must have submitted a bid.
+    /// * Timing — only during the bidding or reveal phase, before the auction
+    ///   is finalized (phase = `Reveal` or `Awarded`).
+    /// * The bid must exist and not be revealed yet.
+    ///
+    /// Returns the bond amount in stroops to the bidder.
+    /// Emits `(bidding, bid_wdrw)`.
+    pub fn withdraw_bid(
+        env: Env,
+        task_id: Symbol,
+        bidder: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        bidder.require_auth();
+
+        let mut auction = load_auction(&env, &task_id)?;
+        require_live(&auction)?;
+
+        // Withdrawal only allowed during bidding phase (before finalization)
+        if auction.phase != AuctionPhase::Bidding {
+            return Err(Error::AuctionClosed);
+        }
+
+        let bid_key = DataKey::Bid(task_id.clone(), bidder.clone());
+        let sealed: SealedBid = env
+            .storage()
+            .persistent()
+            .get(&bid_key)
+            .ok_or(Error::NotFound)?;
+
+        // Cannot withdraw after revealing
+        if sealed.revealed {
+            return Err(Error::BidAlreadyRevealed);
+        }
+
+        // Refund the bond
+        let bond_amount = sealed.bond;
+        push_funds(&env, &bidder, bond_amount)?;
+
+        // Remove the bid from storage
+        env.storage().persistent().remove(&bid_key);
+
+        // Remove bidder from the bidders list
+        let bidders_key = DataKey::Bidders(task_id.clone());
+        let mut bidders: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&bidders_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        
+        // Find and remove the bidder
+        let mut new_bidders = Vec::new(&env);
+        for b in bidders.iter() {
+            if b != bidder {
+                new_bidders.push_back(b);
+            }
+        }
+        env.storage().persistent().set(&bidders_key, &new_bidders);
+        extend_ttl_for_key(&env, &bidders_key);
+
+        // Update auction bid count
+        auction.bid_count = auction.bid_count.saturating_sub(1);
+        save_auction(&env, &auction);
+
+        // Emit withdrawal event
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("bid_wdrw")),
+            (task_id, bidder.clone(), bond_amount),
+        );
+
+        Ok(())
+    }
+
     // ── Reveal Individual Bid ─────────────────────────────────────────────
 
     /// Reveal a previously sealed bid inside the reveal window.
