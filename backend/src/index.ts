@@ -4,6 +4,11 @@
  * Initializes all agents and starts the HTTP/WebSocket server.
  */
 
+// OpenTelemetry must be initialised before any other import that touches
+// Express, HTTP, or fetch so that auto-instrumentation patches in time.
+import { initTracing, shutdownTracing } from "./tracing";
+initTracing();
+
 import { createApp } from "./api/app";
 import { initializeAgents, globalAgentRegistry } from "./agents";
 import { startAgentSync, stopAgentSync } from "./registry/sync";
@@ -140,6 +145,9 @@ export function setupGracefulShutdown(
       closeAgentDb();
       closeTaskDb();
       closeJobDb();
+
+      console.log("[ai-net-backend] Phase 6: Flushing OpenTelemetry spans...");
+      await shutdownTracing();
 
       console.log("[ai-net-backend] Graceful shutdown complete. Exiting.");
       clearTimeout(forcedTimeout);
