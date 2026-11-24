@@ -80,7 +80,7 @@
 .dotPending {
   background: rgba(245, 158, 11, 0.12);
   border-color: rgba(245, 158, 11, 0.4);
-  color: #FCD34D;
+  color: #fcd34d;
 }
 
 .dotRunning {
@@ -128,7 +128,9 @@
   border: 1px solid var(--panel-border);
   border-radius: var(--radius-xl);
   padding: 14px 16px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
   cursor: default;
   min-width: 0;
 }
@@ -176,7 +178,9 @@
   justify-content: center;
   box-shadow: none;
   margin-top: 2px;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   cursor: pointer;
   padding: 0;
 }
@@ -258,7 +262,7 @@
 .badgePending {
   background: rgba(245, 158, 11, 0.12);
   border: 1px solid rgba(245, 158, 11, 0.3);
-  color: #FCD34D;
+  color: #fcd34d;
 }
 
 .badgeRunning {
@@ -305,7 +309,9 @@
   border-radius: var(--radius-md);
   color: var(--text-secondary);
   box-shadow: none;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
   padding: 0;
 }
 
@@ -345,13 +351,19 @@
   transition: opacity 0.2s;
 }
 
-.execSegmentPending { background: var(--status-warning-surface-strong); }
+.execSegmentPending {
+  background: var(--status-warning-surface-strong);
+}
 .execSegmentRunning {
   background: var(--accent-secondary);
   animation: shimmer 1.5s ease-in-out infinite;
 }
-.execSegmentCompleted { background: var(--status-success); }
-.execSegmentFailed { background: var(--status-danger); }
+.execSegmentCompleted {
+  background: var(--status-success);
+}
+.execSegmentFailed {
+  background: var(--status-danger);
+}
 
 /* ─── Meta row ──────────────────────────────────────────────────── */
 
@@ -415,13 +427,13 @@
 }
 
 .errorToggle:hover {
-  color: #FCA5A5;
+  color: #fca5a5;
   transform: none;
   box-shadow: none;
 }
 
 .errorToggle:active {
-  color: #FECACA;
+  color: #fecaca;
 }
 
 .errorToggle:focus-visible {
@@ -509,14 +521,25 @@
 /* ─── Animations ────────────────────────────────────────────────── */
 
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 8px var(--accent-border); }
-  50%       { box-shadow: var(--info-glow-strong); }
+  0%,
+  100% {
+    box-shadow: 0 0 8px var(--accent-border);
+  }
+  50% {
+    box-shadow: var(--info-glow-strong);
+  }
 }
 
 @keyframes shimmer {
-  0%   { opacity: 0.6; }
-  50%  { opacity: 1; }
-  100% { opacity: 0.6; }
+  0% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.6;
+  }
 }
 
 .spinIcon {
@@ -524,8 +547,12 @@
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ─── Responsive ────────────────────────────────────────────────── */
@@ -554,5 +581,21 @@
 
   .stats {
     gap: 8px;
+  }
+}
+
+/* #878: mobile responsiveness — horizontal scroll fallback, touch targets */
+@media (max-width: 375px) {
+  .timeline {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .node {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 4px;
+  }
+  .connector {
+    min-width: 16px;
   }
 }

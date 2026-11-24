@@ -1,8 +1,14 @@
 //! Storage-budget assertions for task creation and updates (Issue #771).
 
 use contract_test_utils::{assert_storage_within, StorageBudget};
-use soroban_sdk::{testutils::Address as _, Address, Bytes, BytesN, Env, Vec};
-use task_store::{TaskStatus, TaskStoreContract, TaskStoreContractClient};
+use soroban_sdk::{
+    testutils::{storage::Persistent as _, Address as _, Ledger as _},
+    Address, Bytes, BytesN, Env, Vec,
+};
+use task_store::{
+    DataKey, Error, TaskStatus, TaskStoreContract, TaskStoreContractClient,
+    LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_TRACKED_TASKS_PER_CREATOR,
+};
 
 fn setup() -> (Env, TaskStoreContractClient<'static>) {
     let env = Env::default();
@@ -113,5 +119,104 @@ fn task_reads_are_storage_neutral() {
         "task_store::get_tasks_by_creator",
         StorageBudget::read_only(),
         || client.get_tasks_by_creator(&submitter, &0, &10),
+    );
+}
+
+/// Storage-budget finding: one creator index retains at most
+/// `MAX_TRACKED_TASKS_PER_CREATOR` task ids (oldest-first eviction).  The
+/// bounded vector prevents unbounded persistent storage growth per creator.
+#[test]
+fn creator_task_index_is_bounded_at_64_tasks() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+
+    for n in 0..MAX_TRACKED_TASKS_PER_CREATOR + 5 {
+        let mut bytes = [0u8; 32];
+        bytes[..4].copy_from_slice(&(n as u32).to_be_bytes());
+        client.create_task(
+            &BytesN::from_array(&env, &bytes),
+            &creator,
+            &BytesN::from_array(&env, &[n as u8; 32]),
+            &1_000_000,
+        );
+    }
+
+    let page = client.get_tasks_by_creator(&creator, &0, &20);
+    assert_eq!(page.total, MAX_TRACKED_TASKS_PER_CREATOR);
+    assert_eq!(page.task_ids.len(), 20);
+}
+
+/// Storage-budget finding: the largest accepted compressed task payload/result
+/// is 4 KiB.  One byte beyond the limit is rejected before any task state is
+/// written, keeping persistent storage bounded.
+#[test]
+fn maximum_compressed_task_payload_is_bounded() {
+    let (env, client) = setup();
+    let submitter = Address::generate(&env);
+
+    let at_limit = task_id(&env, 5);
+    let max_dag = Bytes::from_slice(&env, &vec![0u8; MAX_COMPRESSED_DAG_BYTES as usize]);
+    let agents = Vec::from_array(&env, [Address::generate(&env)]);
+    client.store_task_metadata(
+        &submitter,
+        &at_limit,
+        &BytesN::from_array(&env, &[9; 32]),
+        &agents,
+        &max_dag,
+        &1,
+        &None,
+    );
+    assert!(client.get_task_metadata(&at_limit).compressed_dag.len() <= MAX_COMPRESSED_DAG_BYTES);
+
+    let over_limit = task_id(&env, 6);
+    let too_large = Bytes::from_slice(
+        &env,
+        &vec![0u8; (MAX_COMPRESSED_DAG_BYTES + 1) as usize],
+    );
+    assert_eq!(
+        client.try_store_task_metadata(
+            &submitter,
+            &over_limit,
+            &BytesN::from_array(&env, &[10; 32]),
+            &Vec::from_array(&env, [Address::generate(&env)]),
+            &too_large,
+            &1,
+            &None,
+        ),
+        Err(Ok(Error::InvalidDag))
+    );
+}
+
+/// Storage-budget finding: task metadata and auxiliary history/counter entries
+/// share the TTL window.  At expiry, reads return `Expired` and the persistent
+/// key retains no live storage beyond the configured ledger window.
+#[test]
+fn ttl_expiry_cleans_up_live_task_entries() {
+    let (env, client) = setup();
+    env.ledger().set_timestamp(1_700_000_000);
+    env.ledger().set_sequence_number(100);
+
+    let submitter = Address::generate(&env);
+    let task = task_id(&env, 7);
+    let agents = Vec::from_array(&env, [Address::generate(&env)]);
+    client.store_task_metadata(
+        &submitter,
+        &task,
+        &BytesN::from_array(&env, &[9; 32]),
+        &agents,
+        &Bytes::from_slice(&env, &[1, 2, 3]),
+        &1,
+        &None,
+    );
+
+    let ttl = env.as_contract(&client.address, || {
+        env.storage().persistent().get_ttl(&DataKey::Task(task.clone()))
+    });
+    assert_eq!(ttl, LEDGERS_PER_DAY);
+
+    env.ledger().set_timestamp(1_700_000_000 + 86_400);
+    assert_eq!(
+        client.try_get_task_metadata(&task),
+        Err(Ok(Error::Expired))
     );
 }

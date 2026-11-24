@@ -50,6 +50,9 @@ const envSchema = z.object({
   STELLAR_NETWORK: z.enum(['testnet', 'mainnet', 'local', 'futurenet']).default('testnet'),
   STELLAR_HORIZON_URL: z.string().url().default('https://horizon-testnet.stellar.org'),
   STELLAR_HORIZON: z.string().url().optional(),
+  STELLAR_PAYMENT_MAX_RETRIES: z.coerce.number().int().positive().default(3),
+  STELLAR_PAYMENT_RETRY_BASE_MS: z.coerce.number().int().positive().default(200),
+  STELLAR_PAYMENT_RETRY_MAX_MS: z.coerce.number().int().positive().default(5_000),
   STELLAR_PUBLIC_KEY: z.string().optional(),
   SKIP_STELLAR_ACCOUNT_VERIFY: z
     .enum(['true', 'false'])
@@ -233,6 +236,14 @@ const envSchema = z.object({
   DB_BACKUP_ENCRYPTION_KEY: z.preprocess(
     (v) => (v === '' ? undefined : v),
     z.string().min(1).optional()
+  ),
+  /**
+   * Retired backup keys, comma-separated. They still decrypt existing backups
+   * during a rotation window; new backups always use DB_BACKUP_ENCRYPTION_KEY.
+   */
+  DB_BACKUP_PREVIOUS_KEYS: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.string().optional()
   ),
   DB_MAINTENANCE_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   DB_MAINTENANCE_VACUUM_THRESHOLD: z.coerce.number().int().nonnegative().default(100),

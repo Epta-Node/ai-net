@@ -58,5 +58,9 @@ export const DashboardPanel: React.FC<DashboardPanelProps> = ({
       </div>
     );
   }
-  return <>{children}</>;
+  return (
+    <div className={styles.panel} data-testid="dashboard-panel">
+      {children}
+    </div>
+  );
 };

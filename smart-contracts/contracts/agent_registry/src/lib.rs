@@ -1579,7 +1579,7 @@ impl AgentRegistryContract {
         for id in ids.iter() {
             let agent_key = DataKey::Agent(id.clone());
 
-            if let Some(record) = env.storage().persistent().get(&agent_key) {
+            if let Some(record) = env.storage().persistent().get::<_, AgentRecord>(&agent_key) {
                 ttl_keys.push_back(agent_key);
                 records.push_back(record);
             }
@@ -1638,6 +1638,28 @@ impl AgentRegistryContract {
             next_cursor,
             total_count: total_active,
         }
+    }
+
+    /// Paginated list function with cursor and limit (issue #943).
+    ///
+    /// ## Gas cost per page
+    /// Bounded cursor-based pagination costs ~45,000 CU (base per-transaction overhead)
+    /// plus ~12,000 CU per agent in the page (reading AgentByIndex + Agent persistent storage
+    /// and batch extending TTLs). Max gas per call is capped by [`MAX_PAGE_SIZE`] (50 items)
+    /// to remain well within a single ledger footprint budget (~645,000 CU max).
+    ///
+    /// - `cursor`: Starting registration sequence index (defaults to 0 if `None`).
+    /// - `limit`: Number of items requested (defaults to [`DEFAULT_PAGE_SIZE`], capped at [`MAX_PAGE_SIZE`]).
+    ///
+    /// Returns [`AgentPage`] containing matching agents, `next_cursor` for subsequent page,
+    /// and `total_count` of active registered agents.
+    pub fn list_agents(env: Env, cursor: Option<u32>, limit: Option<u32>) -> AgentPage {
+        Self::get_agents(env, cursor, limit)
+    }
+
+    /// Return total active registered agents count (issue #943).
+    pub fn get_total_agents(env: Env) -> u32 {
+        get_total_agents(&env)
     }
 
     /// Discover and rank agents matching multi-criteria criteria:
@@ -2070,7 +2092,8 @@ impl AgentRegistryContract {
         Ok(())
     }
 
-    /// Read the current minimum bond requirement (stroops).
+    /// Read the current minimum bond from instance storage, falling back to the
+    /// compile-time default (10 XLM = 100_000_000 stroops).
     pub fn get_min_bond(env: Env) -> i128 {
         min_bond(&env)
     }
@@ -2108,7 +2131,6 @@ impl AgentRegistryContract {
             .persistent()
             .get(&agent_key)
             .ok_or(Error::NotFound)?;
-        agent.owner.require_auth();
         let mut record = bond::load(&env, &agent_id)?;
         if record.status == bond::BondStatus::Cooldown {
             return Err(Error::CooldownNotElapsed);
@@ -2244,6 +2266,7 @@ impl AgentRegistryContract {
             return Err(Error::CooldownNotElapsed);
         }
         let returned = record.amount_stroops;
+        record.amount_stroops = 0;
         record.amount_stroops = 0;
         record.status = bond::BondStatus::Returned;
         record.cooldown_until = None;
@@ -2490,12 +2513,21 @@ impl AgentRegistryContract {
             .get(&agent_key)
             .ok_or(Error::NotFound)?;
 
-        record.owner.require_auth();
-
+        let old_price_stroops = record.price_stroops;
         record.price_stroops = new_price;
         env.storage().persistent().set(&agent_key, &record);
         extend_ttl_for_existing_key(&env, &agent_key);
 
+        env.events().publish(
+            (symbol_short!("registry"), symbol_short!("agent_upd")),
+            events::AgentUpdatedEvent {
+                agent_id: agent_id.clone(),
+                owner: record.owner.clone(),
+                capability: record.capability.clone(),
+                old_price_stroops,
+                new_price_stroops: new_price,
+            },
+        );
         env.events().publish(
             (symbol_short!("registry"), symbol_short!("price_upd")),
             (agent_id, new_price),

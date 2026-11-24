@@ -185,6 +185,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
     }
   };
 
+  // Keep the highlighted option visible while navigating long lists.
+  useEffect(() => {
+    if (!isOpen || filtered.length === 0) return;
+    const activeEl = document.getElementById(`command-palette-option-${safeIndex}`);
+    if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+      activeEl.scrollIntoView({ block: 'nearest' });
+    }
+  }, [safeIndex, isOpen, filtered.length]);
+
   useEffect(() => {
     if (!isOpen || filtered.length === 0) return;
     const activeEl = document.getElementById(`command-palette-option-${safeIndex}`);

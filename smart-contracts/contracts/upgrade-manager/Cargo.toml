@@ -19,6 +19,8 @@ soroban-sdk = { version = "=22.0.11", features = ["testutils"] }
 # Integration tests in tests/ link this crate without `cfg(test)`; enabling
 # `testutils` routes `swap_wasm` through the mock deployer they assert on.
 upgrade-manager = { path = ".", features = ["testutils"] }
+# Shared gas-snapshot assertions (baselines in smart-contracts/gas-baselines.json).
+contract-test-utils = { path = "../../test-utils" }
 
 [features]
 # Exports the UpgradeManager contract entry points. On by default so this crate

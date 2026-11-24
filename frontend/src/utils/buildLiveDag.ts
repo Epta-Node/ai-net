@@ -20,15 +20,58 @@ export interface LiveDag {
 export function buildLiveDag(
   preferences: AgentPreference[],
   labelOf: (preference: AgentPreference) => string,
+  explicitEdges?: readonly DagEdge[],
 ): LiveDag {
-  const nodes: DagNode[] = preferences.map((preference) => ({
+  const uniquePreferences = Array.from(new Set(preferences));
+  const nodes: DagNode[] = uniquePreferences.map((preference) => ({
     id: preference,
     label: labelOf(preference),
   }));
 
+  const nodeIds = new Set(uniquePreferences);
+  const edgeExists = (edges: readonly DagEdge[], source: string, target: string) =>
+    edges.some((edge) => edge.source === source && edge.target === target);
+  const wouldCreateCycle = (
+    edges: readonly DagEdge[],
+    source: string,
+    target: string,
+  ): boolean => {
+    if (source === target) return true;
+    const adjacency = new Map<string, string[]>();
+    for (const edge of edges) {
+      adjacency.set(edge.source, [...(adjacency.get(edge.source) ?? []), edge.target]);
+    }
+    const visiting = new Set<string>();
+    const stack = [target];
+    while (stack.length > 0) {
+      const current = stack.pop();
+      if (!current) continue;
+      if (current === source) return true;
+      if (visiting.has(current)) continue;
+      visiting.add(current);
+      stack.push(...(adjacency.get(current) ?? []));
+    }
+    return false;
+  };
+
   const edges: DagEdge[] = [];
-  for (let i = 0; i < preferences.length - 1; i += 1) {
-    edges.push({ source: preferences[i], target: preferences[i + 1] });
+  const candidates =
+    explicitEdges ??
+    uniquePreferences.slice(0, -1).map((preference, index) => ({
+      source: preference,
+      target: uniquePreferences[index + 1],
+    }));
+
+  for (const edge of candidates) {
+    if (
+      !nodeIds.has(edge.source) ||
+      !nodeIds.has(edge.target) ||
+      edgeExists(edges, edge.source, edge.target) ||
+      wouldCreateCycle(edges, edge.source, edge.target)
+    ) {
+      continue;
+    }
+    edges.push({ source: edge.source, target: edge.target });
   }
 
   return { nodes, edges };

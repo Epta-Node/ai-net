@@ -28,4 +28,14 @@ pub enum Error {
     OraclePaused = 10,
     /// The configured oracle has no feed for the pair and no fallback exists.
     FeedNotFound = 11,
+    /// The caller of `update_price` is not in the authorized oracle set.
+    OracleNotAuthorized = 12,
+    /// `register_oracle` was called for an address that is already authorized.
+    OracleAlreadyRegistered = 13,
+    /// `remove_oracle` was called for an address that is not authorized.
+    OracleNotRegistered = 14,
+    /// The authorized oracle set is at `MAX_AUTHORIZED_ORACLES`.
+    TooManyOracles = 15,
+    /// The pushed price is zero or negative.
+    InvalidPrice = 16,
 }

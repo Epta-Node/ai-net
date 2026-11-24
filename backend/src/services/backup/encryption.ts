@@ -53,6 +53,8 @@ export interface BackupHeader {
   authTag: string;
   /** Hex SHA-256 of the plaintext snapshot. */
   checksum: string;
+  /** Fingerprint of the key that encrypted this file (see {@link keyIdFor}). Absent on files written before rotation. */
+  keyId?: string;
   createdAt: string;
   /** SQLite `PRAGMA user_version` at snapshot time, when readable. */
   schemaVersion?: number;
@@ -86,6 +88,32 @@ export function getBackupEncryptionKey(): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Public fingerprint of a backup key, stored in the header so a restore tries
+ * only matching keys. It is a one-way hash, so it does not reveal the key.
+ */
+export function keyIdFor(key: string): string {
+  return createHash('sha256').update(`ai-net.db.backup.keyid.v1:${key}`).digest('hex').slice(0, 16);
+}
+
+/** Retired keys still accepted for decryption (DB_BACKUP_PREVIOUS_KEYS). */
+export function getPreviousBackupKeys(): string[] {
+  try {
+    const raw = getConfig().DB_BACKUP_PREVIOUS_KEYS;
+    if (typeof raw !== 'string') return [];
+    return raw.split(',').map((key) => key.trim()).filter((key) => key.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** Every key a backup may be decrypted with: the active key first, then retired keys. */
+export function decryptionKeys(): string[] {
+  const active = getBackupEncryptionKey();
+  const all = [...(active ? [active] : []), ...getPreviousBackupKeys()];
+  return all.filter((key, index) => all.indexOf(key) === index);
 }
 
 function deriveKey(secret: string): Buffer {
@@ -152,6 +180,7 @@ export function encryptBuffer(
     iv: iv.toString('base64'),
     authTag: cipher.getAuthTag().toString('base64'),
     checksum: sha256Hex(plaintext),
+    keyId: keyIdFor(key),
     createdAt: (options.now ?? new Date()).toISOString(),
     schemaVersion: options.schemaVersion,
     source: options.source,
@@ -160,31 +189,46 @@ export function encryptBuffer(
   return packBackupFile(header, ciphertext);
 }
 
-/** Decrypt a container back to raw snapshot bytes, verifying tag and checksum. */
-export function decryptBuffer(buf: Buffer, options: { key?: string } = {}): Buffer {
-  const key = options.key ?? getBackupEncryptionKey();
-  if (!key) {
+/**
+ * Decrypt a container back to raw snapshot bytes, verifying tag and checksum.
+ * Tries the keys whose fingerprint matches the header, so a file written under
+ * a retired key still opens while DB_BACKUP_PREVIOUS_KEYS lists it.
+ */
+export function decryptBuffer(buf: Buffer, options: { key?: string; keys?: string[] } = {}): Buffer {
+  const candidates = options.key ? [options.key] : (options.keys ?? decryptionKeys());
+  if (candidates.length === 0) {
     throw new BackupEncryptionError('DB_BACKUP_ENCRYPTION_KEY is not configured');
   }
   const { header, ciphertext } = unpackBackupFile(buf);
   if (header.algo !== ALGO) {
     throw new BackupEncryptionError(`Unsupported backup algorithm: ${String(header.algo)}`);
   }
-  try {
-    const decipher = createDecipheriv(ALGO, deriveKey(key), Buffer.from(header.iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(header.authTag, 'base64'));
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    const checksum = sha256Hex(plaintext);
-    if (checksum !== header.checksum) {
-      throw new BackupEncryptionError('Backup checksum mismatch after decrypt');
+  // Legacy headers carry no keyId, so every candidate is tried for them.
+  const ordered = header.keyId ? candidates.filter((key) => keyIdFor(key) === header.keyId) : candidates;
+  let lastError: unknown;
+  for (const key of ordered) {
+    try {
+      return decryptWith(key, header, ciphertext);
+    } catch (err) {
+      lastError = err;
     }
-    return plaintext;
-  } catch (err) {
-    if (err instanceof BackupEncryptionError) throw err;
-    throw new BackupEncryptionError('Backup decryption failed (wrong key or corrupted file)', {
-      cause: err,
-    });
   }
+  if (lastError instanceof BackupEncryptionError && lastError.message.startsWith('Backup checksum')) {
+    throw lastError;
+  }
+  throw new BackupEncryptionError('Backup decryption failed (wrong key or corrupted file)', {
+    cause: lastError,
+  });
+}
+
+function decryptWith(key: string, header: BackupHeader, ciphertext: Buffer): Buffer {
+  const decipher = createDecipheriv(ALGO, deriveKey(key), Buffer.from(header.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(header.authTag, 'base64'));
+  const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  if (sha256Hex(plaintext) !== header.checksum) {
+    throw new BackupEncryptionError('Backup checksum mismatch after decrypt');
+  }
+  return plaintext;
 }
 
 /** Read the header of a container without decrypting the payload. */
@@ -268,4 +312,75 @@ export function verifyBackupBuffer(buf: Buffer, options: { key?: string } = {}):
   const { header } = unpackBackupFile(buf);
   decryptBuffer(buf, options);
   return header;
+}
+
+export interface ReencryptResult {
+  path: string;
+  status: 'rotated' | 'current';
+}
+
+/**
+ * Re-encrypts one backup file under the active key. The payload, creation time
+ * and schema version are kept; only the key and nonce change. The new file is
+ * written beside the old one and renamed over it, so a crash leaves either the
+ * old or the new file, never a partial one.
+ */
+export function reencryptBackupFile(
+  encPath: string,
+  options: { activeKey?: string; keys?: string[] } = {}
+): ReencryptResult {
+  const activeKey = options.activeKey ?? getBackupEncryptionKey();
+  if (!activeKey) {
+    throw new BackupEncryptionError('DB_BACKUP_ENCRYPTION_KEY is not configured');
+  }
+  const buf = fs.readFileSync(encPath);
+  const header = readBackupHeader(buf);
+  if (header.keyId === keyIdFor(activeKey)) {
+    return { path: encPath, status: 'current' };
+  }
+  const plaintext = decryptBuffer(buf, { keys: options.keys ?? decryptionKeys() });
+  const rewritten = encryptBuffer(plaintext, {
+    key: activeKey,
+    source: header.source,
+    schemaVersion: header.schemaVersion,
+    now: new Date(header.createdAt),
+  });
+  const tmpPath = `${encPath}.rotating`;
+  fs.writeFileSync(tmpPath, rewritten);
+  fs.renameSync(tmpPath, encPath);
+  return { path: encPath, status: 'rotated' };
+}
+
+export interface RotationSummary {
+  scanned: number;
+  rotated: number;
+  current: number;
+  failed: Array<{ file: string; error: string }>;
+}
+
+/**
+ * Re-encrypts every encrypted backup in `directory` under the active key.
+ * One file failing does not stop the others; failures are listed in the summary.
+ */
+export function rotateBackupKeys(
+  directory: string,
+  options: { activeKey?: string; keys?: string[] } = {}
+): RotationSummary {
+  const summary: RotationSummary = { scanned: 0, rotated: 0, current: 0, failed: [] };
+  if (!fs.existsSync(directory)) return summary;
+  const files = fs
+    .readdirSync(directory)
+    .filter((name) => name.endsWith(ENCRYPTED_BACKUP_SUFFIX))
+    .sort();
+  for (const name of files) {
+    summary.scanned += 1;
+    try {
+      const result = reencryptBackupFile(path.join(directory, name), options);
+      if (result.status === 'rotated') summary.rotated += 1;
+      else summary.current += 1;
+    } catch (err) {
+      summary.failed.push({ file: name, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return summary;
 }

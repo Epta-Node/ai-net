@@ -3,6 +3,15 @@
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.panel > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .loading {
@@ -25,4 +34,16 @@
   display: inline-flex;
   gap: 0.35rem;
   padding: 0.4rem 0.7rem;
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .panel {
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .panel {
+    gap: 1rem;
+  }
 }
