@@ -113,6 +113,30 @@ describe("safeJsonArray", () => {
     expect(fields.agentId).toBeUndefined();
   });
 
+  it("parses a deeply nested document without throwing and drops the nested entries", () => {
+    const depth = 500;
+    const raw = `${"[".repeat(depth)}"leaf"${"]".repeat(depth)}`;
+    expect(safeJsonArray(raw, "agents.list", "agent-deep")).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "non-string-entry", agentId: "agent-deep" }),
+      expect.any(String)
+    );
+  });
+
+  it("keeps the string entries of a flat array and drops nested arrays inside it", () => {
+    expect(safeJsonArray('["a",["b"],"c",{"d":1},null,"e"]', "agents.list")).toEqual(["a", "c", "e"]);
+  });
+
+  it("treats a bare JSON string or number as not-an-array, not as capabilities", () => {
+    expect(safeJsonArray('"research"', "agents.list")).toEqual([]);
+    expect(safeJsonArray("42", "agents.list")).toEqual([]);
+  });
+
+  it("returns an empty array for the empty array and for the empty string", () => {
+    expect(safeJsonArray("[]", "agents.list")).toEqual([]);
+    expect(safeJsonArray("", "agents.list")).toEqual([]);
+  });
+
   it("accepts an already-decoded array", () => {
     expect(safeJsonArray(["research", 7] as unknown as string[], "agents.list")).toEqual([
       "research",

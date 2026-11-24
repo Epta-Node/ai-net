@@ -18,6 +18,7 @@ export * from "./jobStore";
 export * from "./worker";
 export * from "./backoff";
 export * from "./dlq";
+export * from "./taskQueue";
 
 /**
  * Thrown by {@link JobQueue.enqueueUnique} when a job for the same `taskId`

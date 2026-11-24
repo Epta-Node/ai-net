@@ -28,6 +28,7 @@ import { metricsService } from './metrics';
 import { quotaMetricsRegistry } from './quota/metrics';
 import { deepHealthMetricsRegistry } from './deepHealthMetrics';
 import { getQueueRetryMetrics } from '../queue/backoff';
+import { getQueueWorkerMetricsSnapshot } from '../queue/metrics';
 import { getCostBudgetStatus } from './budget';
 import { getSseMetricsSnapshot } from './sseMetrics';
 import { getQualityScoreCacheTotals } from './qualityScoreCache';
@@ -176,6 +177,29 @@ function collectQueueMetrics(): string {
     out += formatCounter('ainet_queue_dead_letter_total', 'Jobs moved to the dead-letter queue', retry.deadLetterTotal);
     out += formatCounter('ainet_queue_retry_lag_milliseconds_sum', 'Sum of delay between a retry being due and starting, in ms', retry.retryLagMsSum);
     out += formatCounter('ainet_queue_retry_lag_milliseconds_count', 'Number of retried runs measured for retry lag', retry.retryLagCount);
+
+       const workerMetrics = getQueueWorkerMetricsSnapshot();
+
+    out += formatCounter(
+      'ainet_queue_worker_jobs_processed_total',
+      'Total queue job processing attempts',
+      workerMetrics.jobsProcessed
+    );
+
+    let cumulative = 0;
+    const durationBuckets = workerMetrics.buckets.map((le, index) => {
+      cumulative += workerMetrics.jobProcessingDurationBuckets[index] ?? 0;
+      return { le: String(le), count: cumulative };
+    });
+
+    out += formatHistogram(
+      'ainet_queue_worker_job_processing_duration_milliseconds',
+      'Queue job processing duration in milliseconds',
+      durationBuckets,
+      workerMetrics.jobProcessingDurationSum,
+      workerMetrics.jobProcessingDurationCount
+    );
+
   } catch (err) {
     logger.debug({ err }, 'queue metrics unavailable');
   }

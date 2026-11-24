@@ -244,3 +244,70 @@ export function buildCacheKey(
     : 'noquery';
   return `api:${method.toUpperCase()}:${path}:${queryHash}`;
 }
+
+// ---------------------------------------------------------------------------
+// Agent-by-id lookup cache (Issue #906)
+// ---------------------------------------------------------------------------
+
+const AGENT_LOOKUP_TTL_MS = 30_000;
+
+type AgentLookupCacheEntry = {
+  value: unknown;
+  expiresAt: number;
+};
+
+const agentLookupCache = new Map<string, AgentLookupCacheEntry>();
+let agentLookupHits = 0;
+let agentLookupMisses = 0;
+
+export interface AgentLookupCacheMetrics {
+  hits: number;
+  misses: number;
+  size: number;
+  hitRate: number;
+}
+
+export function getCachedAgentById<T>(agentId: string): T | undefined {
+  const entry = agentLookupCache.get(agentId);
+  if (!entry) {
+    agentLookupMisses += 1;
+    return undefined;
+  }
+  if (entry.expiresAt <= Date.now()) {
+    agentLookupCache.delete(agentId);
+    agentLookupMisses += 1;
+    return undefined;
+  }
+  agentLookupHits += 1;
+  return entry.value as T;
+}
+
+export function setCachedAgentById<T>(agentId: string, agent: T, ttlMs = AGENT_LOOKUP_TTL_MS): void {
+  agentLookupCache.set(agentId, {
+    value: agent,
+    expiresAt: Date.now() + ttlMs,
+  });
+}
+
+export function invalidateCachedAgentById(agentId: string): void {
+  agentLookupCache.delete(agentId);
+}
+
+export function clearAgentLookupCache(): void {
+  agentLookupCache.clear();
+}
+
+export function getAgentLookupCacheMetrics(): AgentLookupCacheMetrics {
+  const total = agentLookupHits + agentLookupMisses;
+  return {
+    hits: agentLookupHits,
+    misses: agentLookupMisses,
+    size: agentLookupCache.size,
+    hitRate: total === 0 ? 0 : agentLookupHits / total,
+  };
+}
+
+export function resetAgentLookupCacheMetrics(): void {
+  agentLookupHits = 0;
+  agentLookupMisses = 0;
+}

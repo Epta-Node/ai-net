@@ -1058,4 +1058,23 @@ fn fuzz_escrow_release_and_refund_conserve_funds() {
             total
         );
     }
+#[test]
+fn gas_snapshots_cover_order_operations() {
+    let env = Env::default();
+    let cases = [
+        (Symbol::new(&env, "listing"), 1u32, gas::GAS_LIST),
+        (
+            Symbol::new(&env, "search"),
+            3u32,
+            gas::GAS_SEARCH + gas::GAS_SEARCH_PER_LISTING * 3,
+        ),
+        (Symbol::new(&env, "purchase"), 2u32, gas::GAS_PURCHASE * 2),
+    ];
+
+    for (operation, count, expected) in cases {
+        assert_eq!(gas::estimate(operation, count), expected);
+    }
+    assert_eq!(gas::estimate(Symbol::new(&env, "listing"), 0), 0);
+}
+
 }

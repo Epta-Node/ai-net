@@ -10,7 +10,7 @@
 import { EventEmitter } from 'events';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, jest } from '@jest/globals';
 import type { DAGEvent } from '../../types/task';
 import type { StoredEvent } from '../../events/eventStore';
 import { TaskStreamHub, type TaskStreamBus } from './taskStreamHub';
@@ -453,6 +453,51 @@ describe('TaskStreamHub (#655)', () => {
 
       expect(leaving.events).toEqual([0]);
       expect(staying.events).toEqual([0, 1]);
+    });
+  });
+
+  describe('graceful shutdown (#901)', () => {
+    it('notifies SSE subscribers and waits for them to detach', async () => {
+      const hub = makeHub(new ArrayStore(), new EmitterBus());
+      const forceClose = jest.fn();
+      let detach = (): void => { /* assigned below */ };
+      const onShutdown = jest.fn(() => detach());
+      detach = hub.subscribe(
+        'task-shutdown',
+        { onShutdown, onForceClose: forceClose },
+        collector().deliver,
+      );
+
+      await hub.shutdown(1_000);
+
+      expect(onShutdown).toHaveBeenCalledTimes(1);
+      expect(forceClose).not.toHaveBeenCalled();
+      expect(hub.activeTaskCount()).toBe(0);
+      expect(hub.busSubscriptionCount()).toBe(0);
+    });
+
+    it('force-closes subscribers that are still attached at the deadline', async () => {
+      const hub = makeHub(new ArrayStore(), new EmitterBus());
+      const forceClose = jest.fn();
+      hub.subscribe('task-stuck', { onShutdown: jest.fn(), onForceClose: forceClose }, collector().deliver);
+
+      await hub.shutdown(5);
+
+      expect(forceClose).toHaveBeenCalledTimes(1);
+      expect(hub.activeTaskCount()).toBe(0);
+      expect(hub.busSubscriptionCount()).toBe(0);
+    });
+
+    it('notifies subscribers that arrive after shutdown started', async () => {
+      const hub = makeHub(new ArrayStore(), new EmitterBus());
+      await hub.shutdown(5);
+      const onShutdown = jest.fn();
+
+      const detach = hub.subscribe('task-late', { onShutdown }, collector().deliver);
+      detach();
+
+      expect(onShutdown).toHaveBeenCalledTimes(1);
+      expect(hub.activeTaskCount()).toBe(0);
     });
   });
 });
