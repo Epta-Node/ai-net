@@ -35,6 +35,11 @@ import { getAgentDb, createAgentDb } from "../db/agents";
 import { createLogger } from "../utils/logger";
 import { getConfig, stellarClientOptions } from "../config";
 import { invalidateAgentsCache } from "../cache/invalidation";
+import {
+  getCachedAgentById,
+  invalidateCachedAgentById,
+  setCachedAgentById,
+} from "../cache";
 
 const logger = createLogger({ module: "registry-sync" });
 
@@ -99,6 +104,27 @@ function resolutionLabel(code: number): string {
 }
 
 /**
+ * Find an agent by ID with a 30-second in-memory lookup cache.
+ *
+ * Cache hit/miss metrics are tracked in `cache/index.ts`.
+ */
+export function findAgentByIdCached(
+  db: ReturnType<typeof createAgentDb>,
+  agentId: string
+) {
+  const cached = getCachedAgentById<ReturnType<ReturnType<typeof createAgentDb>["findById"]>>(agentId);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const agent = db.findById(agentId);
+  if (agent) {
+    setCachedAgentById(agentId, agent);
+  }
+  return agent;
+}
+
+/**
  * Process a single decoded contract event.
  *
  * Only uses methods that exist on the `AgentDb` interface:
@@ -155,7 +181,8 @@ function handleEvent(
         status: "online",
       });
 
-      // Invalidate registry cache so the updated agent list is served fresh
+      // Invalidate registry and agent-by-id caches so fresh data is served.
+      invalidateCachedAgentById(data.agent_id);
       invalidateAgentsCache().catch(() => {/* best-effort — sync must not crash */});
 
       logger.info(
@@ -171,7 +198,8 @@ function handleEvent(
       // Remove the agent from the local DB using the existing delete method.
       db.delete(data.agent_id);
 
-      // Invalidate registry cache so the agent no longer appears in listings
+      // Invalidate registry and agent-by-id caches so removed agent is not served.
+      invalidateCachedAgentById(data.agent_id);
       invalidateAgentsCache().catch(() => {/* best-effort */});
 
       logger.info(
@@ -189,9 +217,10 @@ function handleEvent(
           ? payload
           : (payload as { agent_id?: string }).agent_id ?? "";
 
-      const existing = db.findById(agentId);
+      const existing = findAgentByIdCached(db, agentId);
       if (existing) {
         db.upsert({ ...existing, status: "offline" });
+        invalidateCachedAgentById(agentId);
         invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent frozen (marked offline)");
@@ -205,9 +234,10 @@ function handleEvent(
           ? payload
           : (payload as { agent_id?: string }).agent_id ?? "";
 
-      const existing = db.findById(agentId);
+      const existing = findAgentByIdCached(db, agentId);
       if (existing) {
         db.upsert({ ...existing, status: "online", lastSeenAt: new Date().toISOString() });
+        invalidateCachedAgentById(agentId);
         invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info({ agentId }, "agent unfrozen (marked online)");
@@ -223,16 +253,18 @@ function handleEvent(
             (payload as { new_price?: number }).new_price ?? 0,
           ];
 
-      const existing = db.findById(agentId as string);
+      const normalizedAgentId = agentId as string;
+      const existing = findAgentByIdCached(db, normalizedAgentId);
       if (existing) {
         db.upsert({
           ...existing,
           pricingXLM: Number(priceStroops) / 10_000_000,
         });
+        invalidateCachedAgentById(normalizedAgentId);
         invalidateAgentsCache().catch(() => {/* best-effort */});
       }
       logger.info(
-        { agentId, priceXLM: (Number(priceStroops) / 10_000_000).toFixed(7) },
+        { agentId: normalizedAgentId, priceXLM: (Number(priceStroops) / 10_000_000).toFixed(7) },
         "price updated"
       );
       break;
