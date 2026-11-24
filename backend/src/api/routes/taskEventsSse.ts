@@ -212,8 +212,29 @@ export function createTaskEventsSseHandler(options: TaskEventsSseOptions): Reque
         }
       };
 
+      // Graceful shutdown (#901): tell the client why the stream is ending,
+      // end the response so buffered writes flush, and let the hub count the
+      // connection as drained when the socket closes. If the drain deadline
+      // passes, the hub calls `forceClose` to release the socket immediately.
+      const onShutdown = (): void => {
+        if (closed) return;
+        finished = true;
+        res.write(
+          `event: close\ndata: ${JSON.stringify({ type: "server_shutdown", taskId })}\n\n`,
+        );
+        res.end();
+      };
+      const forceClose = (): void => {
+        res.destroy();
+        cleanup();
+      };
+
       // Subscribe, then drain the backlog through the shared hub (bounded pages).
-      unsubscribe = hub.subscribe(taskId, { lastEventId: parseResumeCursor(req) }, deliver);
+      unsubscribe = hub.subscribe(
+        taskId,
+        { lastEventId: parseResumeCursor(req), onShutdown, onForceClose: forceClose },
+        deliver,
+      );
       if (closed) unsubscribe();
       else hub.flush(taskId);
     } catch (err) {

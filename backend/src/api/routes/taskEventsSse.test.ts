@@ -60,6 +60,7 @@ describe("GET /api/tasks/:id/events/stream", () => {
   let port: number;
   let store: ArrayStore;
   let bus: EmitterBus;
+  let hub: TaskStreamHub;
   const clients: Client[] = [];
 
   beforeAll(() => {
@@ -70,7 +71,7 @@ describe("GET /api/tasks/:id/events/stream", () => {
   beforeEach(async () => {
     store = new ArrayStore();
     bus = new EmitterBus();
-    const hub = new TaskStreamHub({ store, bus });
+    hub = new TaskStreamHub({ store, bus });
     const app = express();
     app.get(
       "/api/tasks/:id/events/stream",
@@ -211,5 +212,33 @@ describe("GET /api/tasks/:id/events/stream", () => {
     await client.closed;
     await new Promise((r) => setTimeout(r, 50));
     expect(bus.emitter.listenerCount(TASK.id)).toBe(0);
+  });
+
+  it("notifies all SSE clients and closes their streams on graceful shutdown", async () => {
+    const first = await connect();
+    const second = await connect();
+    await first.waitFor(": keep-alive");
+    await second.waitFor(": keep-alive");
+    expect(hub.activeTaskCount()).toBe(1);
+
+    await hub.shutdown(2_000);
+
+    for (const client of [first, second]) {
+      expect(client.body()).toContain("event: close");
+      expect(client.body()).toContain('data: {"type":"server_shutdown","taskId":"task_1"}');
+      await client.closed;
+    }
+    expect(hub.activeTaskCount()).toBe(0);
+    expect(bus.emitter.listenerCount(TASK.id)).toBe(0);
+  });
+
+  it("sends a close event to clients that connect during shutdown", async () => {
+    await hub.shutdown(10);
+    const client = await connect();
+    await client.closed;
+
+    expect(client.status).toBe(200);
+    expect(client.body()).toContain("event: close");
+    expect(hub.activeTaskCount()).toBe(0);
   });
 });
