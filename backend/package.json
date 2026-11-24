@@ -14,7 +14,9 @@
     "test:coverage": "jest --coverage --runInBand --forceExit",
     "test:contract": "jest tests/openapiContract.test.ts tests/openapiRouteDiff.test.ts --runInBand --forceExit",
     "test:e2e": "jest --config ../tests/e2e/jest.config.js --runInBand --forceExit",
-    "test:performance": "ts-node tests/performance/run.ts",
+    "test:performance": "ts-node --transpile-only tests/performance/run.ts",
+    "perf": "ts-node --transpile-only tests/performance/run.ts",
+    "perf:update": "ts-node --transpile-only tests/performance/run.ts --update",
     "validate:env": "ts-node --transpile-only scripts/validate-env-example.ts",
     "test:watch": "jest --watch",
     "lint": "eslint src --ext .ts",
@@ -52,6 +54,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/autocannon": "^7.12.7",
     "@types/better-sqlite3": "^7.6.13",
     "@types/compression": "1.7.5",
     "@types/cors": "^2.8.17",
@@ -66,6 +69,7 @@
     "@typescript-eslint/eslint-plugin": "7.18.0",
     "@typescript-eslint/parser": "7.18.0",
     "ajv": "8.20.0",
+    "autocannon": "^9.0.0",
     "eslint": "8.57.0",
     "jest": "29.7.0",
     "prettier": "^3.2.5",

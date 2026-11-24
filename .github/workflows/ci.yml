@@ -101,8 +101,17 @@ jobs:
       - name: OpenAPI contract tests
         run: npm run test:contract
 
-      - name: Performance latency budgets
-        run: npm run test:performance
+      - name: Performance regression check
+        run: npm run perf
+
+      - name: Upload performance report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-performance-report-${{ github.run_id }}
+          path: backend/test-results/performance/
+          if-no-files-found: warn
+          retention-days: 14
 
   frontend:
     name: frontend
