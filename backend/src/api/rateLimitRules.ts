@@ -25,4 +25,12 @@ export const RATE_LIMIT_RULES = {
     windowMs: 60 * 1000,
     maxRequests: 30, // 30/min per wallet/IP
   } as RateLimitRule,
+
+  // Privileged /api/admin/* operations. Deliberately stricter than the
+  // public/authenticated groups; operators can tune the live limiter through
+  // RATE_LIMIT_ADMIN_* and exempt trusted IPs via ADMIN_IP_ALLOWLIST.
+  ADMIN: {
+    windowMs: 60 * 1000,
+    maxRequests: 10, // 10/min per IP
+  } as RateLimitRule,
 };

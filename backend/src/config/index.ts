@@ -129,7 +129,13 @@ const envSchema = z.object({
   RATE_LIMIT_AUTHED_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   RATE_LIMIT_AUTHED_MAX_REQUESTS: z.coerce.number().int().positive().default(30),
   RATE_LIMIT_ADMIN_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
-  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(20),
+  RATE_LIMIT_ADMIN_MAX_REQUESTS: z.coerce.number().int().positive().default(10),
+  /**
+   * Comma-separated IPs exempt from admin rate limiting (trusted operators or
+   * internal proxies). Empty by default. IPv4-mapped IPv6 addresses are
+   * normalised, so `127.0.0.1` also matches `::ffff:127.0.0.1`.
+   */
+  ADMIN_IP_ALLOWLIST: z.string().default(''),
   DAILY_TASK_LIMIT_PER_WALLET: z.coerce.number().int().min(0).default(100),
 
   // ── Per-wallet abuse-control quota (issue #803) ─────────────────────────────
