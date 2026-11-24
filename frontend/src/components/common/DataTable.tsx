@@ -28,6 +28,11 @@ export interface DataTableProps<T> {
   onRowSelect?: (row: T) => void;
   onRowClick?: (row: T) => void;
   onSort?: (key: string, direction: SortDirection) => void;
+  /** Optional native table caption; supplies the table's accessible name. */
+  caption?: string;
+  /** Controlled sort state. When omitted, sorting is managed internally. */
+  sortKey?: string | null;
+  sortDirection?: SortDirection;
   rowClassName?: (row: T) => string;
   getRowTestId?: (row: T) => string;
 }
@@ -75,17 +80,32 @@ export function DataTable<T>({
   onRowSelect,
   onRowClick,
   onSort,
+  caption,
+  sortKey,
+  sortDirection,
   rowClassName,
   getRowTestId,
 }: DataTableProps<T>) {
-  const [sortKey, setSortKey] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [internalSortKey, setInternalSortKey] = useState<string | null>(null);
+  const [internalSortDirection, setInternalSortDirection] = useState<SortDirection>('asc');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<Array<HTMLTableRowElement | null>>([]);
   const [scrollTop, setScrollTop] = useState(0);
   const [activeRowIndex, setActiveRowIndex] = useState(0);
 
-  const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDirection), [rows, sortKey, sortDirection]);
+  const effectiveSortKey = sortKey !== undefined ? sortKey : internalSortKey;
+  const effectiveSortDirection = sortDirection ?? internalSortDirection;
+
+  useEffect(() => {
+    if (sortKey === undefined) return;
+    setInternalSortKey(sortKey);
+    setInternalSortDirection(sortDirection ?? 'asc');
+  }, [sortKey, sortDirection]);
+
+  const sortedRows = useMemo(
+    () => sortRows(rows, effectiveSortKey, effectiveSortDirection),
+    [rows, effectiveSortKey, effectiveSortDirection]
+  );
 
   const itemCount = sortedRows.length;
   const overscan = 6;
@@ -109,12 +129,12 @@ export function DataTable<T>({
     const nextKey = column.key;
     let nextDirection: SortDirection = 'asc';
 
-    if (sortKey === nextKey) {
-      nextDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    if (effectiveSortKey === nextKey) {
+      nextDirection = effectiveSortDirection === 'asc' ? 'desc' : 'asc';
     }
 
-    setSortKey(nextKey);
-    setSortDirection(nextDirection);
+    setInternalSortKey(nextKey);
+    setInternalSortDirection(nextDirection);
     if (onSort) {
       onSort(nextKey, nextDirection);
     }
@@ -169,34 +189,47 @@ export function DataTable<T>({
         onScroll={virtualization ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
       >
         <table className={styles.table}>
+          {caption && <caption className={styles.caption}>{caption}</caption>}
           <thead className={stickyHeader ? styles.stickyHeader : ''}>
             <tr>
-              {onRowSelect && <th className={styles.selectionCell} aria-label="Row selection" />}
-              {columns.map((column) => (
-                <th
-                  key={column.key}
-                  className={column.sortable ? styles.sortableHeader : undefined}
-                  style={{ width: column.width, minWidth: column.minWidth, resize: 'horizontal' }}
-                >
-                  {column.sortable ? (
-                    <button
-                      type="button"
-                      className={styles.sortButton}
-                      onClick={() => handleSort(column)}
-                      aria-label={`Sort by ${column.header}`}
-                    >
-                      <span>{column.header}</span>
-                      {sortKey === column.key ? (
-                        sortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
-                      ) : (
-                        <ArrowUpDown size={12} />
-                      )}
-                    </button>
-                  ) : (
-                    column.header
-                  )}
-                </th>
-              ))}
+              {onRowSelect && <th scope="col" className={styles.selectionCell} aria-label="Row selection" />}
+              {columns.map((column) => {
+                const ariaSort = column.sortable
+                  ? effectiveSortKey === column.key
+                    ? effectiveSortDirection === 'asc'
+                      ? 'ascending'
+                      : 'descending'
+                    : 'none'
+                  : undefined;
+
+                return (
+                  <th
+                    key={column.key}
+                    scope="col"
+                    aria-sort={ariaSort}
+                    className={column.sortable ? styles.sortableHeader : undefined}
+                    style={{ width: column.width, minWidth: column.minWidth, resize: 'horizontal' }}
+                  >
+                    {column.sortable ? (
+                      <button
+                        type="button"
+                        className={styles.sortButton}
+                        onClick={() => handleSort(column)}
+                        aria-label={`Sort by ${column.header}`}
+                      >
+                        <span>{column.header}</span>
+                        {effectiveSortKey === column.key ? (
+                          effectiveSortDirection === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
+                        ) : (
+                          <ArrowUpDown size={12} />
+                        )}
+                      </button>
+                    ) : (
+                      column.header
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -223,7 +256,7 @@ export function DataTable<T>({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => handleSelect(row)}
+                        onChange={() => handleSelect(rowKey, row)}
                         onClick={(event) => event.stopPropagation()}
                         aria-label={`Select row ${String(rowKey)}`}
                       />

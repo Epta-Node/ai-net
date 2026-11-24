@@ -15,7 +15,7 @@ import {
   filtersFromSearchParams,
   filtersToSearchParams,
   priceDomain,
-  type AgentFilters,
+  type AgentFilters as RegistryFilters,
   type SortKey,
 } from '../utils/agentRegistry'
 import styles from './AgentsPage.module.css'
@@ -72,7 +72,7 @@ function AgentsPage() {
   )
 
   const updateFilters = useCallback(
-    (next: Partial<AgentFilters>) => {
+    (next: Partial<RegistryFilters>) => {
       const merged = { ...filters, ...next }
       setSearchParams(filtersToSearchParams(merged), { replace: true })
     },
