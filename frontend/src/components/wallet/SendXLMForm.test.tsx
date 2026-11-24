@@ -248,10 +248,14 @@ describe('SendXLMForm Component', () => {
       await waitFor(() => {
         expect(screen.getByText(testAddress)).toBeInTheDocument();
         expect(screen.getByText(/10 XLM/)).toBeInTheDocument();
+        expect(screen.getByText('Network fee')).toBeInTheDocument();
+        expect(screen.getByText('0.0000100 XLM')).toBeInTheDocument();
       });
     });
 
     it('closes confirmation when cancel is clicked', async () => {
+      global.fetch = vi.fn();
+
       render(<SendXLMForm />);
 
       const destInput = screen.getByLabelText(/destination/i);
@@ -271,6 +275,32 @@ describe('SendXLMForm Component', () => {
 
       await waitFor(() => {
         expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('submits only after explicit confirmation', async () => {
+      global.fetch = vi.fn(() => new Promise<Response>(() => {}));
+
+      render(<SendXLMForm />);
+
+      fireEvent.change(screen.getByLabelText(/destination/i), {
+        target: {
+          value: 'GBRPYHIL2CI3WHZDTOOQFC6EB4PSQUMACTUN4QE2LBNVQWSRUCF6XX2H',
+        },
+      });
+      fireEvent.change(screen.getByLabelText(/amount/i), {
+        target: { value: '10' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+      expect(await screen.findByRole('dialog')).toBeInTheDocument();
+      expect(global.fetch).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: /confirm & send/i }));
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledTimes(1);
       });
     });
 

@@ -74,6 +74,7 @@
   "wallet.send.confirmTitle": "确认支付",
   "wallet.send.to": "收款方：",
   "wallet.send.amount": "金额：",
+  "wallet.send.fee": "网络费用：",
   "wallet.send.memo": "备注：",
   "wallet.send.confirmSend": "确认并发送",
   "wallet.send.signingFreighter": "正在使用 Freighter 签名……",

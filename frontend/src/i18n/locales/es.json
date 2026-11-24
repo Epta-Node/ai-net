@@ -74,6 +74,7 @@
   "wallet.send.confirmTitle": "Confirm Payment",
   "wallet.send.to": "To:",
   "wallet.send.amount": "Amount:",
+  "wallet.send.fee": "Network fee:",
   "wallet.send.memo": "Memo:",
   "wallet.send.confirmSend": "Confirm & Send",
   "wallet.send.signingFreighter": "Signing with Freighter...",
