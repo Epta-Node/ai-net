@@ -4,6 +4,8 @@
  * Sends a DAG node to a remote agent endpoint via HTTP POST and returns the
  * parsed JSON response.  Retries on transient/5xx errors using exponential
  * back-off; gives up after `maxRetries` attempts and rethrows the last error.
+ * A per-agent circuit breaker sheds dispatch to endpoints that keep failing
+ * (#905).
  *
  * Implements the real HTTP dispatch required by issue #169:
  * replaces the `defaultDispatch` stub that always threw, restoring the full
@@ -13,6 +15,55 @@
 
 import type { AgentRegistration } from '../types/agent';
 import type { DAGNode } from '../types/task';
+import {
+  getCircuitBreaker,
+  type CircuitBreaker,
+  type CircuitBreakerEvent,
+} from '../services/circuitBreaker.js';
+import { createLogger } from '../utils/logger';
+
+/** A consistently failing agent is shed after five failed dispatches. */
+export const AGENT_DISPATCH_FAILURE_THRESHOLD = 5;
+/** Recovery probe is allowed one minute after the circuit opens. */
+export const AGENT_DISPATCH_RESET_TIMEOUT_MS = 60_000;
+
+/** Circuit breakers are scoped per agent so one bad agent cannot shed others. */
+export function agentDispatchBreakerName(agentId: string): string {
+  return `agent-dispatch:${agentId}`;
+}
+
+/**
+ * Resolve (or create) the breaker guarding an agent endpoint.
+ *
+ * State changes are logged with the agent ID so operators can see when the
+ * coordinator stops dispatching to a failing agent and when it probes again.
+ */
+function agentDispatchBreaker(agent: AgentRegistration): CircuitBreaker {
+  return getCircuitBreaker({
+    name: agentDispatchBreakerName(agent.id),
+    failureThreshold: AGENT_DISPATCH_FAILURE_THRESHOLD,
+    recoveryTimeoutMs: AGENT_DISPATCH_RESET_TIMEOUT_MS,
+    onStateChange: (event: CircuitBreakerEvent) => {
+      const log = createLogger({ module: 'dispatch-circuit-breaker', agentId: agent.id });
+      const payload = {
+        event: 'circuit_breaker_state_change',
+        circuit: event.name,
+        agentId: agent.id,
+        from: event.from,
+        to: event.to,
+        timestamp: event.timestamp,
+      };
+      if (event.to === 'OPEN') {
+        log.warn(
+          payload,
+          `Circuit opened for agent ${agent.id} after ${AGENT_DISPATCH_FAILURE_THRESHOLD} failures`,
+        );
+      } else {
+        log.info(payload, `Circuit for agent ${agent.id} transitioned ${event.from} -> ${event.to}`);
+      }
+    },
+  });
+}
 
 export interface DispatchOptions {
   /** Maximum time (ms) to wait for a single HTTP request before aborting */
@@ -47,13 +98,13 @@ function isRetryableStatus(status: number): boolean {
  * @param options - Overrides for timeout / retry behaviour.
  * @param fetchImpl - Injectable `fetch` implementation (defaults to global).
  */
-export async function httpDispatch(
+async function dispatchWithRetries(
   agent: AgentRegistration,
   nodeId: string,
   node: DAGNode,
   context: string,
-  options: DispatchOptions = DEFAULT_DISPATCH_OPTIONS,
-  fetchImpl: typeof fetch = fetch,
+  options: DispatchOptions,
+  fetchImpl: typeof fetch,
 ): Promise<unknown> {
   const url = `${agent.endpoint.replace(/\/$/, '')}/execute`;
   let lastError: Error = new Error(`Dispatch to agent ${agent.id} failed before first attempt`);
@@ -118,6 +169,34 @@ export async function httpDispatch(
   }
 
   throw lastError;
+}
+
+/**
+ * Dispatch a DAG node through the per-agent circuit breaker.
+ *
+ * The breaker is checked before any HTTP work starts, so a shed agent is not
+ * retried on every task. A completed dispatch (success or final failure) is
+ * recorded once; successes reset the consecutive-failure count.
+ */
+export async function httpDispatch(
+  agent: AgentRegistration,
+  nodeId: string,
+  node: DAGNode,
+  context: string,
+  options: DispatchOptions = DEFAULT_DISPATCH_OPTIONS,
+  fetchImpl: typeof fetch = fetch,
+): Promise<unknown> {
+  const breaker = agentDispatchBreaker(agent);
+  breaker.assertClosed();
+
+  try {
+    const result = await dispatchWithRetries(agent, nodeId, node, context, options, fetchImpl);
+    breaker.recordSuccess();
+    return result;
+  } catch (err) {
+    breaker.recordFailure();
+    throw err;
+  }
 }
 
 /**
