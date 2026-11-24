@@ -21,6 +21,10 @@ function makeTx(overrides: Partial<TransactionEvent> = {}): TransactionEvent {
 }
 
 describe('TransactionTable', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('prompts to connect when no wallet is connected', () => {
     render(<TransactionTable transactions={[]} loading={false} publicKey={null} />)
     expect(screen.getByText('Connect your wallet to view transaction history.')).toBeInTheDocument()

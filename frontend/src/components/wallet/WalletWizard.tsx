@@ -1,16 +1,19 @@
 import React, { useState } from 'react'
 import { Wallet, Download, CheckCircle, ExternalLink } from 'lucide-react'
 import { useWallet } from '../../context/WalletContext'
+import { useToast } from '../../context/ToastContext'
 import { useWalletBalance } from '../../hooks/useWalletBalance'
 import { useOnboarding } from '../../hooks/useOnboarding'
 import { WizardStep } from './WizardStep'
 import { WizardProgress } from './WizardProgress'
+import CopyButton from '../common/CopyButton'
 import styles from './WalletWizard.module.css'
 
 export const WalletWizard: React.FC = () => {
   const { freighterAvailable, connectFreighter, connected, publicKey, completeWizard } = useWallet()
   const { balance, balances } = useWalletBalance(publicKey)
   const { currentStep, nextStep, prevStep } = useOnboarding(4)
+  const { showToast } = useToast()
 
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
@@ -111,7 +114,15 @@ export const WalletWizard: React.FC = () => {
             {connected && publicKey ? (
               <div className={styles.walletInfo}>
                 <p>Connected Address:</p>
-                <code>{publicKey}</code>
+                <div className={styles.addressRow}>
+                  <code>{publicKey}</code>
+                  <CopyButton
+                    text={publicKey}
+                    label="Copy"
+                    copiedLabel="Copied!"
+                    onCopy={() => showToast('Wallet address copied to clipboard', 'success')}
+                  />
+                </div>
               </div>
             ) : (
               <button 

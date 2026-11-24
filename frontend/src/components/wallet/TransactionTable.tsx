@@ -15,6 +15,8 @@ import { useSelectTypeahead } from '../../hooks/useSelectTypeahead'
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
 
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
+
 interface TransactionTableProps {
   transactions: TransactionEvent[]
   loading: boolean
@@ -46,23 +48,12 @@ function truncateAddress(addr: string): string {
 
 export function TransactionTable({ transactions, loading, publicKey }: TransactionTableProps) {
   const { t, i18n } = useTranslation()
+  const { showToast } = useToast()
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [pageSize] = useState<number>(25)
+  const [pageSize, setPageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
-  const pageSizeOptions = useMemo(
-    () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
-    []
-  )
-  const selectPageSize = (size: number) => {
-    setPageSize(size)
-    setPage(1)
-  }
-  const handlePageSizeTypeahead = useSelectTypeahead({
-    options: pageSizeOptions,
-    onMatch: selectPageSize,
-  })
 
   const filtered = useMemo(
     () => filterTransactions(transactions, { search, from: dateFrom || null, to: dateTo || null }),

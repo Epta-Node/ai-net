@@ -227,6 +227,19 @@
   word-break: break-all;
 }
 
+.addressRow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.addressRow code {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
 .balanceChips {
   display: flex;
   flex-wrap: wrap;
