@@ -179,6 +179,23 @@ describe("AgentDb.listCursor", () => {
     expect(seen.size).toBe(15);
   });
 
+  it("uses the agent id as a stable tie breaker when timestamps match", () => {
+    const timestamp = new Date("2025-01-01T00:00:00.000Z").toISOString();
+    for (let i = 0; i < 7; i++) {
+      db.upsert(makeAgent({ id: `tied_${i}`, lastSeenAt: timestamp }));
+    }
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = db.listCursor({ limit: 3, cursor });
+      seen.push(...page.items.filter((agent) => agent.id.startsWith("tied_")).map((agent) => agent.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    expect(seen).toEqual(["tied_6", "tied_5", "tied_4", "tied_3", "tied_2", "tied_1", "tied_0"]);
+  });
+
   it("respects the status filter", () => {
     db.upsert(makeAgent({ id: "agent_offline", status: "offline" }));
     const page = db.listCursor({ limit: 50, status: "offline" });
