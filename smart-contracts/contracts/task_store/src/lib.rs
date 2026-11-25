@@ -59,10 +59,11 @@ mod types;
 mod tests;
 
 pub use types::{
-    CoordinatorSetEvent, DataKey, Error, LifecycleStatusChangedEvent, LifecycleTaskCreatedEvent,
-    OracleManagerSetEvent, TaskCreatedEvent, TaskFinalizedEvent, TaskMetadata, TaskPage,
-    TaskRecord, TaskStatus, TaskUpdatedEvent, TaskVersionRecord, TaskWithHistory, DEFAULT_TTL_DAYS,
-    LEDGERS_PER_DAY, MAX_COMPRESSED_DAG_BYTES, MAX_HISTORY_RECORDS, MAX_TASKS_PAGE_SIZE,
+    CleanupResult, CoordinatorSetEvent, DataKey, Error, LifecycleStatusChangedEvent,
+    LifecycleTaskCreatedEvent, OracleManagerSetEvent, TaskCreatedEvent, TaskExpiredEvent,
+    TaskFinalizedEvent, TaskMetadata, TaskPage, TaskRecord, TaskStatus, TaskTtlExtendedEvent,
+    TaskUpdatedEvent, TaskVersionRecord, TaskWithHistory, DEFAULT_TTL_DAYS, LEDGERS_PER_DAY,
+    MAX_COMPRESSED_DAG_BYTES, MAX_HISTORY_RECORDS, MAX_TASKS_PAGE_SIZE,
     MAX_TRACKED_TASKS_PER_CREATOR, MAX_TTL_DAYS, TASK_LIFECYCLE_EVENT_VERSION,
 };
 
@@ -956,6 +957,282 @@ impl TaskStoreContract {
             total,
             next_cursor: if end < total { Some(end) } else { None },
         }
+    }
+
+    // ── TTL-based cleanup ────────────────────────────────────────────────────
+
+    /// Remove all persistent-storage entries for every expired task id in
+    /// `task_ids`.
+    ///
+    /// A task is considered expired once `env.ledger().timestamp()` ≥
+    /// `expires_at`.  For DAG tasks (`DataKey::Task`) the expiry is read from
+    /// the stored `TaskMetadata`; for lifecycle tasks (`DataKey::LifecycleTask`)
+    /// it is re-derived from `created_at` using the same `lifecycle_expires_at`
+    /// formula used at creation time.
+    ///
+    /// For each expired task the following persistent keys are removed:
+    /// `Task`/`LifecycleTask`, `TaskHistory`, `TaskVersionCount`, `TaskCreator`.
+    /// The `CreatorTasks` index is *not* modified here — that is a per-creator
+    /// vector that the host prunes automatically when its own rent window
+    /// expires, and rebuilding it on every cleanup call would cost unbounded gas.
+    ///
+    /// An entry that is not found is silently skipped (idempotent: calling
+    /// cleanup twice on the same id is safe).  Live (non-expired) tasks are
+    /// never touched. The function is permissionless so off-chain keepers do not
+    /// need admin credentials to run it.
+    ///
+    /// `task_ids` is bounded by `MAX_TASK_QUERY_BATCH` (50); a larger batch is
+    /// rejected with [`Error::BatchTooLarge`] to bound per-call gas.
+    pub fn cleanup_expired_tasks(
+        env: Env,
+        task_ids: Vec<BytesN<32>>,
+    ) -> Result<CleanupResult, Error> {
+        if task_ids.len() > MAX_TASK_QUERY_BATCH {
+            return Err(Error::BatchTooLarge);
+        }
+
+        let now = env.ledger().timestamp();
+        let mut tasks_expired: u32 = 0;
+        let mut entries_removed: u32 = 0;
+
+        for task_id in task_ids.iter() {
+            // ── Determine whether this task is expired ─────────────────────
+
+            let dag_key = DataKey::Task(task_id.clone());
+            let lifecycle_key = DataKey::LifecycleTask(task_id.clone());
+
+            let expired_at: Option<u64> =
+                if let Some(meta) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, TaskMetadata>(&dag_key)
+                {
+                    if now >= meta.expires_at {
+                        Some(meta.expires_at)
+                    } else {
+                        None // live DAG task — skip
+                    }
+                } else if let Some(record) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, TaskRecord>(&lifecycle_key)
+                {
+                    let exp = lifecycle_expires_at(record.created_at);
+                    if now >= exp {
+                        Some(exp)
+                    } else {
+                        None // live lifecycle task — skip
+                    }
+                } else {
+                    None // not found — skip
+                };
+
+            let expired_at = match expired_at {
+                Some(ts) => ts,
+                None => continue,
+            };
+
+            // ── Remove all storage keys belonging to this task ─────────────
+
+            let storage = env.storage().persistent();
+
+            if storage.has(&dag_key) {
+                storage.remove(&dag_key);
+                entries_removed = entries_removed.saturating_add(1);
+            }
+            if storage.has(&lifecycle_key) {
+                storage.remove(&lifecycle_key);
+                entries_removed = entries_removed.saturating_add(1);
+            }
+
+            let history_key = DataKey::TaskHistory(task_id.clone());
+            if storage.has(&history_key) {
+                storage.remove(&history_key);
+                entries_removed = entries_removed.saturating_add(1);
+            }
+
+            let count_key = DataKey::TaskVersionCount(task_id.clone());
+            if storage.has(&count_key) {
+                storage.remove(&count_key);
+                entries_removed = entries_removed.saturating_add(1);
+            }
+
+            let creator_key = DataKey::TaskCreator(task_id.clone());
+            if storage.has(&creator_key) {
+                storage.remove(&creator_key);
+                entries_removed = entries_removed.saturating_add(1);
+            }
+
+            tasks_expired = tasks_expired.saturating_add(1);
+
+            env.events().publish(
+                (symbol_short!("task_str"), symbol_short!("expired")),
+                TaskExpiredEvent {
+                    task_id,
+                    expired_at,
+                    cleaned_at: now,
+                },
+            );
+        }
+
+        Ok(CleanupResult {
+            tasks_checked: task_ids.len(),
+            tasks_expired,
+            entries_removed,
+        })
+    }
+
+    /// Extend the rent window of an active task by `extension_days` additional
+    /// days (capped so the new total does not exceed `MAX_TTL_DAYS` from now).
+    ///
+    /// Only the task's creator or the configured coordinator may extend a task
+    /// they did not create; the `updater` address must sign via `require_auth`.
+    ///
+    /// The function updates:
+    ///   - `TaskMetadata::expires_at` / `TaskRecord` (the timestamp gate)
+    ///   - The persistent-storage TTL on `Task`/`LifecycleTask`, `TaskHistory`,
+    ///     and `TaskVersionCount` (the rent gate)
+    ///
+    /// Returns [`Error::Expired`] when called on a task whose `expires_at` has
+    /// already passed.  Returns [`Error::InvalidTtl`] when `extension_days` is
+    /// zero or would push the window beyond `MAX_TTL_DAYS`.
+    pub fn extend_task_ttl(
+        env: Env,
+        task_id: BytesN<32>,
+        updater: Address,
+        extension_days: u32,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        updater.require_auth();
+
+        if extension_days == 0 {
+            return Err(Error::InvalidTtl);
+        }
+
+        let now = env.ledger().timestamp();
+        let max_seconds = u64::from(MAX_TTL_DAYS).saturating_mul(SECONDS_PER_DAY);
+
+        // ── DAG-based task path ────────────────────────────────────────────
+
+        let dag_key = DataKey::Task(task_id.clone());
+        if let Some(mut meta) = env
+            .storage()
+            .persistent()
+            .get::<_, TaskMetadata>(&dag_key)
+        {
+            // Authorization: creator (tracked in TaskCreator) or coordinator.
+            let creator: Option<Address> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::TaskCreator(task_id.clone()));
+            ensure_can_update(
+                &env,
+                &updater,
+                creator.as_ref(),
+                Some(&meta.assigned_agents),
+                Error::Unauthorized,
+            )?;
+
+            if now >= meta.expires_at {
+                return Err(Error::Expired);
+            }
+
+            let additional_secs =
+                u64::from(extension_days).saturating_mul(SECONDS_PER_DAY);
+            let new_expires_at = meta
+                .expires_at
+                .saturating_add(additional_secs)
+                .min(now.saturating_add(max_seconds));
+
+            if new_expires_at <= meta.expires_at {
+                return Err(Error::InvalidTtl);
+            }
+
+            meta.expires_at = new_expires_at;
+            env.storage().persistent().set(&dag_key, &meta);
+
+            let ledgers = remaining_ledgers(&env, new_expires_at);
+            for key in [
+                dag_key,
+                DataKey::TaskHistory(task_id.clone()),
+                DataKey::TaskVersionCount(task_id.clone()),
+            ] {
+                if env.storage().persistent().has(&key) {
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
+                }
+            }
+
+            env.events().publish(
+                (symbol_short!("task_str"), symbol_short!("ttl_ext")),
+                TaskTtlExtendedEvent {
+                    task_id,
+                    extension_days,
+                    new_expires_at,
+                },
+            );
+
+            return Ok(());
+        }
+
+        // ── Lifecycle-based task path ──────────────────────────────────────
+
+        let lifecycle_key = DataKey::LifecycleTask(task_id.clone());
+        if let Some(record) = env
+            .storage()
+            .persistent()
+            .get::<_, TaskRecord>(&lifecycle_key)
+        {
+            ensure_can_update(
+                &env,
+                &updater,
+                Some(&record.creator),
+                None,
+                Error::Unauthorized,
+            )?;
+
+            let current_expires_at = lifecycle_expires_at(record.created_at);
+            if now >= current_expires_at {
+                return Err(Error::Expired);
+            }
+
+            let additional_secs =
+                u64::from(extension_days).saturating_mul(SECONDS_PER_DAY);
+            let new_expires_at = current_expires_at
+                .saturating_add(additional_secs)
+                .min(now.saturating_add(max_seconds));
+
+            if new_expires_at <= current_expires_at {
+                return Err(Error::InvalidTtl);
+            }
+
+            let ledgers = remaining_ledgers(&env, new_expires_at);
+            for key in [
+                lifecycle_key,
+                DataKey::TaskHistory(task_id.clone()),
+                DataKey::TaskVersionCount(task_id.clone()),
+            ] {
+                if env.storage().persistent().has(&key) {
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&key, ledgers.saturating_sub(1), ledgers);
+                }
+            }
+
+            env.events().publish(
+                (symbol_short!("task_str"), symbol_short!("ttl_ext")),
+                TaskTtlExtendedEvent {
+                    task_id,
+                    extension_days,
+                    new_expires_at,
+                },
+            );
+
+            return Ok(());
+        }
+
+        Err(Error::NotFound)
     }
 }
 

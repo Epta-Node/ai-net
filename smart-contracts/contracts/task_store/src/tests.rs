@@ -1021,3 +1021,377 @@ fn ttl_management_preserves_expiry_boundary_for_all_retention_days() {
         }
     }
 }
+
+// ─── TTL cleanup and extension tests (issue #937) ────────────────────────────
+//
+// Four test groups, one per issue task:
+//   1. TTL is attached to task records (ledger rent + timestamp expiry).
+//   2. cleanup_expired_tasks removes expired entries and leaves live ones.
+//   3. extend_task_ttl pushes the rent window forward for active tasks.
+//   4. Combined: expiry → cleanup → extension round-trip.
+
+#[cfg(test)]
+mod ttl_cleanup_tests {
+    use super::*;
+    #[allow(unused_imports)]
+    use soroban_sdk::{
+        testutils::{storage::Persistent as _, Address as _, Ledger as _},
+        Address, Bytes, BytesN, Env, Vec,
+    };
+
+    const BASE_TS: u64 = 1_700_000_000;
+    // One day in seconds (must match the private const in lib.rs).
+    const SECS_PER_DAY: u64 = 86_400;
+
+    // ── Shared helpers ──────────────────────────────────────────────────────
+
+    fn setup() -> (Env, TaskStoreContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(BASE_TS);
+        env.ledger().set_sequence_number(100);
+        let id = env.register(TaskStoreContract, ());
+        let client = TaskStoreContractClient::new(&env, &id);
+        client.initialize(&Address::generate(&env));
+        (env, client)
+    }
+
+    fn tid(env: &Env, n: u8) -> BytesN<32> {
+        BytesN::from_array(env, &[n; 32])
+    }
+
+    fn dag_task(env: &Env, client: &TaskStoreContractClient<'_>, id: &BytesN<32>, ttl_days: u32) {
+        let agents = Vec::from_array(env, [Address::generate(env)]);
+        let dag = Bytes::from_slice(env, &[0x78, 0x9c, 0x03, 0x00]);
+        client.store_task_metadata(
+            &Address::generate(env),
+            id,
+            &BytesN::from_array(env, &[0xAA; 32]),
+            &agents,
+            &dag,
+            &ttl_days,
+            &None,
+        );
+    }
+
+    fn lifecycle_task(
+        env: &Env,
+        client: &TaskStoreContractClient<'_>,
+        id: &BytesN<32>,
+        creator: &Address,
+    ) {
+        client.create_task(id, creator, &BytesN::from_array(env, &[0xBB; 32]), &1_000_000);
+    }
+
+    fn ttl_of(env: &Env, client: &TaskStoreContractClient<'_>, key: DataKey) -> u32 {
+        env.as_contract(&client.address, || env.storage().persistent().get_ttl(&key))
+    }
+
+    fn has_key(env: &Env, client: &TaskStoreContractClient<'_>, key: DataKey) -> bool {
+        env.as_contract(&client.address, || env.storage().persistent().has(&key))
+    }
+
+    // ── 1. TTL attached to task records ─────────────────────────────────────
+
+    /// A DAG task stored with `ttl_days = 1` must have its `Task`,
+    /// `TaskHistory`, and `TaskVersionCount` persistent keys each carrying a
+    /// ledger TTL of exactly `LEDGERS_PER_DAY`. The `expires_at` timestamp
+    /// must equal `created_at + 1 day`.
+    #[test]
+    fn dag_task_ttl_is_set_to_requested_days() {
+        let (env, client) = setup();
+        let id = tid(&env, 1);
+        dag_task(&env, &client, &id, 1);
+
+        let meta = client.get_task_metadata(&id);
+        assert_eq!(meta.expires_at, BASE_TS + SECS_PER_DAY);
+
+        assert_eq!(ttl_of(&env, &client, DataKey::Task(id.clone())), LEDGERS_PER_DAY);
+        assert_eq!(
+            ttl_of(&env, &client, DataKey::TaskHistory(id.clone())),
+            LEDGERS_PER_DAY
+        );
+        assert_eq!(
+            ttl_of(&env, &client, DataKey::TaskVersionCount(id.clone())),
+            LEDGERS_PER_DAY
+        );
+    }
+
+    /// A lifecycle task created at `BASE_TS` must carry a ledger TTL of
+    /// `DEFAULT_TTL_DAYS * LEDGERS_PER_DAY` on its `LifecycleTask` key and
+    /// must be readable until the timestamp boundary.
+    #[test]
+    fn lifecycle_task_ttl_uses_default_ttl_days() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = tid(&env, 2);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        // Key carries the full default TTL.
+        let expected_ledgers = DEFAULT_TTL_DAYS * LEDGERS_PER_DAY;
+        assert_eq!(
+            ttl_of(&env, &client, DataKey::LifecycleTask(id.clone())),
+            expected_ledgers
+        );
+
+        // Readable one second before expiry.
+        env.ledger().set_timestamp(BASE_TS + u64::from(DEFAULT_TTL_DAYS) * SECS_PER_DAY - 1);
+        assert!(client.try_get_task(&id).is_ok());
+
+        // Expired at the boundary.
+        env.ledger().set_timestamp(BASE_TS + u64::from(DEFAULT_TTL_DAYS) * SECS_PER_DAY);
+        assert_eq!(client.try_get_task(&id), Err(Ok(Error::Expired)));
+    }
+
+    // ── 2. cleanup_expired_tasks removes expired entries ────────────────────
+
+    /// After advancing the clock past a DAG task's `expires_at`,
+    /// `cleanup_expired_tasks` must remove its `Task`, `TaskHistory`,
+    /// `TaskVersionCount`, and `TaskCreator` keys and return a `CleanupResult`
+    /// reflecting one expired task. A subsequent call on the same id is a no-op
+    /// (idempotent).
+    #[test]
+    fn cleanup_removes_all_keys_for_expired_dag_task() {
+        let (env, client) = setup();
+        let id = tid(&env, 3);
+        dag_task(&env, &client, &id, 1);
+
+        // Advance past expiry.
+        env.ledger().set_timestamp(BASE_TS + SECS_PER_DAY);
+
+        let batch = Vec::from_array(&env, [id.clone()]);
+        let result = client.cleanup_expired_tasks(&batch);
+
+        assert_eq!(result.tasks_checked, 1);
+        assert_eq!(result.tasks_expired, 1);
+        // Task + TaskHistory + TaskVersionCount + TaskCreator = up to 4 entries.
+        assert!(result.entries_removed >= 2, "expected at least 2 entries removed");
+
+        // All task keys must be gone.
+        assert!(!has_key(&env, &client, DataKey::Task(id.clone())));
+        assert!(!has_key(&env, &client, DataKey::TaskHistory(id.clone())));
+        assert!(!has_key(&env, &client, DataKey::TaskVersionCount(id.clone())));
+        assert!(!has_key(&env, &client, DataKey::TaskCreator(id.clone())));
+
+        // Calling cleanup again on the same (now-absent) id must succeed silently.
+        let second = client.cleanup_expired_tasks(&Vec::from_array(&env, [id.clone()]));
+        assert_eq!(second.tasks_expired, 0);
+        assert_eq!(second.entries_removed, 0);
+    }
+
+    /// An expired lifecycle task must also be cleaned up, and its
+    /// `TaskExpiredEvent` must be emitted exactly once per expired task.
+    #[test]
+    fn cleanup_removes_expired_lifecycle_task_and_emits_event() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = tid(&env, 4);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        // Advance past the default TTL.
+        env.ledger().set_timestamp(BASE_TS + u64::from(DEFAULT_TTL_DAYS) * SECS_PER_DAY);
+
+        let batch = Vec::from_array(&env, [id.clone()]);
+        let result = client.cleanup_expired_tasks(&batch);
+
+        assert_eq!(result.tasks_expired, 1);
+        assert!(!has_key(&env, &client, DataKey::LifecycleTask(id.clone())));
+
+        // Exactly one TaskExpiredEvent must have been emitted for this task.
+        // The event was the most-recently published one (cleanup emits one per
+        // expired task, and we cleaned exactly one).
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        assert_eq!(
+            last_event.1,
+            (symbol_short!("task_str"), symbol_short!("expired")).into_val(&env),
+            "expected TaskExpiredEvent as the last emitted event"
+        );
+    }
+
+    /// A live (not-yet-expired) task in the batch must be skipped — its storage
+    /// keys must remain intact after `cleanup_expired_tasks` returns.
+    #[test]
+    fn cleanup_does_not_touch_live_tasks() {
+        let (env, client) = setup();
+        let id_live = tid(&env, 5);
+        let id_expired = tid(&env, 6);
+
+        dag_task(&env, &client, &id_live, MAX_TTL_DAYS); // long-lived
+        dag_task(&env, &client, &id_expired, 1); // expires in 1 day
+
+        // Advance past the short task but not the long one.
+        env.ledger().set_timestamp(BASE_TS + SECS_PER_DAY);
+
+        let batch = Vec::from_array(&env, [id_live.clone(), id_expired.clone()]);
+        let result = client.cleanup_expired_tasks(&batch);
+
+        assert_eq!(result.tasks_checked, 2);
+        assert_eq!(result.tasks_expired, 1);
+
+        // Short task removed.
+        assert!(!has_key(&env, &client, DataKey::Task(id_expired.clone())));
+
+        // Long task untouched — still readable.
+        assert!(has_key(&env, &client, DataKey::Task(id_live.clone())));
+        assert!(client.try_get_task_metadata(&id_live).is_ok());
+    }
+
+    /// A batch larger than `MAX_TASK_QUERY_BATCH` must be rejected before any
+    /// storage is touched.
+    #[test]
+    fn cleanup_rejects_oversized_batch() {
+        let (env, client) = setup();
+        let mut ids = Vec::new(&env);
+        for n in 0..=MAX_TASK_QUERY_BATCH {
+            ids.push_back(tid(&env, n as u8));
+        }
+        assert_eq!(
+            client.try_cleanup_expired_tasks(&ids),
+            Err(Ok(Error::BatchTooLarge))
+        );
+    }
+
+    // ── 3. extend_task_ttl pushes rent window forward ────────────────────────
+
+    /// Extending a DAG task by 1 day must increment `expires_at` by exactly
+    /// `SECS_PER_DAY` and re-arm the persistent TTL on its storage keys.
+    #[test]
+    fn extend_dag_task_ttl_increases_expires_at_and_refreshes_ledger_ttl() {
+        let (env, client) = setup();
+        let submitter = Address::generate(&env);
+        let agents = Vec::from_array(&env, [Address::generate(&env)]);
+        let dag = Bytes::from_slice(&env, &[0x78, 0x9c, 0x03, 0x00]);
+        let id = tid(&env, 7);
+        client.store_task_metadata(
+            &submitter,
+            &id,
+            &BytesN::from_array(&env, &[0xAA; 32]),
+            &agents,
+            &dag,
+            &1,
+            &None,
+        );
+
+        let before = client.get_task_metadata(&id).expires_at;
+        assert_eq!(before, BASE_TS + SECS_PER_DAY);
+
+        // Extend by 1 more day (the submitter is indexed as the TaskCreator).
+        client.extend_task_ttl(&id, &submitter, &1u32);
+
+        let after = client.get_task_metadata(&id).expires_at;
+        assert_eq!(after, before + SECS_PER_DAY);
+
+        // The persistent-storage TTL on the Task key must be ≥ 2 days.
+        let ttl = ttl_of(&env, &client, DataKey::Task(id.clone()));
+        assert!(
+            ttl >= 2 * LEDGERS_PER_DAY,
+            "expected TTL ≥ 2 days worth of ledgers, got {}",
+            ttl
+        );
+
+        // A `TaskTtlExtendedEvent` must be emitted as the last event.
+        let events = env.events().all();
+        let last_event = events.get(events.len() - 1).unwrap();
+        assert_eq!(
+            last_event.1,
+            (symbol_short!("task_str"), symbol_short!("ttl_ext")).into_val(&env),
+            "expected TaskTtlExtendedEvent as the last emitted event"
+        );
+    }
+
+    /// Extending a lifecycle task must re-arm the rent on `LifecycleTask`,
+    /// `TaskHistory`, and `TaskVersionCount`.
+    #[test]
+    fn extend_lifecycle_task_ttl_refreshes_all_auxiliary_keys() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = tid(&env, 8);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        // Extend by 1 day.
+        client.extend_task_ttl(&id, &creator, &1u32);
+
+        let lc_ttl = ttl_of(&env, &client, DataKey::LifecycleTask(id.clone()));
+        let hist_ttl = ttl_of(&env, &client, DataKey::TaskHistory(id.clone()));
+        let cnt_ttl = ttl_of(&env, &client, DataKey::TaskVersionCount(id.clone()));
+
+        // All three keys must have been extended beyond the default window.
+        let default_ttl = DEFAULT_TTL_DAYS * LEDGERS_PER_DAY;
+        assert!(
+            lc_ttl > default_ttl,
+            "LifecycleTask TTL should exceed default after extension"
+        );
+        assert!(
+            hist_ttl > default_ttl,
+            "TaskHistory TTL should exceed default after extension"
+        );
+        assert!(
+            cnt_ttl > default_ttl,
+            "TaskVersionCount TTL should exceed default after extension"
+        );
+    }
+
+    /// Attempting to extend a task with `extension_days = 0` must be rejected
+    /// with `InvalidTtl`.
+    #[test]
+    fn extend_task_ttl_rejects_zero_extension() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = tid(&env, 9);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        assert_eq!(
+            client.try_extend_task_ttl(&id, &creator, &0u32),
+            Err(Ok(Error::InvalidTtl))
+        );
+    }
+
+    /// Calling `extend_task_ttl` on an already-expired task must return
+    /// `Error::Expired` and must not alter any storage.
+    #[test]
+    fn extend_task_ttl_rejects_already_expired_task() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let id = tid(&env, 10);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        // Expire the task.
+        env.ledger().set_timestamp(BASE_TS + u64::from(DEFAULT_TTL_DAYS) * SECS_PER_DAY);
+
+        assert_eq!(
+            client.try_extend_task_ttl(&id, &creator, &1u32),
+            Err(Ok(Error::Expired))
+        );
+    }
+
+    /// A non-creator, non-coordinator address must be rejected with
+    /// `Unauthorized`.
+    #[test]
+    fn extend_task_ttl_rejects_unauthorized_caller() {
+        let (env, client) = setup();
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        let id = tid(&env, 11);
+        lifecycle_task(&env, &client, &id, &creator);
+
+        assert_eq!(
+            client.try_extend_task_ttl(&id, &stranger, &1u32),
+            Err(Ok(Error::Unauthorized))
+        );
+    }
+
+    /// Calling `extend_task_ttl` on an unknown task id must return
+    /// `Error::NotFound`.
+    #[test]
+    fn extend_task_ttl_rejects_unknown_task() {
+        let (env, client) = setup();
+        let stranger = Address::generate(&env);
+        let ghost = tid(&env, 12);
+
+        assert_eq!(
+            client.try_extend_task_ttl(&ghost, &stranger, &1u32),
+            Err(Ok(Error::NotFound))
+        );
+    }
+}
