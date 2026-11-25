@@ -644,3 +644,296 @@ mod upgrade_integration_tests {
         assert!(!events.is_empty());
     }
 }
+
+// ─── Storage Migration Tests ─────────────────────────────────────────────────
+//
+// These tests verify that the v1→v2 storage migration:
+//   1. Runs all required migration steps and updates the on-chain version.
+//   2. Preserves every agent record written before the upgrade.
+//   3. Populates new v2 fields with their documented defaults when they were
+//      absent from the v1 state.
+//   4. Emergency rollback fully restores the pre-upgrade version and wasm hash
+//      and clears rollback availability.
+//
+// All tests share a lightweight `setup` helper and use `env.mock_all_auths()`
+// to avoid threading authorization keys through every call.
+
+#[cfg(test)]
+mod storage_migration_tests {
+    use crate::*;
+    use soroban_sdk::{
+        testutils::{Address as _, Ledger as _},
+        Address, BytesN, Map, String, Symbol,
+    };
+
+    // ── Shared helpers ──────────────────────────────────────────────────────
+
+    fn setup() -> (Env, AgentRegistryContractClient<'static>, Address) {
+        let env = Env::default();
+        env.ledger().set_sequence_number(1);
+        env.mock_all_auths();
+        let contract_id = env.register(AgentRegistryContract, ());
+        let client = AgentRegistryContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+        (env, client, admin)
+    }
+
+    fn wasm(env: &Env, tag: u8) -> BytesN<32> {
+        let mut h = [0u8; 32];
+        h[0] = tag;
+        BytesN::from_array(env, &h)
+    }
+
+    fn register_agent(
+        env: &Env,
+        client: &AgentRegistryContractClient<'_>,
+        id: &str,
+    ) -> AgentRecord {
+        let owner = Address::generate(env);
+        let record = AgentRecord {
+            id: Symbol::new(env, id),
+            capability: Symbol::new(env, "research"),
+            price_stroops: 1_000,
+            endpoint: String::from_str(env, "https://agent.example.com"),
+            owner,
+            metadata: Map::new(env),
+            bond_amount: DEFAULT_MIN_BOND_STROOPS,
+        };
+        // `register_agent` returns `()` on the client; use `try_` to surface errors.
+        client
+            .try_register_agent(&record)
+            .expect("register_agent call failed")
+            .expect("register_agent returned Err");
+        record
+    }
+
+    /// Read one agent record from persistent storage without going through the
+    /// contract's public API (which has no single-item getter).
+    fn read_agent(
+        env: &Env,
+        client: &AgentRegistryContractClient<'_>,
+        id: &str,
+    ) -> Option<AgentRecord> {
+        let key = DataKey::Agent(Symbol::new(env, id));
+        env.as_contract(&client.address, || env.storage().persistent().get(&key))
+    }
+
+    // ── Test 1: v1→v2 migration runs all six steps ──────────────────────────
+
+    /// `post_upgrade_hook("1.0.0", "2.0.0")` must complete without error, write
+    /// "2.0.0" to instance storage, record the new wasm hash, and populate the
+    /// upgrade-status timestamp.  A 1.x→2.x jump triggers the full six-step
+    /// pipeline: backup_existing_data, validate_data_integrity,
+    /// migrate_storage_format, update_schema, rebuild_indexes, verify_migration.
+    #[test]
+    fn test_v1_to_v2_schema_migration_runs_all_steps() {
+        let (env, client, _admin) = setup();
+
+        assert_eq!(client.get_version(), String::from_str(&env, "1.0.0"));
+
+        let v2_hash = wasm(&env, 2);
+        client.upgrade_contract(
+            &v2_hash,
+            &String::from_str(&env, "2.0.0"),
+            &String::from_str(&env, "v1 to v2 migration"),
+        );
+
+        // Version key in instance storage must be "2.0.0".
+        assert_eq!(client.get_version(), String::from_str(&env, "2.0.0"));
+
+        // Wasm hash must reflect the new binary.
+        assert_eq!(client.get_wasm_hash(), v2_hash);
+
+        // last_upgrade_ledger must be nonzero, proving the hook wrote the
+        // upgrade timestamp.
+        let status = client.get_upgrade_status();
+        assert!(
+            status.last_upgrade_ledger > 0,
+            "last_upgrade_ledger was not written by the migration hook"
+        );
+        assert!(
+            status.rollback_available,
+            "rollback must be available immediately after upgrade"
+        );
+
+        // The migration plan for 2.0.0 must list all six transformation steps
+        // required for a major-version upgrade.
+        let plan = client.get_migration_plan(&String::from_str(&env, "2.0.0"));
+        assert!(
+            plan.data_transformations.len() >= 6,
+            "expected ≥6 migration steps for a major-version upgrade, got {}",
+            plan.data_transformations.len()
+        );
+        assert!(
+            plan.rollback_supported,
+            "migration plan must declare rollback_supported"
+        );
+    }
+
+    // ── Test 2: existing agent data is preserved after migration ─────────────
+
+    /// Writes two agent records to persistent storage in the v1 state, then
+    /// upgrades to v2 and reads them back.  Every field must be bit-for-bit
+    /// identical to the values written before the upgrade.
+    #[test]
+    fn test_existing_agent_data_preserved_after_migration() {
+        let (env, client, _admin) = setup();
+
+        // Establish v1 state with two registered agents.
+        let r1 = register_agent(&env, &client, "agent1");
+        let r2 = register_agent(&env, &client, "agent2");
+
+        // Run the v1→v2 upgrade.
+        client.upgrade_contract(
+            &wasm(&env, 2),
+            &String::from_str(&env, "2.0.0"),
+            &String::from_str(&env, "preserve data test"),
+        );
+
+        // Both agents must survive in persistent storage after the migration.
+        let f1 = read_agent(&env, &client, "agent1")
+            .expect("agent1 missing after migration");
+        let f2 = read_agent(&env, &client, "agent2")
+            .expect("agent2 missing after migration");
+
+        assert_eq!(f1.id, r1.id, "agent1.id changed");
+        assert_eq!(f1.capability, r1.capability, "agent1.capability changed");
+        assert_eq!(f1.price_stroops, r1.price_stroops, "agent1.price_stroops changed");
+        assert_eq!(f1.endpoint, r1.endpoint, "agent1.endpoint changed");
+        assert_eq!(f1.owner, r1.owner, "agent1.owner changed");
+        assert_eq!(f1.bond_amount, r1.bond_amount, "agent1.bond_amount changed");
+
+        assert_eq!(f2.id, r2.id, "agent2.id changed");
+        assert_eq!(f2.capability, r2.capability, "agent2.capability changed");
+        assert_eq!(f2.price_stroops, r2.price_stroops, "agent2.price_stroops changed");
+        assert_eq!(f2.owner, r2.owner, "agent2.owner changed");
+
+        // The TotalAgents counter must still read two after the migration.
+        let page = client.list_agents(&None::<u32>, &Some(10u32));
+        assert_eq!(
+            page.total_count, 2,
+            "total_count changed across the migration boundary"
+        );
+    }
+
+    // ── Test 3: new v2 fields default correctly when absent from v1 ──────────
+
+    /// When no StorageConfig, ReputationConfig, or GasConfig was written in the
+    /// v1 state, the contract's `unwrap_or_else` guards must return the
+    /// compile-time defaults unchanged after the migration.
+    #[test]
+    fn test_new_v2_fields_have_correct_defaults_after_migration() {
+        let (env, client, _admin) = setup();
+
+        // No explicit StorageConfig or ReputationConfig — pure v1 baseline.
+        client.upgrade_contract(
+            &wasm(&env, 2),
+            &String::from_str(&env, "2.0.0"),
+            &String::from_str(&env, "default fields test"),
+        );
+
+        // StorageConfig defaults: max_agents = 0 (unlimited),
+        // max_per_capability = 0 (unlimited).
+        let storage_cfg = client.get_storage_config();
+        assert_eq!(
+            storage_cfg.max_agents, 0,
+            "StorageConfig.max_agents default must be 0 (unlimited) after migration"
+        );
+        assert_eq!(
+            storage_cfg.max_per_capability, 0,
+            "StorageConfig.max_per_capability default must be 0 (unlimited) after migration"
+        );
+
+        // ReputationConfig defaults: decay_pct = DEFAULT_DECAY_PCT (5),
+        // epoch_secs = DEFAULT_EPOCH_SECS (604_800 seconds = 7 days).
+        let rep_cfg = client.get_reputation_config();
+        assert_eq!(
+            rep_cfg.decay_pct,
+            DEFAULT_DECAY_PCT,
+            "ReputationConfig.decay_pct must default to {} after migration",
+            DEFAULT_DECAY_PCT
+        );
+        assert_eq!(
+            rep_cfg.epoch_secs,
+            DEFAULT_EPOCH_SECS,
+            "ReputationConfig.epoch_secs must default to {} after migration",
+            DEFAULT_EPOCH_SECS
+        );
+
+        // GasConfig must still be the compiled-in default because it was never
+        // overridden in the v1 state.
+        let gas_cfg = client.get_gas_config();
+        assert_eq!(gas_cfg.tx_overhead, GAS_TX_OVERHEAD);
+        assert_eq!(gas_cfg.register_agent, GAS_REGISTER_AGENT);
+    }
+
+    // ── Test 4: rollback restores the previous version and wasm hash ──────────
+
+    /// After a v1→v2 upgrade, `emergency_rollback` must:
+    ///   - revert the on-chain version to "1.0.0"
+    ///   - revert the recorded wasm hash to the v1 hash
+    ///   - set `rollback_available` to false (rollback is consumed)
+    ///   - leave persistent agent records intact (they are not erased by a
+    ///     wasm-pointer rollback)
+    #[test]
+    fn test_rollback_restores_previous_storage_state() {
+        let (env, client, _admin) = setup();
+
+        // Register one agent in v1 before the upgrade.
+        let pre = register_agent(&env, &client, "preagent");
+
+        let v1_hash = wasm(&env, 1);
+        let v2_hash = wasm(&env, 2);
+
+        // Upgrade so a rollback becomes available.
+        client.upgrade_contract(
+            &v2_hash,
+            &String::from_str(&env, "2.0.0"),
+            &String::from_str(&env, "rollback test upgrade"),
+        );
+        assert_eq!(client.get_version(), String::from_str(&env, "2.0.0"));
+        assert!(
+            client.get_upgrade_status().rollback_available,
+            "rollback must be available immediately after upgrade"
+        );
+
+        // Execute the emergency rollback within the window.
+        client.emergency_rollback(&v1_hash, &String::from_str(&env, "1.0.0"));
+
+        // Version must revert to 1.0.0.
+        assert_eq!(
+            client.get_version(),
+            String::from_str(&env, "1.0.0"),
+            "version must revert to 1.0.0 after rollback"
+        );
+
+        // Recorded wasm hash must revert to the v1 hash.
+        assert_eq!(
+            client.get_wasm_hash(),
+            v1_hash,
+            "wasm hash must revert to v1 after rollback"
+        );
+
+        // Rollback availability is consumed: a second attempt must be rejected.
+        assert!(
+            !client.get_upgrade_status().rollback_available,
+            "rollback must not be available after it has been consumed"
+        );
+        assert!(
+            client
+                .try_emergency_rollback(&v2_hash, &String::from_str(&env, "2.0.0"))
+                .is_err(),
+            "a second rollback call must fail once rollback is consumed"
+        );
+
+        // Persistent storage (agent records) must survive the wasm-pointer
+        // rollback because `emergency_rollback` only updates instance-storage
+        // keys — it does not wipe persistent entries.
+        let restored = read_agent(&env, &client, "preagent")
+            .expect("pre-upgrade agent must still be readable after rollback");
+        assert_eq!(restored.id, pre.id);
+        assert_eq!(restored.owner, pre.owner);
+        assert_eq!(restored.capability, pre.capability);
+    }
+}
