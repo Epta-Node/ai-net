@@ -199,3 +199,138 @@ fn test_admin_set_via_multisig() {
 
     assert_eq!(client.get_admin(), Some(new_admin));
 }
+
+// ─── Additional Integration Tests (issue #942) ───────────────────────────────
+
+#[test]
+fn test_multisig_proposal_rejection_by_insufficient_approvals() {
+    let (env, client, admin1, admin2, admin3) = setup_test_env();
+
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin1.clone());
+    admins.push_back(admin2.clone());
+    admins.push_back(admin3.clone());
+
+    // Require 3-of-3 unanimous approval
+    client.set_multisig_config(&admin1, &admins, &3, &DEFAULT_TIMELOCK_DELAY);
+
+    let proposal_id = client.propose_operation(&admin1, &AdminAction::Pause, &None);
+
+    // Only 1 approval (proposer), need 3
+    let proposal = client.get_proposal(&proposal_id);
+    env.ledger().set_timestamp(proposal.eta + 1);
+
+    let res = client.try_execute_operation(&admin1, &proposal_id);
+    assert_eq!(res, Err(Ok(Error::InsufficientApprovals)));
+
+    // Add 1 more approval (2 total, still need 3)
+    client.approve_operation(&admin2, &proposal_id);
+    let res = client.try_execute_operation(&admin1, &proposal_id);
+    assert_eq!(res, Err(Ok(Error::InsufficientApprovals)));
+
+    // Add final approval to reach threshold
+    client.approve_operation(&admin3, &proposal_id);
+    client.execute_operation(&admin1, &proposal_id);
+
+    assert!(client.is_paused());
+}
+
+#[test]
+fn test_multisig_execution_with_different_executors() {
+    let (env, client, admin1, admin2, admin3) = setup_test_env();
+
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin1.clone());
+    admins.push_back(admin2.clone());
+    admins.push_back(admin3.clone());
+
+    client.set_multisig_config(&admin1, &admins, &2, &DEFAULT_TIMELOCK_DELAY);
+
+    let proposal_id = client.propose_operation(&admin1, &AdminAction::Pause, &None);
+    client.approve_operation(&admin2, &proposal_id);
+
+    let proposal = client.get_proposal(&proposal_id);
+    env.ledger().set_timestamp(proposal.eta + 1);
+
+    // Execute by admin3 (who didn't propose or approve yet)
+    client.execute_operation(&admin3, &proposal_id);
+
+    assert!(client.is_paused());
+    assert!(client.get_proposal(&proposal_id).executed);
+}
+
+#[test]
+fn test_multisig_multiple_concurrent_proposals() {
+    let (env, client, admin1, admin2, admin3) = setup_test_env();
+
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin1.clone());
+    admins.push_back(admin2.clone());
+    admins.push_back(admin3.clone());
+
+    client.set_multisig_config(&admin1, &admins, &2, &DEFAULT_TIMELOCK_DELAY);
+
+    // Create multiple proposals
+    let proposal_id1 = client.propose_operation(&admin1, &AdminAction::Pause, &None);
+    let proposal_id2 = client.propose_operation(&admin2, &AdminAction::Unpause, &None);
+
+    assert_ne!(proposal_id1, proposal_id2);
+
+    // Approve both independently
+    client.approve_operation(&admin2, &proposal_id1);
+    client.approve_operation(&admin3, &proposal_id2);
+
+    let proposal1 = client.get_proposal(&proposal_id1);
+    let proposal2 = client.get_proposal(&proposal_id2);
+
+    // Execute first proposal
+    env.ledger().set_timestamp(proposal1.eta + 1);
+    client.execute_operation(&admin1, &proposal_id1);
+
+    assert!(client.is_paused());
+    assert!(client.get_proposal(&proposal_id1).executed);
+    assert!(!client.get_proposal(&proposal_id2).executed);
+
+    // Execute second proposal
+    env.ledger().set_timestamp(proposal2.eta + 1);
+    client.execute_operation(&admin1, &proposal_id2);
+
+    assert!(!client.is_paused());
+    assert!(client.get_proposal(&proposal_id2).executed);
+}
+
+#[test]
+fn test_multisig_unauthorized_outsider_cannot_interact() {
+    let (env, client, admin1, admin2, admin3) = setup_test_env();
+
+    let outsider = Address::generate(&env);
+
+    let mut admins = Vec::new(&env);
+    admins.push_back(admin1.clone());
+    admins.push_back(admin2.clone());
+    admins.push_back(admin3.clone());
+
+    client.set_multisig_config(&admin1, &admins, &2, &DEFAULT_TIMELOCK_DELAY);
+
+    let proposal_id = client.propose_operation(&admin1, &AdminAction::Pause, &None);
+
+    // Outsider tries to propose
+    let res = client.try_propose_operation(&outsider, &AdminAction::Unpause, &None);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+
+    // Outsider tries to approve
+    let res = client.try_approve_operation(&outsider, &proposal_id);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+
+    // Outsider tries to execute
+    client.approve_operation(&admin2, &proposal_id);
+    let proposal = client.get_proposal(&proposal_id);
+    env.ledger().set_timestamp(proposal.eta + 1);
+
+    let res = client.try_execute_operation(&outsider, &proposal_id);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+
+    // Outsider tries to cancel
+    let res = client.try_cancel_operation(&outsider, &proposal_id);
+    assert_eq!(res, Err(Ok(Error::Unauthorized)));
+}

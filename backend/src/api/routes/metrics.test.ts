@@ -11,6 +11,10 @@ import express from "express";
 import request from "supertest";
 import { MetricsService } from "../../services/metrics";
 import { createMetricsRouter } from "./metrics";
+import {
+  recordJobProcessed,
+  resetQueueWorkerMetrics,
+} from "../../queue/metrics";
 
 beforeAll(() => {
   process.env.VENICE_API_KEY = process.env.VENICE_API_KEY || "test-venice-key";
@@ -95,6 +99,25 @@ describe("Prometheus Metrics Route (Issue #499)", () => {
     expect(text).toContain("# HELP ainet_venice_circuit_breaker_state");
     expect(text).toContain("# TYPE ainet_venice_circuit_breaker_state gauge");
     expect(text).toContain("ainet_venice_circuit_breaker_state 0");
+  });
+
+    it("GET /metrics includes queue worker throughput and duration metrics", async () => {
+    resetQueueWorkerMetrics();
+    recordJobProcessed(25);
+    recordJobProcessed(50);
+
+    const { app } = buildApp();
+    const res = await request(app).get("/metrics");
+
+    expect(res.status).toBe(200);
+    expect(res.text).toContain("# TYPE ainet_queue_worker_jobs_processed_total counter");
+    expect(res.text).toContain("ainet_queue_worker_jobs_processed_total 2");
+    expect(res.text).toContain("# TYPE ainet_queue_worker_job_processing_duration_milliseconds histogram");
+    expect(res.text).toContain('ainet_queue_worker_job_processing_duration_milliseconds_bucket{le="50"} 2');
+    expect(res.text).toContain("ainet_queue_worker_job_processing_duration_milliseconds_sum 75");
+    expect(res.text).toContain("ainet_queue_worker_job_processing_duration_milliseconds_count 2");
+
+    resetQueueWorkerMetrics();
   });
 
   it("GET /metrics/health returns scrape reliability payload", async () => {

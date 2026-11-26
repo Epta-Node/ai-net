@@ -52,6 +52,21 @@ export function createV1TasksRouter(
       (req.headers["walletpublickey"] as string | undefined) ??
       "anonymous";
 
+    if (req.idempotencyKey) {
+      const existingTask = createTaskDb(getTaskDb()).findByIdempotencyKey(
+        walletPublicKey,
+        req.idempotencyKey,
+      );
+
+      if (existingTask) {
+        res.status(200).json({
+          taskId: existingTask.id,
+          dagPreview: existingTask.dag,
+          status: existingTask.status,
+        });
+        return;
+      }
+    }
     // Throws a 429 RateLimitError and counts the rejection in the quota metrics
     // when the wallet has spent its DAILY_TASK_LIMIT_PER_WALLET.
     assertDailyTaskQuota(walletPublicKey);
@@ -68,6 +83,7 @@ export function createV1TasksRouter(
       dag,
       createdAt: now,
       updatedAt: now,
+      idempotencyKey: req.idempotencyKey,
       requestId: res.locals.requestId,
       traceId,
     };

@@ -46,6 +46,7 @@ function deps(overrides: Partial<DeepHealthDeps> = {}): DeepHealthDeps {
     timeoutMs: 1_000,
     queueDepthWarn: 100,
     fetchFn: jest.fn().mockResolvedValue(okResponse),
+    pingVenice: jest.fn().mockResolvedValue(undefined),
     getBreaker: () => null,
     getWriteDb: () => db,
     isReadOnly: () => false,
@@ -107,11 +108,30 @@ describe('runDeepHealthCheck', () => {
     expect(report.dependencies.venice.status).toBe('ok');
   });
 
-  it('treats a 401 from Venice as reachable', async () => {
-    const fetchFn = jest.fn().mockResolvedValue({ ok: false, status: 401 } as Response);
-    const report = await runDeepHealthCheck(deps({ fetchFn }));
+  it('pings Venice with a 3 second timeout and degrades when unreachable', async () => {
+    const pingVenice = jest.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const report = await runDeepHealthCheck(deps({ pingVenice }));
+    expect(pingVenice).toHaveBeenCalledWith('test-key', 3_000);
+    expect(report.status).toBe('degraded');
+    expect(report.degraded).toEqual(['venice']);
+    expect(report.dependencies.venice).toMatchObject({ status: 'degraded', critical: true, detail: 'unreachable' });
+  });
+
+  it('reports the Venice ping timeout as degraded', async () => {
+    const timeout = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    const report = await runDeepHealthCheck(deps({ pingVenice: jest.fn().mockRejectedValue(timeout) }));
+    expect(report.dependencies.venice.detail).toBe('timed out after 3000ms');
+    expect(report.status).toBe('degraded');
+  });
+
+  it('keeps the Horizon fetch probe independent of the mocked Venice client', async () => {
+    const report = await runDeepHealthCheck(deps({
+      fetchFn: jest.fn((url: string) => url.includes('venice.ai')
+        ? Promise.reject(new Error('Venice should use its client ping'))
+        : Promise.resolve(okResponse)) as unknown as typeof fetch,
+    }));
     expect(report.dependencies.venice.status).toBe('ok');
-    expect(report.dependencies.horizon.status).toBe('fail');
+    expect(report.dependencies.horizon.status).toBe('ok');
   });
 
   it('fails when Horizon is unreachable', async () => {
@@ -126,10 +146,10 @@ describe('runDeepHealthCheck', () => {
     expect(report.dependencies.horizon.detail).toBe('unreachable');
   });
 
-  it('describes a probe timeout', async () => {
+  it('describes a Horizon probe timeout', async () => {
     const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
     const report = await runDeepHealthCheck(deps({ fetchFn: jest.fn().mockRejectedValue(abort) }));
-    expect(report.dependencies.venice.detail).toBe('timed out after 1000ms');
+    expect(report.dependencies.horizon.detail).toBe('timed out after 1000ms');
   });
 
   describe('database', () => {

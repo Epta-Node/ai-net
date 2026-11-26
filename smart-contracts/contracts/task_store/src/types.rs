@@ -327,6 +327,47 @@ pub struct OracleManagerSetEvent {
     pub oracle_manager: Option<Address>,
 }
 
+/// Summary returned by `cleanup_expired_tasks`.
+///
+/// Reports how many task ids were examined and how many entries were removed
+/// from persistent storage. Each expired task removes up to four entries:
+/// `Task`/`LifecycleTask`, `TaskHistory`, `TaskVersionCount`, and
+/// `TaskCreator`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CleanupResult {
+    /// Number of task ids in the supplied batch.
+    pub tasks_checked: u32,
+    /// Number of tasks whose timestamp had already passed `expires_at`.
+    pub tasks_expired: u32,
+    /// Total persistent-storage entries removed across all expired tasks.
+    pub entries_removed: u32,
+}
+
+/// Emitted for each task removed by `cleanup_expired_tasks`, under topics
+/// `(task_str, expired)`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskExpiredEvent {
+    pub task_id: BytesN<32>,
+    /// Timestamp at which the task was originally due to expire.
+    pub expired_at: u64,
+    /// Ledger timestamp when cleanup ran.
+    pub cleaned_at: u64,
+}
+
+/// Emitted by `extend_task_ttl` when a task's rent window is successfully
+/// extended, under topics `(task_str, ttl_ext)`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TaskTtlExtendedEvent {
+    pub task_id: BytesN<32>,
+    /// Number of additional days added.
+    pub extension_days: u32,
+    /// New `expires_at` timestamp after the extension.
+    pub new_expires_at: u64,
+}
+
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]

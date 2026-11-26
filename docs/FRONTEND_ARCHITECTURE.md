@@ -66,38 +66,42 @@ frontend/src/
 
 ## State Management
 
-### React Context (Global State)
+### Provider hierarchy
 
-Used for cross-cutting concerns that many components need:
+`App.tsx` mounts these providers once. The router sits inside them, so a route change preserves the wallet session, theme, and notification feed.
 
-| Context               | Purpose                                     |
-| --------------------- | ------------------------------------------- |
-| `WalletContext`       | Stellar wallet connection, signing, balance |
-| `ThemeContext`        | Dark/light mode toggle                      |
-| `ToastContext`        | Global toast notifications                  |
-| `NotificationContext` | In-app notification feed                    |
+```mermaid
+flowchart TD
+    I[I18nextProvider] --> E[ErrorBoundary] --> M[MotionProvider]
+    M --> T[ThemeProvider] --> W[WalletProvider] --> S[ToastProvider]
+    S --> N[NotificationProvider] --> P[RouteProgressProvider] --> R[BrowserRouter]
+    R --> B[RouteProgressBar]
+    R --> C[RoutedContent]
+```
 
-### Custom Hooks (Component State)
+| Provider | State and responsibility |
+| --- | --- |
+| `I18nextProvider` and `MotionProvider` | Supply translations and apply the user's reduced-motion preference to animations. |
+| `ThemeProvider` | Stores the selected theme locally and resolves system mode against the OS preference. Components read it through `useTheme()`. |
+| `WalletProvider` | Restores the wallet session, tracks the active network and exposes connection and signing readiness through `useWallet()`. |
+| `ToastProvider` | Holds the queue of transient messages and handles dismissal. |
+| `NotificationProvider` | Receives WebSocket events and persists the notification feed in local storage. `useNotifications()` reads and updates that shared feed. |
+| `RouteProgressProvider` | Tracks in-flight activity and exposes progress and errors to the route progress bar. |
 
-Data fetching and component-local state live in custom hooks:
+### From the API to the page
 
-| Hook               | Purpose                          |
-| ------------------ | -------------------------------- |
-| `useWallet`        | Wallet connection and signing    |
-| `useWalletBalance` | Balance polling                  |
-| `useTaskWebSocket` | Real-time task status via WS     |
-| `useAgentRegistry` | Agent discovery and registration |
-| `useTaskSubmit`    | Task submission flow             |
-| `useNotifications` | Notification polling             |
-| `useTheme`         | Theme preference persistence     |
-| `useNetworkStats`  | Network health metrics           |
+On the task history page, changing a filter updates the URL search parameters. `TaskHistoryPage` passes the filters to `useTaskHistory`. The hook reads the wallet public key and calls `apiClient.get` on `/api/wallets/{address}/tasks` with the page size, status, and optional cursor. It merges subsequent pages by task ID and exposes the filtered rows, loading state, pagination, and errors to the page. A disconnected wallet produces an empty list. [Page](../frontend/src/pages/tasks/TaskHistoryPage.tsx) · [Hook](../frontend/src/hooks/useTaskHistory.ts)
 
-### Rules
+| Feature hook | State it owns |
+| --- | --- |
+| `useAgentRegistry` | Agent results, filters, polling, and cursor navigation. |
+| `useTaskSubmit` | Task submission progress and errors. |
+| `useTaskWebSocket` | Per-task connection and reconnection state. |
+| `useWalletBalance` and `useNetworkStats` | Balance and network metrics for the consuming view. |
 
-1. **No Redux or Zustand.** Context + hooks is the pattern.
-2. **Lift state up** only when two sibling components need the same data.
-3. **Prefer colocation** — keep state close to where it's used.
-4. **Memoize expensive computations** with `useMemo`/`useCallback`.
+### Choosing where state lives
+
+Keep a dialog's open flag in the component that displays it. Lift it to the nearest common parent if two siblings need to coordinate. Keep shareable filters in the URL so a deep link can reproduce the view. Use a feature hook for requests, retries, pagination, or subscriptions that belong to one screen. For example, `useAgentRegistry` fetches and filters the agent list, and `useTaskWebSocket` manages a task subscription. Each hook invocation owns its local state. Use a provider when consumers across routes need the same value or lifecycle, as with the active wallet.
 
 ---
 

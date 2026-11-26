@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { Download, ChevronDown, AlertTriangle, Loader2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 import { downloadTextFile } from '../../utils/download'
 import { buildCsvInChunks, transactionsToCSV, type Transaction } from '../../utils/transactionCsv'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
@@ -15,6 +16,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
   transactions,
   className = '',
 }) => {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -131,12 +133,12 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         {isExporting ? (
           <>
             <Loader2 size={16} className="animate-spin text-[var(--primary,#9333ea)]" />
-            <span>Exporting ({progress}%)…</span>
+            <span>{t('wallet.export.exporting', { percent: progress })}</span>
           </>
         ) : (
           <>
             <Download size={16} aria-hidden="true" />
-            <span>Export CSV</span>
+            <span>{t('wallet.export.exportCsv')}</span>
             <ChevronDown size={14} aria-hidden="true" />
           </>
         )}
@@ -155,7 +157,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             onClick={() => handleSelectPreset('7d')}
             className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary,#fff)] hover:bg-[var(--surface-sunken-hover,#2a2a2a)]"
           >
-            Last 7 days
+            {t('wallet.export.last7Days')}
           </button>
           <button
             type="button"
@@ -163,7 +165,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             onClick={() => handleSelectPreset('30d')}
             className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary,#fff)] hover:bg-[var(--surface-sunken-hover,#2a2a2a)]"
           >
-            Last 30 days
+            {t('wallet.export.last30Days')}
           </button>
           <button
             type="button"
@@ -171,7 +173,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             onClick={() => handleSelectPreset('90d')}
             className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary,#fff)] hover:bg-[var(--surface-sunken-hover,#2a2a2a)]"
           >
-            Last 90 days
+            {t('wallet.export.last90Days')}
           </button>
           <button
             type="button"
@@ -179,7 +181,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             onClick={() => handleSelectPreset('all')}
             className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary,#fff)] hover:bg-[var(--surface-sunken-hover,#2a2a2a)]"
           >
-            All time
+            {t('wallet.export.allTime')}
           </button>
           <div className="my-1 border-t border-[var(--border-subtle,#2a2a2a)]" />
           <button
@@ -188,7 +190,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             onClick={() => handleSelectPreset('custom')}
             className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-[var(--text-primary,#fff)] hover:bg-[var(--surface-sunken-hover,#2a2a2a)]"
           >
-            Custom range…
+            {t('wallet.export.customRange')}
           </button>
         </div>
       )}
@@ -203,12 +205,12 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
         >
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border-subtle,#333)] bg-[var(--surface-sunken,#181818)] p-6 shadow-2xl">
             <h3 id="custom-range-title" className="text-lg font-semibold text-white">
-              Export custom date range
+              {t('wallet.export.customRangeTitle')}
             </h3>
             <form onSubmit={handleCustomExportSubmit} className="mt-4 space-y-4">
               <div>
                 <label htmlFor="custom-from" className="block text-xs font-medium text-gray-300">
-                  From
+                  {t('wallet.export.customFrom')}
                 </label>
                 <input
                   type="date"
@@ -220,7 +222,7 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
               </div>
               <div>
                 <label htmlFor="custom-to" className="block text-xs font-medium text-gray-300">
-                  To
+                  {t('wallet.export.customTo')}
                 </label>
                 <input
                   type="date"
@@ -236,13 +238,13 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
                   onClick={() => setShowCustomRangePicker(false)}
                   className="rounded-lg px-4 py-2 text-sm text-gray-400 hover:text-white"
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="submit"
                   className="rounded-lg bg-[var(--primary,#9333ea)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
                 >
-                  Export
+                  {t('wallet.export.button')}
                 </button>
               </div>
             </form>
@@ -262,13 +264,11 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
             <div className="flex items-center gap-3 text-yellow-500">
               <AlertTriangle size={24} />
               <h3 id="large-export-title" className="text-lg font-semibold text-white">
-                Large Dataset Export Warning
+                {t('wallet.export.largeExportWarning')}
               </h3>
             </div>
             <p className="mt-3 text-sm text-gray-300">
-              The requested export contains{' '}
-              <strong className="text-white">{pendingExportTxs.length.toLocaleString()} rows</strong>.
-              Exporting very large datasets may take a few moments and could impact performance.
+              {t('wallet.export.largeExportBody', { count: pendingExportTxs.length.toLocaleString() })}
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
@@ -279,14 +279,14 @@ export const ExportButton: React.FC<ExportButtonProps> = ({
                 }}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:text-white"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button
                 type="button"
                 onClick={() => performExport(pendingExportTxs)}
                 className="rounded-lg bg-yellow-600 px-4 py-2 text-sm font-medium text-white hover:bg-yellow-700"
               >
-                Confirm &amp; Export
+                {t('wallet.export.confirmAndExport')}
               </button>
             </div>
           </div>

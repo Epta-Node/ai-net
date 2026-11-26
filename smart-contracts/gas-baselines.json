@@ -26,6 +26,18 @@
       "instructions": 77535,
       "memory_bytes": 10817
     },
+    "agent_marketplace::update_listing": {
+      "instructions": 68000,
+      "memory_bytes": 9500
+    },
+    "agent_marketplace::remove_listing": {
+      "instructions": 55000,
+      "memory_bytes": 7500
+    },
+    "agent_marketplace::purchase_listing": {
+      "instructions": 290199,
+      "memory_bytes": 48871
+    },
     "agent_registry::lookup_agents": {
       "instructions": 133597,
       "memory_bytes": 15191

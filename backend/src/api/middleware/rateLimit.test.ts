@@ -20,11 +20,14 @@ import {
   createPublicLimiter,
   createAuthedLimiter,
   createAdminLimiter,
+  adminIpAllowlist,
+  isAdminIpAllowed,
   agentAuthFailureGuard,
   recordAuthFailure,
   resetAuthFailures,
   type RateLimiter,
 } from "./rateLimit";
+import { RATE_LIMIT_RULES } from "../rateLimitRules";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,14 +202,59 @@ describe("createAuthedLimiter", () => {
 });
 
 describe("createAdminLimiter", () => {
-  it("defaults to 20 requests per minute", async () => {
+  it("defaults to 10 requests per minute", async () => {
+    delete process.env.ADMIN_IP_ALLOWLIST;
     const limiter = createAdminLimiter();
     const app = express();
     app.use(limiter.middleware);
     app.get("/ping", (_req, res) => res.json({ ok: true }));
 
     const res = await request(app).get("/ping");
-    expect(res.headers["x-ratelimit-limit"]).toBe("20");
+    expect(res.headers["x-ratelimit-limit"]).toBe("10");
+  });
+});
+
+describe("ADMIN_IP_ALLOWLIST", () => {
+  afterEach(() => {
+    delete process.env.ADMIN_IP_ALLOWLIST;
+  });
+
+  it("lets allowlisted IPs make unlimited admin requests", async () => {
+    process.env.ADMIN_IP_ALLOWLIST = " 203.0.113.10 , ::ffff:127.0.0.1 ";
+    const app = express();
+    app.set("trust proxy", true);
+    app.use(createAdminLimiter().middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+    for (let i = 0; i < 15; i++) {
+      const res = await request(app).get("/ping").set("X-Forwarded-For", "203.0.113.10");
+      expect(res.status).toBe(200);
+    }
+    // IPv4-mapped form of a loopback address is normalised before comparison.
+    const mapped = await request(app).get("/ping").set("X-Forwarded-For", "::ffff:127.0.0.1");
+    expect(mapped.status).toBe(200);
+  });
+
+  it("still blocks non-allowlisted IPs with the stricter limit", async () => {
+    process.env.ADMIN_IP_ALLOWLIST = "203.0.113.10";
+    const app = express();
+    app.set("trust proxy", true);
+    app.use(createAdminLimiter().middleware);
+    app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+    for (let i = 0; i < 10; i++) {
+      expect((await request(app).get("/ping").set("X-Forwarded-For", "203.0.113.11")).status).toBe(200);
+    }
+    const blocked = await request(app).get("/ping").set("X-Forwarded-For", "203.0.113.11");
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers["x-ratelimit-limit"]).toBe("10");
+  });
+
+  it("normalises and trims configured addresses", () => {
+    process.env.ADMIN_IP_ALLOWLIST = " 203.0.113.10 , , ::ffff:127.0.0.1 ";
+    expect(adminIpAllowlist()).toEqual(["203.0.113.10", "127.0.0.1"]);
+    expect(isAdminIpAllowed("::ffff:127.0.0.1")).toBe(true);
+    expect(isAdminIpAllowed(undefined)).toBe(false);
   });
 });
 
@@ -214,14 +262,12 @@ describe("createAdminLimiter", () => {
 
 describe("group limits are distinct from each other", () => {
   it("public > authed > admin by default", () => {
-    const publicLimit = 120;
-    const authedLimit = 30;
-    const adminLimit = 20;
-    expect(publicLimit).toBeGreaterThan(authedLimit);
-    expect(authedLimit).toBeGreaterThan(adminLimit);
+    expect(RATE_LIMIT_RULES.GLOBAL.maxRequests).toBeGreaterThan(RATE_LIMIT_RULES.ADMIN.maxRequests);
+    expect(RATE_LIMIT_RULES.TASKS.maxRequests).toBeGreaterThan(RATE_LIMIT_RULES.ADMIN.maxRequests);
+    expect(RATE_LIMIT_RULES.ADMIN).toMatchObject({ windowMs: 60_000, maxRequests: 10 });
   });
 
-  it("public limiter allows 120 while admin only allows 20", async () => {
+  it("public limiter allows 120 while admin only allows 10", async () => {
     const pubLimiter = createPublicLimiter();
     const admLimiter = createAdminLimiter();
 
@@ -237,7 +283,7 @@ describe("group limits are distinct from each other", () => {
     const admRes = await request(admApp).get("/ping");
 
     expect(pubRes.headers["x-ratelimit-limit"]).toBe("120");
-    expect(admRes.headers["x-ratelimit-limit"]).toBe("20");
+    expect(admRes.headers["x-ratelimit-limit"]).toBe("10");
   });
 });
 

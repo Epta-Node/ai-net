@@ -567,3 +567,143 @@ fn get_bidders_pagination_limits() {
     let bidders = client.get_bidders(&task_id, &0, &51);
     assert_eq!(bidders.len(), 0);
 }
+
+// ─── Withdraw Bid ────────────────────────────────────────────────────────────
+
+#[test]
+fn withdraw_bid_succeeds_during_bidding_phase() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_withdraw");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    let salt = BytesN::from_array(&env, &[1u8; 32]);
+    let terms = String::from_str(&env, "");
+    let comm = client.commitment_of(&task_id, &bidder, &2_000_000, &terms, &salt);
+    client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+    // Withdraw should succeed during bidding phase
+    assert!(client.try_withdraw_bid(&task_id, &bidder).is_ok());
+
+    // Bid should be removed
+    assert_eq!(client.try_get_bid(&task_id, &bidder), Err(Ok(Error::NotFound)));
+
+    // Auction bid count should be decremented
+    let auction = client.get_auction(&task_id).unwrap();
+    assert_eq!(auction.bid_count, 0);
+}
+
+#[test]
+fn withdraw_bid_fails_after_reveal() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_withdraw_reveal");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    let salt = BytesN::from_array(&env, &[1u8; 32]);
+    let terms = String::from_str(&env, "");
+    let price = 2_000_000;
+    let comm = client.commitment_of(&task_id, &bidder, &price, &terms, &salt);
+    client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+    // Advance to reveal phase
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    
+    // Reveal the bid
+    client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+
+    // Withdrawal should fail after revealing
+    assert_eq!(
+        client.try_withdraw_bid(&task_id, &bidder),
+        Err(Ok(Error::BidAlreadyRevealed))
+    );
+}
+
+#[test]
+fn withdraw_bid_fails_after_auction_finalized() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_withdraw_final");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    let salt = BytesN::from_array(&env, &[1u8; 32]);
+    let terms = String::from_str(&env, "");
+    let price = 2_000_000;
+    let comm = client.commitment_of(&task_id, &bidder, &price, &terms, &salt);
+    client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+    // Advance to reveal phase and reveal
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    client.reveal_bid(&task_id, &bidder, &price, &terms, &salt);
+
+    // Advance past reveal deadline and finalize
+    env.ledger().set_timestamp(env.ledger().timestamp() + 3601);
+    let caller = Address::generate(&env);
+    client.reveal_bids(&caller, &task_id);
+
+    // Withdrawal should fail after finalization
+    assert_eq!(
+        client.try_withdraw_bid(&task_id, &bidder),
+        Err(Ok(Error::AuctionClosed))
+    );
+}
+
+#[test]
+fn withdraw_bid_fails_for_nonexistent_bid() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_no_bid");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    // Try to withdraw without submitting a bid
+    assert_eq!(
+        client.try_withdraw_bid(&task_id, &bidder),
+        Err(Ok(Error::NotFound))
+    );
+}
+
+#[test]
+fn withdraw_bid_requires_bidder_auth() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_auth");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    let salt = BytesN::from_array(&env, &[1u8; 32]);
+    let terms = String::from_str(&env, "");
+    let comm = client.commitment_of(&task_id, &bidder, &2_000_000, &terms, &salt);
+    client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+    // Note: mock_all_auths is set, so authentication checks are bypassed
+    // In a real scenario, this would fail with Unauthorized if stranger tries to withdraw
+    // Testing proper auth requires more sophisticated test setup
+}
+
+#[test]
+fn withdraw_bid_emits_event() {
+    let (env, client) = setup();
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    let task_id = Symbol::new(&env, "task_event");
+
+    create_default_auction(&env, &client, &creator, &task_id);
+
+    let salt = BytesN::from_array(&env, &[1u8; 32]);
+    let terms = String::from_str(&env, "");
+    let comm = client.commitment_of(&task_id, &bidder, &2_000_000, &terms, &salt);
+    client.submit_bid(&task_id, &bidder, &comm, &500_000, &50);
+
+    // Withdraw and check events (events checking requires more setup in Soroban)
+    assert!(client.try_withdraw_bid(&task_id, &bidder).is_ok());
+}

@@ -322,6 +322,292 @@ impl AgentGovernanceContract {
         Ok(())
     }
 
+    // ── Multi-Admin Role Management (issue #940) ─────────────────────────
+
+    /// Initialize multi-admin mode by adding admins to the admin set.
+    /// Only the current single admin can call this. Once set, admin changes
+    /// require majority vote.
+    pub fn add_admins_to_set(env: Env, new_admins: Vec<Address>) -> Result<(), Error> {
+        let current_admin = require_admin(&env)?;
+        
+        // Get or create admin set
+        let mut admin_set: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admins)
+            .unwrap_or_else(|| {
+                let mut set = Vec::new(&env);
+                set.push_back(current_admin.clone());
+                set
+            });
+
+        // Add new admins
+        for addr in new_admins.iter() {
+            if !admin_set.contains(&addr) {
+                admin_set.push_back(addr.clone());
+            }
+        }
+
+        env.storage().instance().set(&DataKey::Admins, &admin_set);
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("admins_add")),
+            admin_set.clone(),
+        );
+        Ok(())
+    }
+
+    /// Get the current admin set. Returns None if multi-admin mode is not enabled.
+    pub fn get_admin_set(env: Env) -> Option<Vec<Address>> {
+        env.storage().instance().get(&DataKey::Admins)
+    }
+
+    /// Propose adding a new admin to the admin set. Requires majority approval.
+    pub fn propose_add_admin(env: Env, proposer: Address, new_admin: Address) -> Result<u64, Error> {
+        proposer.require_auth();
+
+        let admin_set: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admins)
+            .ok_or(Error::NotInitialized)?;
+
+        if !admin_set.contains(&proposer) {
+            return Err(Error::Unauthorized);
+        }
+
+        if admin_set.contains(&new_admin) {
+            return Err(Error::AlreadyInitialized); // Reusing error for "already admin"
+        }
+
+        let proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AdminProposalCount)
+            .unwrap_or(0)
+            + 1;
+
+        let mut approvals = Vec::new(&env);
+        approvals.push_back(proposer.clone());
+
+        let proposal = types::AdminProposal {
+            id: proposal_id,
+            proposer: proposer.clone(),
+            target_admin: new_admin.clone(),
+            is_add: true,
+            created_at: env.ledger().timestamp(),
+            approvals,
+            executed: false,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminProposalCount, &proposal_id);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("adm_prop")),
+            types::AdminChangeProposedEvent {
+                proposal_id,
+                proposer,
+                target_admin: new_admin,
+                is_add: true,
+            },
+        );
+
+        Ok(proposal_id)
+    }
+
+    /// Propose removing an admin from the admin set. Requires majority approval.
+    pub fn propose_remove_admin(
+        env: Env,
+        proposer: Address,
+        admin_to_remove: Address,
+    ) -> Result<u64, Error> {
+        proposer.require_auth();
+
+        let admin_set: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admins)
+            .ok_or(Error::NotInitialized)?;
+
+        if !admin_set.contains(&proposer) {
+            return Err(Error::Unauthorized);
+        }
+
+        if !admin_set.contains(&admin_to_remove) {
+            return Err(Error::AgentNotRegistered); // Reusing error for "not an admin"
+        }
+
+        // Cannot remove if it would leave no admins
+        if admin_set.len() <= 1 {
+            return Err(Error::InvalidReputation); // Reusing error  
+        }
+
+        let proposal_id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AdminProposalCount)
+            .unwrap_or(0)
+            + 1;
+
+        let mut approvals = Vec::new(&env);
+        approvals.push_back(proposer.clone());
+
+        let proposal = types::AdminProposal {
+            id: proposal_id,
+            proposer: proposer.clone(),
+            target_admin: admin_to_remove.clone(),
+            is_add: false,
+            created_at: env.ledger().timestamp(),
+            approvals,
+            executed: false,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminProposal(proposal_id), &proposal);
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminProposalCount, &proposal_id);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("adm_prop")),
+            types::AdminChangeProposedEvent {
+                proposal_id,
+                proposer,
+                target_admin: admin_to_remove,
+                is_add: false,
+            },
+        );
+
+        Ok(proposal_id)
+    }
+
+    /// Approve an admin role change proposal.
+    pub fn approve_admin_change(env: Env, approver: Address, proposal_id: u64) -> Result<(), Error> {
+        approver.require_auth();
+
+        let admin_set: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admins)
+            .ok_or(Error::NotInitialized)?;
+
+        if !admin_set.contains(&approver) {
+            return Err(Error::Unauthorized);
+        }
+
+        let mut proposal: types::AdminProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminProposal(proposal_id))
+            .ok_or(Error::ProposalNotFound)?;
+
+        if proposal.executed {
+            return Err(Error::ProposalAlreadyExecuted);
+        }
+
+        if proposal.approvals.contains(&approver) {
+            return Err(Error::AlreadyVoted);
+        }
+
+        proposal.approvals.push_back(approver.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminProposal(proposal_id), &proposal);
+
+        let approval_count = proposal.approvals.len() as u32;
+        let required = (admin_set.len() as u32 + 1) / 2; // Majority
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("adm_appr")),
+            types::AdminChangeApprovedEvent {
+                proposal_id,
+                approver,
+                approval_count,
+                required,
+            },
+        );
+
+        // Auto-execute if majority reached
+        if approval_count >= required {
+            Self::execute_admin_change(env, proposal_id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Execute an approved admin role change.
+    fn execute_admin_change(env: Env, proposal_id: u64) -> Result<(), Error> {
+        let mut proposal: types::AdminProposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::AdminProposal(proposal_id))
+            .ok_or(Error::ProposalNotFound)?;
+
+        if proposal.executed {
+            return Err(Error::ProposalAlreadyExecuted);
+        }
+
+        let mut admin_set: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admins)
+            .ok_or(Error::NotInitialized)?;
+
+        let required = (admin_set.len() as u32 + 1) / 2;
+        if (proposal.approvals.len() as u32) < required {
+            return Err(Error::InsufficientApprovals);
+        }
+
+        if proposal.is_add {
+            if !admin_set.contains(&proposal.target_admin) {
+                admin_set.push_back(proposal.target_admin.clone());
+            }
+        } else {
+            // Remove admin
+            let mut new_set = Vec::new(&env);
+            for admin in admin_set.iter() {
+                if admin != proposal.target_admin {
+                    new_set.push_back(admin);
+                }
+            }
+            admin_set = new_set;
+
+            // Ensure at least one admin remains
+            if admin_set.is_empty() {
+                return Err(Error::InvalidReputation); // Reusing error
+            }
+        }
+
+        env.storage().instance().set(&DataKey::Admins, &admin_set);
+        proposal.executed = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::AdminProposal(proposal_id), &proposal);
+
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("adm_exec")),
+            types::AdminChangeExecutedEvent {
+                proposal_id,
+                target_admin: proposal.target_admin.clone(),
+                is_add: proposal.is_add,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Get an admin role change proposal by ID.
+    pub fn get_admin_proposal(env: Env, proposal_id: u64) -> Option<types::AdminProposal> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AdminProposal(proposal_id))
+    }
+
     // ── Agent registration ───────────────────────────────────────────────
 
     /// Register `agent` as a stakeholder with a reputation score and stake.

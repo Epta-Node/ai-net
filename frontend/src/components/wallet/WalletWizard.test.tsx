@@ -13,6 +13,19 @@ vi.mock('framer-motion', () => ({
   },
 }))
 
+// Mock toast hook
+const { showToast } = vi.hoisted(() => ({ showToast: vi.fn() }))
+vi.mock('../../context/ToastContext', () => ({
+  useToast: () => ({ showToast }),
+}))
+
+// Mock navigator.clipboard
+Object.assign(navigator, {
+  clipboard: {
+    writeText: vi.fn().mockImplementation(() => Promise.resolve()),
+  },
+})
+
 describe('WalletWizard', () => {
   const mockCompleteWizard = vi.fn()
   const mockConnectFreighter = vi.fn()
@@ -131,5 +144,44 @@ describe('WalletWizard', () => {
     
     fireEvent.click(screen.getByText('Finish Setup'))
     expect(mockCompleteWizard).toHaveBeenCalledTimes(1)
+  })
+
+  it('copies the connected wallet address to clipboard and shows a toast', async () => {
+    vi.spyOn(WalletContext, 'useWallet').mockReturnValue({
+      publicKey: 'GA1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      keypair: null,
+      connected: true,
+      connecting: false,
+      ready: true,
+      network: Networks.TESTNET,
+      expectedNetwork: Networks.TESTNET,
+      networkMismatch: false,
+      connectionMethod: 'freighter',
+      freighterAvailable: true,
+      error: null,
+      connect: vi.fn(),
+      connectFreighter: mockConnectFreighter,
+      connectSecretKey: vi.fn(),
+      disconnect: vi.fn(),
+      hasCompletedWizard: false,
+      completeWizard: mockCompleteWizard,
+      autoReconnectSettled: true,
+    })
+
+    render(<WalletWizard />)
+
+    // Navigate to step 3 where the connected address is displayed
+    fireEvent.click(screen.getByText('Get Started'))
+    fireEvent.click(screen.getByText('Continue'))
+
+    expect(screen.getByText('Connected Address:')).toBeInTheDocument()
+    expect(screen.getByText('GA1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('copy-button'))
+
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith('GA1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+      expect(showToast).toHaveBeenCalledWith('Wallet address copied to clipboard', 'success')
+    })
   })
 })

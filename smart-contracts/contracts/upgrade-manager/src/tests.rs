@@ -749,3 +749,8 @@ mod gas_snapshot {
         assert_snapshot(&f.env, CONTRACT, "rollback_upgrade");
     }
 }
+
+// ─── 11. Version Compatibility Tests (issue #945) ────────────────────────────
+//
+// Tests are located in `tests/version_compatibility.rs` and are executed
+// as integration tests for comprehensive version validation coverage.

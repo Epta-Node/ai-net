@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { ExternalLink, ArrowUpRight, ArrowDownRight, Clock, Search, CreditCard, Send } from 'lucide-react'
+import { ExternalLink, ArrowUpRight, ArrowDownRight, Clock, Search, CreditCard, Send, Loader2 } from 'lucide-react'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
 import { filterTransactions, computeRunningTotal } from '../../hooks/useTransactionHistory'
 import styles from './TransactionTable.module.css'
@@ -10,8 +10,12 @@ import { ExportButton } from './ExportButton'
 import { DataTable, type DataTableColumn } from '../common/DataTable'
 import { SkeletonTable } from '../common/Skeleton'
 import EmptyState from '../common/EmptyState'
+import { useSelectTypeahead } from '../../hooks/useSelectTypeahead'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const
 
 interface TransactionTableProps {
   transactions: TransactionEvent[]
@@ -44,23 +48,12 @@ function truncateAddress(addr: string): string {
 
 export function TransactionTable({ transactions, loading, publicKey }: TransactionTableProps) {
   const { t, i18n } = useTranslation()
+  const { showToast } = useToast()
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [pageSize] = useState<number>(25)
+  const [pageSize, setPageSize] = useState<number>(25)
   const [page, setPage] = useState(1)
-  const pageSizeOptions = useMemo(
-    () => PAGE_SIZE_OPTIONS.map((size) => ({ label: String(size), value: size })),
-    []
-  )
-  const selectPageSize = (size: number) => {
-    setPageSize(size)
-    setPage(1)
-  }
-  const handlePageSizeTypeahead = useSelectTypeahead({
-    options: pageSizeOptions,
-    onMatch: selectPageSize,
-  })
 
   const filtered = useMemo(
     () => filterTransactions(transactions, { search, from: dateFrom || null, to: dateTo || null }),
@@ -130,7 +123,49 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
         )
       ),
       sortable: true,
-      width: '12%',
+      width: '10%',
+    },
+    {
+      key: 'status',
+      header: t('wallet.tx.status', 'Status'),
+      render: (tx) => {
+        const isPending = tx.status === 'pending';
+        const isFailed = tx.status === 'failed';
+        if (isPending) {
+          return (
+            <span
+              className={`${styles.statusBadge} ${styles.statusPending}`}
+              title={t('wallet.tx.pendingTooltip', 'Transaction is pending confirmation on the Stellar network')}
+              data-testid="tx-status-pending"
+            >
+              <Loader2 size={12} className={styles.spin} />
+              <span>{t('wallet.tx.pending', 'Pending')}</span>
+            </span>
+          );
+        }
+        if (isFailed) {
+          return (
+            <span
+              className={`${styles.statusBadge} ${styles.statusFailed}`}
+              title={t('wallet.tx.failedTooltip', 'Transaction failed')}
+              data-testid="tx-status-failed"
+            >
+              <span>{t('wallet.tx.failed', 'Failed')}</span>
+            </span>
+          );
+        }
+        return (
+          <span
+            className={`${styles.statusBadge} ${styles.statusCompleted}`}
+            title={t('wallet.tx.completedTooltip', 'Transaction completed')}
+            data-testid="tx-status-completed"
+          >
+            <span>{t('wallet.tx.completed', 'Completed')}</span>
+          </span>
+        );
+      },
+      sortable: true,
+      width: '14%',
     },
     {
       key: 'amount',
@@ -141,19 +176,19 @@ export function TransactionTable({ transactions, loading, publicKey }: Transacti
           {tx.direction === 'in' ? '+' : '-'}{parseFloat(tx.amount).toFixed(7)} XLM
         </span>
       ),
-      width: '16%',
+      width: '14%',
     },
     {
       key: 'counterparty',
       header: t('wallet.tx.counterparty'),
       render: (tx) => <span title={tx.counterparty}>{truncateAddress(tx.counterparty)}</span>,
-      width: '20%',
+      width: '18%',
     },
     {
       key: 'memo',
       header: t('wallet.tx.memo'),
-      render: (tx) => (tx.memo ? <span className={styles.memoText}>{tx.memo}</span> : <span className={styles.noMemo}>—</span>),
-      width: '22%',
+      render: (tx) => (tx.memo ? <span className={styles.memoText}>{tx.memo}</span> : <span className={styles.noMemo}>-</span>),
+      width: '18%',
     },
     {
       key: 'timestamp',

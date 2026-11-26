@@ -18,7 +18,8 @@ import {
   type VeniceKeyHealthStore,
 } from './keyHealth.js';
 import { getConfig } from '../../config/index.js';
-import { currentTraceContext, toW3cTraceparent } from '../traceContext.js';
+import { currentPropagationHeaders } from '../tracing.js';
+import { getVeniceRouter } from '../veniceRouter.js';
 import type {
   AgentType,
   CompleteOptions,
@@ -105,6 +106,24 @@ const RETRY_DELAYS_MS = [200, 400, 800, 1600];
 const RETRYABLE_STATUS_CODES = new Set([429, 503, 500, 502, 504]);
 const NON_RETRYABLE_STATUS_CODES = new Set([400, 401, 422]);
 const DEFAULT_CHAT_MODEL = 'llama-3.3-70b';
+
+/** Lightweight connectivity probe used by `/health/deep` (does not call the LLM). */
+export async function pingVeniceApi(apiKey: string, timeoutMs = 3_000): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch('https://api.venice.ai/api/v1/models', {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    // A 401 still confirms connectivity; credentials are configured separately.
+    if (!response.ok && response.status !== 401) {
+      throw new Error(`Venice API responded ${response.status}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Whether a failure is worth retrying against a *different* provider.
@@ -414,7 +433,11 @@ export class VeniceClient implements VeniceClientLike {
   }
 
   getModelFor(agentType: AgentType): string {
-    return MODEL_MAP[agentType];
+    try {
+      return getVeniceRouter().selectModel(agentType, 1000).id;
+    } catch {
+      return MODEL_MAP[agentType];
+    }
   }
 
   /** Current breaker state: `CLOSED` | `OPEN` | `HALF_OPEN`. */
@@ -537,23 +560,16 @@ export class VeniceClient implements VeniceClientLike {
     };
 
     try {
-      try {
-        this.breaker.assertClosed();
-        probeHeld = true;
-      } catch (e) {
-        if (this.enableCacheFallback && !options?.force) {
-          const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
-          if (stale !== null) {
-            log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
-            // A cache read costs no upstream tokens; report zero so the ledger
-            // does not charge the task for a lookup.
-            this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
-            return stale;
-          }
+      this.breaker.assertClosed();
+      probeHeld = true;
+    } catch (e) {
+      if (this.enableCacheFallback && !options?.force) {
+        const stale = this.cache.getStale(promptForLogging, agentType, this.modelVersion);
+        if (stale !== null) {
+          log.warn({ agentType, model, circuitState: this.breaker.getState() }, 'venice circuit open — serving stale cache');
+          this.reportUsage(options, { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 });
+          return stale;
         }
-        // No stale entry to fall back on: the open circuit must still shed
-        // the call rather than let it through.
-        throw e;
       }
       throw e;
     }
@@ -675,6 +691,7 @@ export class VeniceClient implements VeniceClientLike {
       }
       attempted += 1;
 
+      const attemptStart = Date.now();
       try {
         const response = await this.fetchWithRetryForProvider(
           body,
@@ -687,14 +704,11 @@ export class VeniceClient implements VeniceClientLike {
           throw new Error('Venice response missing expected content field');
         }
 
-        // Prefer the provider's own counts. If the payload has no usage block
-        // (some deployments omit it), fall back to estimating rather than
-        // reporting zero — under-counting is how a budget stops meaning
-        // anything.
         const usage = parseUsage(data) ?? estimateUsage(promptForLogging, content);
 
         this.keyPool.recordResult(provider.apiKey, true);
         settleSuccess();
+        try { getVeniceRouter().recordCall(model, Date.now() - attemptStart, true); } catch { /* best effort */ }
         this.logRequest(requestId, agentType, model, promptForLogging, Date.now() - start, 'ok', retries, provider.name, usage);
         return { content, usage };
       } catch (err) {
@@ -702,6 +716,7 @@ export class VeniceClient implements VeniceClientLike {
           throw err;
         }
         lastError = err instanceof Error ? err : new Error(String(err));
+        try { getVeniceRouter().recordCall(model, Date.now() - attemptStart, false); } catch { /* best effort */ }
         this.keyHealth.recordFailure(
           provider.name ?? 'primary',
           classifyVeniceFailure(lastError),
@@ -1001,17 +1016,14 @@ export class VeniceClient implements VeniceClientLike {
       }
 
       try {
-        // Propagate the active W3C trace context to Venice so provider-side
-        // logs correlate with our request spans (#856).
-        const traceCtx = currentTraceContext();
+        // Propagate the active request ID and W3C trace context to Venice so
+        // provider-side logs correlate with our request spans (#856, #903).
         const response = await fetch(`${provider.baseUrl ?? this.baseUrl}/chat/completions`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${provider.apiKey}`,
-            ...(traceCtx
-              ? { traceparent: toW3cTraceparent(traceCtx.traceId, traceCtx.spanId) }
-              : {}),
+            ...(currentPropagationHeaders() ?? {}),
           },
           body,
           signal: controller.signal,

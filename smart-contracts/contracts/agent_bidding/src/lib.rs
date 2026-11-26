@@ -92,7 +92,7 @@ mod types;
 
 pub use errors::Error;
 pub use types::{
-    Auction, AuctionAbortedEvent, AuctionConfig, AuctionCreatedEvent, AuctionPhase,
+    Auction, AuctionAbortedEvent, AuctionConfig, AuctionCreatedEvent, AuctionPhase, BidAccepted,
     BidRevealedEvent, BidSubmittedEvent, BidsRevealedEvent, BondDeposited, BondRefundClaimedEvent,
     BondSlashed, ContractAwardedEvent, DataKey, Escrow, EscrowSettledEvent, RefundClaimedEvent,
     SealedBid,
@@ -843,6 +843,87 @@ impl AgentBiddingContract {
         Ok(())
     }
 
+    // ── Withdraw Bid ──────────────────────────────────────────────────────
+
+    /// Withdraw a sealed bid before the auction is finalized.
+    ///
+    /// Allows a bidder to withdraw their sealed bid and retrieve their bond
+    /// **before the reveal phase ends**. After `reveal_bids` is called, the
+    /// auction is finalized and withdrawal is no longer possible.
+    ///
+    /// * `bidder` — must authorise the call and must have submitted a bid.
+    /// * Timing — only during the bidding or reveal phase, before the auction
+    ///   is finalized (phase = `Reveal` or `Awarded`).
+    /// * The bid must exist and not be revealed yet.
+    ///
+    /// Returns the bond amount in stroops to the bidder.
+    /// Emits `(bidding, bid_wdrw)`.
+    pub fn withdraw_bid(
+        env: Env,
+        task_id: Symbol,
+        bidder: Address,
+    ) -> Result<(), Error> {
+        require_not_paused(&env)?;
+        bidder.require_auth();
+
+        let mut auction = load_auction(&env, &task_id)?;
+        require_live(&auction)?;
+
+        // Withdrawal only allowed during bidding phase (before finalization)
+        if auction.phase != AuctionPhase::Bidding {
+            return Err(Error::AuctionClosed);
+        }
+
+        let bid_key = DataKey::Bid(task_id.clone(), bidder.clone());
+        let sealed: SealedBid = env
+            .storage()
+            .persistent()
+            .get(&bid_key)
+            .ok_or(Error::NotFound)?;
+
+        // Cannot withdraw after revealing
+        if sealed.revealed {
+            return Err(Error::BidAlreadyRevealed);
+        }
+
+        // Refund the bond
+        let bond_amount = sealed.bond;
+        push_funds(&env, &bidder, bond_amount)?;
+
+        // Remove the bid from storage
+        env.storage().persistent().remove(&bid_key);
+
+        // Remove bidder from the bidders list
+        let bidders_key = DataKey::Bidders(task_id.clone());
+        let mut bidders: Vec<Address> = env
+            .storage()
+            .persistent()
+            .get(&bidders_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        
+        // Find and remove the bidder
+        let mut new_bidders = Vec::new(&env);
+        for b in bidders.iter() {
+            if b != bidder {
+                new_bidders.push_back(b);
+            }
+        }
+        env.storage().persistent().set(&bidders_key, &new_bidders);
+        extend_ttl_for_key(&env, &bidders_key);
+
+        // Update auction bid count
+        auction.bid_count = auction.bid_count.saturating_sub(1);
+        save_auction(&env, &auction);
+
+        // Emit withdrawal event
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("bid_wdrw")),
+            (task_id, bidder.clone(), bond_amount),
+        );
+
+        Ok(())
+    }
+
     // ── Reveal Individual Bid ─────────────────────────────────────────────
 
     /// Reveal a previously sealed bid inside the reveal window.
@@ -1164,7 +1245,8 @@ impl AgentBiddingContract {
     /// sealed bid from being a free option to walk away after seeing everyone
     /// else's price.
     ///
-    /// Phase transitions to `Awarded`. Emits `(bidding, cntrct_aw)`.
+    /// Phase transitions to `Awarded`. Emits `(bidding, cntrct_aw)` and, on
+    /// acceptance of the winning bid, `(bidding, bid_accpt)`.
     pub fn award_contract(env: Env, caller: Address, task_id: Symbol) -> Result<(), Error> {
         require_not_paused(&env)?;
         caller.require_auth();
@@ -1280,6 +1362,14 @@ impl AgentBiddingContract {
                 escrow_amount,
                 refunded_bidders: refunded_count,
                 forfeited_bidders: forfeited_count,
+            },
+        );
+        env.events().publish(
+            (symbol_short!("bidding"), symbol_short!("bid_accpt")),
+            BidAccepted {
+                auction_id: task_id,
+                agent_id: winner,
+                bid_amount: escrow_amount,
             },
         );
 
@@ -3000,6 +3090,46 @@ mod test {
         let bid = client.get_bid(&task_id, &bidder).unwrap();
         assert!(bid.refunded);
         assert!(!bid.forfeited);
+    }
+
+    #[test]
+    fn award_contract_emits_bid_accepted_event() {
+        let (env, client, anyone) = setup();
+        let creator = Address::generate(&env);
+        let task_id = Symbol::new(&env, "bid_accept");
+        let bidder = Address::generate(&env);
+        let price: i128 = 4_000_000;
+
+        create_test_auction(&env, &client, &creator, &task_id, BID_SECS);
+
+        let s = salt(&env, 171);
+        let t = terms(&env, "Winner");
+        let c = client.commitment_of(&task_id, &bidder, &price, &t, &s);
+        fund(&env, &client, &bidder);
+        client.submit_bid(&task_id, &bidder, &c, &BOND, &50);
+
+        enter_reveal_window(&env, &client, &task_id);
+        client.reveal_bid(&task_id, &bidder, &price, &t, &s);
+        client.reveal_bids(&anyone, &task_id);
+
+        let _ = env.events().all();
+
+        client.award_contract(&creator, &task_id);
+
+        let events = env.events().all();
+        let mut accepted: Vec<BidAccepted> = Vec::new(&env);
+        for i in 0..events.len() {
+            let (_, topics, data) = events.get(i).unwrap();
+            let topic: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            if topic == symbol_short!("bid_accpt") {
+                accepted.push_back(data.try_into_val(&env).unwrap());
+            }
+        }
+        assert_eq!(accepted.len(), 1, "expected exactly one bid_accpt event");
+        let payload = accepted.first().unwrap();
+        assert_eq!(payload.auction_id, task_id);
+        assert_eq!(payload.agent_id, bidder);
+        assert_eq!(payload.bid_amount, price);
     }
 
     #[test]

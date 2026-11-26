@@ -153,11 +153,8 @@ export function AgentTable({
             rows={paged}
             getRowKey={(agent) => agent.id}
             getRowTestId={(agent) => `agent-row-${agent.id}`}
-            caption={t('nav.agentRegistry')}
             maxHeight={540}
             stickyHeader
-            sortKey={sortKey}
-            sortDirection={sortDir as SortDirection}
             onSort={(key) => onSort(key as SortKey)}
             onRowClick={onRowClick}
             rowClassName={() => styles.row}
@@ -165,11 +162,11 @@ export function AgentTable({
           {/* #877: pagination controls */}
           {agents.length > size && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-              <button type="button" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>Prev</button>
+              <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>Prev</button>
               <span>Page {page + 1} of {totalPages}</span>
-              <button type="button" disabled={page >= totalPages - 1} onClick={() => setPage((p) => p + 1)}>Next</button>
-              <select aria-label={t('page.agents.pageFilters')} value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0); }}>
-                {PAGE_SIZES.map((s) => <option key={s} value={s}>{s} / page</option>)}
+              <button disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next</button>
+              <select value={size} onChange={e => { setSize(Number(e.target.value)); setPage(0); }}>
+                {PAGE_SIZES.map(s => <option key={s} value={s}>{s} / page</option>)}
               </select>
             </div>
           )}

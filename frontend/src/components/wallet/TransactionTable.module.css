@@ -282,6 +282,12 @@
   color: var(--border-color);
 }
 
+.counterpartyCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .txLink {
   color: var(--accent-secondary);
   transition: color 0.15s, opacity 0.15s;
@@ -366,4 +372,49 @@
 @keyframes pulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 0.8; }
+}
+
+/* Status Badges */
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-round, 9999px);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.statusPending {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.statusCompleted {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--status-success-strong, #10b981);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.statusFailed {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--status-danger, #ef4444);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }

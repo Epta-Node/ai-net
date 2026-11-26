@@ -43,6 +43,8 @@ export function versioningMiddleware(req: Request, res: Response, next: NextFunc
 
   // Validate the requested version
   if (!supportedVersions.includes(negotiatedVersion)) {
+    // Even a rejected request is told which version the server runs (#922).
+    res.setHeader('X-API-Version', latestVersion);
     res.status(400).json({
       error: {
         message: `Unsupported API version: "${negotiatedVersion}". Supported versions: ${supportedVersions.join(', ')}`,

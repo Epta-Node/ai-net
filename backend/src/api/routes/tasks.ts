@@ -142,7 +142,21 @@ export function createTasksRouter(
         (req.body as z.infer<typeof createTaskSchema>).walletPublicKey ??
         (req.headers["walletpublickey"] as string | undefined) ??
         "anonymous";
+      if (req.idempotencyKey) {
+        const existingTask = createTaskDb(getTaskDb()).findByIdempotencyKey(
+          walletPublicKey,
+          req.idempotencyKey,
+        );
 
+        if (existingTask) {
+          res.status(200).json({
+            taskId: existingTask.id,
+            dagPreview: existingTask.dag,
+            status: existingTask.status,
+          });
+          return;
+        }
+      }
       // ── Per-wallet daily quota ───────────────────────────────────────────────
       // Throws a 429 RateLimitError and counts the rejection in the quota
       // metrics when the wallet has spent its DAILY_TASK_LIMIT_PER_WALLET.
@@ -161,6 +175,7 @@ export function createTasksRouter(
         dag,
         createdAt: now,
         updatedAt: now,
+        idempotencyKey: req.idempotencyKey,
       };
 
       createTask(task);

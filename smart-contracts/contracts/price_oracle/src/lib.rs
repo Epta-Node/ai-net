@@ -178,8 +178,8 @@ impl PriceOracleContract {
     ///
     /// * `pair`      – Asset pair symbol (e.g. `XLM_USD`).
     /// * `price`     – Price in stroops (must be > 0).
-    /// * `timestamp` – Off-chain observation time (Unix seconds, must be ≤
-    ///                 `env.ledger().timestamp()`).
+    /// * `timestamp` – Off-chain observation time (Unix seconds, must be within
+    ///                 `max_price_age` of `env.ledger().timestamp()`).
     pub fn submit_price(env: Env, pair: Symbol, price: i128, timestamp: u64) -> Result<(), Error> {
         require_not_paused(&env)?;
         require_admin(&env)?;
@@ -190,6 +190,9 @@ impl PriceOracleContract {
         let now = env.ledger().timestamp();
         if timestamp > now {
             return Err(Error::InvalidTimestamp);
+        }
+        if now.saturating_sub(timestamp) > read_max_age(&env) {
+            return Err(Error::PriceStale);
         }
 
         let entry = PriceEntry { price, timestamp };
@@ -444,6 +447,24 @@ mod test {
         );
     }
 
+    #[test]
+    fn stale_timestamp_is_rejected_on_submission() {
+        let f = fixture();
+        init(&f);
+        let now = f.env.ledger().timestamp();
+        let stale_timestamp = now.saturating_sub(DEFAULT_MAX_PRICE_AGE + 1);
+
+        assert_eq!(
+            f.client
+                .try_submit_price(&f.pair, &10_000_000i128, &stale_timestamp),
+            Err(Ok(Error::PriceStale))
+        );
+        assert_eq!(
+            f.client.try_get_price(&f.pair),
+            Err(Ok(Error::FeedNotFound))
+        );
+    }
+
     // ── get_price ─────────────────────────────────────────────────────────────
 
     #[test]
@@ -486,6 +507,28 @@ mod test {
 
         let result = f.client.get_price(&f.pair);
         assert_eq!(result.price, 10_000_000);
+    }
+
+    #[test]
+    fn staleness_detection_follows_configured_max_age() {
+        let f = fixture();
+        init(&f);
+        let now = f.env.ledger().timestamp();
+        f.client.set_max_price_age(&60u64);
+
+        assert_eq!(
+            f.client.try_submit_price(&f.pair, &10_000_000i128, &(now - 61)),
+            Err(Ok(Error::PriceStale))
+        );
+
+        let within_tolerance = now - 60;
+        submit(&f, 8_000_000, within_tolerance);
+        assert_eq!(f.client.get_price(&f.pair).price, 8_000_000);
+
+        f.env.ledger().with_mut(|l| {
+            l.timestamp = within_tolerance + 61;
+        });
+        assert_eq!(f.client.try_get_price(&f.pair), Err(Ok(Error::PriceStale)));
     }
 
     #[test]

@@ -4,6 +4,11 @@
  * Initializes all agents and starts the HTTP/WebSocket server.
  */
 
+// OpenTelemetry must be initialised before any other import that touches
+// Express, HTTP, or fetch so that auto-instrumentation patches in time.
+import { initTracing, shutdownTracing } from "./tracing";
+initTracing();
+
 import { createApp } from "./api/app";
 import { initializeAgents, globalAgentRegistry } from "./agents";
 import { startAgentSync, stopAgentSync } from "./registry/sync";

@@ -75,7 +75,27 @@ vi.mock("reactflow", () => {
             aria-selected={node.selected ?? false}
             aria-label={`${String(node.data.label ?? node.id)} node`}
             onClick={(e) => onNodeClick?.(e, node)}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const sourceId = e.dataTransfer.getData('text/plain');
+              if (sourceId && sourceId !== node.id) {
+                (node.data as any).onNodeDrop?.(sourceId, node.id);
+              }
+            }}
           >
+            <div
+              data-testid={`dag-drag-handle-${node.id}`}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/plain', node.id);
+                (node.data as any).onDragStart?.(node.id, e);
+              }}
+            />
             <span data-testid={`dag-node-label-${node.id}`}>{String(node.data.label ?? "")}</span>
             {node.data.capability && (
               <span data-testid={`dag-node-cap-${node.id}`}>{String(node.data.capability)}</span>
@@ -553,5 +573,79 @@ describe("NodeDetailPanel — fallbacks and details", () => {
     );
     fireEvent.click(screen.getByTestId("node-detail-close"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("DAGPreview - Drag and drop node repositioning (#882)", () => {
+  it("renders a drag handle on each node", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    THREE_NODES.forEach((n) => {
+      expect(screen.getByTestId(`dag-drag-handle-${n.id}`)).toBeInTheDocument();
+    });
+  });
+
+  it("repositions and swaps nodes when dropped onto another node", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    const handleNode1 = screen.getByTestId("dag-drag-handle-research");
+    const targetNode2 = screen.getByTestId("dag-node-risk");
+
+    const posNode1Before = capturedNodes.find((n) => n.id === "research")?.position;
+    const posNode2Before = capturedNodes.find((n) => n.id === "risk")?.position;
+
+    const dataTransfer = {
+      data: {} as Record<string, string>,
+      setData(k: string, v: string) {
+        this.data[k] = v;
+      },
+      getData(k: string) {
+        return this.data[k] || "";
+      },
+      effectAllowed: "move",
+      dropEffect: "move",
+    };
+
+    act(() => {
+      fireEvent.dragStart(handleNode1, { dataTransfer });
+      fireEvent.dragOver(targetNode2, { dataTransfer });
+      fireEvent.drop(targetNode2, { dataTransfer });
+    });
+
+    const posNode1After = capturedNodes.find((n) => n.id === "research")?.position;
+    const posNode2After = capturedNodes.find((n) => n.id === "risk")?.position;
+
+    expect(posNode1After).toEqual(posNode2Before);
+    expect(posNode2After).toEqual(posNode1Before);
+  });
+
+  it("updates node position when dropped onto canvas", () => {
+    render(<DAGPreview dagPreview={{ nodes: THREE_NODES, edges: TWO_EDGES }} />);
+    const canvas = screen.getByTestId("dag-preview-canvas");
+    const handleNode1 = screen.getByTestId("dag-drag-handle-research");
+
+    const dataTransfer = {
+      data: {} as Record<string, string>,
+      setData(k: string, v: string) {
+        this.data[k] = v;
+      },
+      getData(k: string) {
+        return this.data[k] || "";
+      },
+      effectAllowed: "move",
+      dropEffect: "move",
+    };
+
+    act(() => {
+      fireEvent.dragStart(handleNode1, { dataTransfer });
+      fireEvent.dragOver(canvas, { dataTransfer });
+      fireEvent.drop(canvas, {
+        dataTransfer,
+        clientX: 300,
+        clientY: 200,
+      });
+    });
+
+    const posNode1After = capturedNodes.find((n) => n.id === "research")?.position;
+    expect(posNode1After).toBeDefined();
+    expect(posNode1After?.x).toBeGreaterThan(0);
   });
 });

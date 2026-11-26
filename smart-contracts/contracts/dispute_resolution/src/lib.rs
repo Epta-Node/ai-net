@@ -153,18 +153,16 @@ fn apply_final_ruling(
 ) -> Result<(), Error> {
     let registry = AgentRegistryClient::new(env, &dispute.registry_address);
     if *outcome == DisputeOutcome::SupportFiler {
-        let bond_key = DataKey::AgentBond(dispute.agent_id.clone());
-        let cached_bond: i128 = env.storage().persistent().get(&bond_key).unwrap_or(0);
+        // Slash 50% of the bond for verified disputes
+        let slash_percentage = 50u32;
         let reason = String::from_str(env, "verified dispute upheld");
-        dispute.bond_slashed = registry.slash_bond_from_dispute(
-            &env.current_contract_address(),
-            &dispute.registry_agent_id,
-            &50,
+        dispute.bond_slashed = slash_bond_internal(
+            env,
+            dispute,
+            slash_percentage,
             &reason,
-        );
-        env.storage()
-            .persistent()
-            .set(&bond_key, &cached_bond.saturating_sub(dispute.bond_slashed));
+        )?;
+        
         let reputation_key = DataKey::AgentReputation(dispute.agent_id.clone());
         let reputation: u32 = env.storage().persistent().get(&reputation_key).unwrap_or(0);
         env.storage()
@@ -208,6 +206,51 @@ fn apply_final_ruling(
         },
     );
     Ok(())
+}
+
+/// Internal helper to slash an agent's bond and emit the event.
+fn slash_bond_internal(
+    env: &Env,
+    dispute: &Dispute,
+    percentage: u32,
+    reason: &String,
+) -> Result<i128, Error> {
+    if percentage > 100 {
+        return Err(Error::InvalidReputation);
+    }
+
+    let registry = AgentRegistryClient::new(env, &dispute.registry_address);
+    let amount_slashed = registry.slash_bond_from_dispute(
+        &env.current_contract_address(),
+        &dispute.registry_agent_id,
+        &percentage,
+        reason,
+    );
+
+    // Update cached bond
+    let bond_key = DataKey::AgentBond(dispute.agent_id.clone());
+    let cached_bond: i128 = env.storage().persistent().get(&bond_key).unwrap_or(0);
+    let remaining_bond = cached_bond.saturating_sub(amount_slashed);
+    env.storage()
+        .persistent()
+        .set(&bond_key, &remaining_bond);
+
+    // Emit bond slashed event
+    env.events().publish(
+        (symbol_short!("dispute"), symbol_short!("bnd_slsh")),
+        BondSlashedEvent {
+            dispute_id: dispute.task_id.clone(),
+            agent_id: dispute.agent_id.clone(),
+            registry_agent_id: dispute.registry_agent_id.clone(),
+            slash_percentage: percentage,
+            amount_slashed,
+            remaining_bond,
+            reason: reason.clone(),
+            slashed_at: env.ledger().timestamp(),
+        },
+    );
+
+    Ok(amount_slashed)
 }
 
 #[contractimpl]
@@ -912,6 +955,46 @@ impl DisputeResolutionContract {
             .persistent()
             .get(&DataKey::AgentBond(agent_id))
             .unwrap_or(0)
+    }
+
+    /// Admin: Manually slash an agent's bond for a specific dispute.
+    ///
+    /// Supports partial (percentage < 100) or full (percentage = 100) slashing.
+    /// This can be called during or after dispute resolution for additional
+    /// penalties or enforcement actions.
+    ///
+    /// * `dispute_id` — the dispute related to the slashing
+    /// * `percentage` — slash percentage (0-100), where 100 = full bond forfeit
+    /// * `reason` — human-readable reason for the slash
+    ///
+    /// Returns the amount slashed. Emits `(dispute, bnd_slsh)`.
+    pub fn slash_bond(
+        env: Env,
+        dispute_id: Symbol,
+        percentage: u32,
+        reason: String,
+    ) -> Result<i128, Error> {
+        require_not_paused(&env)?;
+        require_admin(&env)?;
+
+        if percentage > 100 {
+            return Err(Error::InvalidReputation);
+        }
+
+        let mut dispute = load_dispute(&env, &dispute_id)?;
+        
+        // Can only slash if dispute is resolved or in progress
+        if dispute.status == DisputeStatus::Filed {
+            return Err(Error::InvalidPhase);
+        }
+
+        let amount_slashed = slash_bond_internal(&env, &dispute, percentage, &reason)?;
+        
+        // Update dispute record with cumulative slashed amount
+        dispute.bond_slashed = dispute.bond_slashed.saturating_add(amount_slashed);
+        save_dispute(&env, &dispute);
+
+        Ok(amount_slashed)
     }
 }
 

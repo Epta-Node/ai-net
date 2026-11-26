@@ -607,6 +607,197 @@ Subscribe to Server-Sent Events (SSE) for real-time step-by-step task execution 
   data: {"status": "completed", "outputUrl": "https://reports.ai-net.io/task-8f92a1.pdf"}
   ```
 
+#### `GET /api/v1/tasks/{id}/events`
+
+Subscribe to a dedicated Server-Sent Events (SSE) stream for structured task lifecycle events. Unlike the `/stream` endpoint (which emits progress updates), `/events` emits discrete, typed lifecycle events with structured payloads, retry hints, and an explicit `last-event-id` resume mechanism.
+
+- **Path Parameters**:
+  - `id` _(string, required)_: Task identifier.
+
+- **Query Parameters**:
+  - `Last-Event-ID` _(string, optional)_: Event ID of the last event the client received. The server replays missed events from this point. This header is set automatically by the browser `EventSource` API; for custom clients, send it manually.
+
+- **Request Headers**:
+
+  ```http
+  Accept: text/event-stream
+  Cache-Control: no-cache
+  Connection: keep-alive
+  Last-Event-ID: evt-0042
+  ```
+
+- **Request**:
+
+  ```bash
+  curl -N -H "Accept: text/event-stream" \
+    -H "Last-Event-ID: evt-0042" \
+    http://localhost:3000/api/v1/tasks/task-8f92a1/events
+  ```
+
+- **Stream Response (`200 OK — text/event-stream`)**:
+
+  ```
+  id: evt-0042
+  event: task.queued
+  retry: 5000
+  data: {"taskId":"task-8f92a1","timestamp":"2026-08-29T10:10:00.000Z"}
+
+  id: evt-0043
+  event: task.dispatched
+  retry: 5000
+  data: {"taskId":"task-8f92a1","agentId":"agent-001","timestamp":"2026-08-29T10:10:05.000Z"}
+
+  id: evt-0044
+  event: task.progress
+  retry: 5000
+  data: {"taskId":"task-8f92a1","step":"static_analysis","percentage":70,"timestamp":"2026-08-29T10:10:20.000Z"}
+
+  id: evt-0045
+  event: task.completed
+  retry: 5000
+  data: {"taskId":"task-8f92a1","status":"completed","outputUrl":"https://reports.ai-net.io/task-8f92a1.pdf","durationMs":42100,"timestamp":"2026-08-29T10:10:42.000Z"}
+  ```
+
+- **Event Types**:
+
+  | Event Type             | Description                                        | Payload Fields                                               |
+  | ---------------------- | -------------------------------------------------- | ------------------------------------------------------------ |
+  | `task.queued`          | Task accepted and placed in the coordination queue | `taskId`, `timestamp`                                        |
+  | `task.dispatched`      | Coordinator assigned the task to an agent          | `taskId`, `agentId`, `timestamp`                             |
+  | `task.progress`        | Agent reports progress on a step                   | `taskId`, `step`, `percentage`, `timestamp`                  |
+  | `task.payment.pending` | Payment authorization initiated via Soroban        | `taskId`, `amountXlm`, `paymentContractAddress`, `timestamp` |
+  | `task.payment.settled` | On-chain payment confirmed                         | `taskId`, `txHash`, `amountXlm`, `timestamp`                 |
+  | `task.completed`       | Task finished successfully with output             | `taskId`, `status`, `outputUrl`, `durationMs`, `timestamp`   |
+  | `task.failed`          | Task failed during execution                       | `taskId`, `status`, `errorCode`, `errorMessage`, `timestamp` |
+  | `task.timeout`         | Task exceeded its `timeoutSeconds` budget          | `taskId`, `timeoutSeconds`, `timestamp`                      |
+  | `heartbeat`            | Keep-alive comment, no `data` field                | —                                                            |
+  | `error`                | Stream-level error (not task-level)                | `code`, `message`, `retryable`                               |
+
+- **Error Events**:
+
+  When a stream-level error occurs (e.g. task not found, authentication failure), the server sends an `error` event before closing the connection:
+
+  ```
+  id: evt-error-001
+  event: error
+  retry: 10000
+  data: {"code":"NOT_FOUND","message":"Task task-xxxxx not found","retryable":false}
+  ```
+
+  | Error Code       | HTTP Status | Description                                   |
+  | ---------------- | ----------- | --------------------------------------------- |
+  | `NOT_FOUND`      | 404         | Task ID does not exist                        |
+  | `UNAUTHORIZED`   | 401         | Missing or invalid authentication             |
+  | `RATE_LIMITED`   | 429         | SSE connection limit exceeded for this client |
+  | `INTERNAL_ERROR` | 500         | Unexpected server error during streaming      |
+
+- **Reconnection Strategy**:
+
+  The server includes a `retry:` field (milliseconds) in every event, advising the client how long to wait before reconnecting after a dropped connection. Clients should honor this value.
+
+  1. On disconnect, the browser `EventSource` API automatically reconnects after the last `retry` value. Custom clients should implement equivalent logic.
+  2. If the client tracked the last received event ID, the browser automatically sends it in the `Last-Event-ID` request header. The server replays all events with IDs greater than this value.
+  3. If no `Last-Event-ID` is provided, the stream resumes from the current task state — only future events are delivered.
+  4. If the task is already in a terminal state (`completed` or `failed`), the server replays the terminal event and immediately closes the connection.
+  5. Implement exponential backoff on the client side if reconnection fails repeatedly:
+     ```javascript
+     const baseDelay = 1000;
+     const maxDelay = 30000;
+     let attempt = 0;
+     // delay = min(baseDelay * 2^attempt, maxDelay)
+     ```
+
+- **Example SSE Client (JavaScript)**:
+
+  ```javascript
+  /**
+   * Robust SSE client for /tasks/:id/events with manual reconnection
+   * and Last-Event-ID tracking.
+   */
+  class TaskEventStream {
+    constructor(taskId, baseUrl = "http://localhost:3000") {
+      this.taskId = taskId;
+      this.baseUrl = baseUrl;
+      this.lastEventId = null;
+      this.eventSource = null;
+      this.reconnectAttempts = 0;
+      this.baseRetry = 1000; // ms
+      this.maxRetry = 30000; // 30 s cap
+    }
+
+    connect() {
+      const url = `${this.baseUrl}/api/v1/tasks/${this.taskId}/events`;
+      this.eventSource = new EventSource(url, { withCredentials: true });
+
+      // Track the last event ID for resume
+      this.eventSource.addEventListener("open", () => {
+        console.log("[SSE] Connection opened");
+        this.reconnectAttempts = 0;
+      });
+
+      this.eventSource.addEventListener("task.queued", (e) => this.#handle(e));
+      this.eventSource.addEventListener("task.dispatched", (e) =>
+        this.#handle(e),
+      );
+      this.eventSource.addEventListener("task.progress", (e) =>
+        this.#handle(e),
+      );
+      this.eventSource.addEventListener("task.payment.pending", (e) =>
+        this.#handle(e),
+      );
+      this.eventSource.addEventListener("task.payment.settled", (e) =>
+        this.#handle(e),
+      );
+      this.eventSource.addEventListener("task.completed", (e) => {
+        this.#handle(e);
+        this.disconnect();
+      });
+      this.eventSource.addEventListener("task.failed", (e) => {
+        this.#handle(e);
+        this.disconnect();
+      });
+      this.eventSource.addEventListener("task.timeout", (e) => {
+        this.#handle(e);
+        this.disconnect();
+      });
+      this.eventSource.addEventListener("error", (e) => {
+        console.error("[SSE] Stream error", e);
+        this.eventSource.close();
+        this.#reconnect();
+      });
+    }
+
+    #handle(e) {
+      const data = JSON.parse(e.data);
+      this.lastEventId = e.lastEventId || this.lastEventId;
+      console.log(`[SSE] ${e.type}`, data);
+    }
+
+    #reconnect() {
+      this.reconnectAttempts++;
+      const delay = Math.min(
+        this.baseRetry * 2 ** this.reconnectAttempts,
+        this.maxRetry,
+      );
+      console.log(
+        `[SSE] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})…`,
+      );
+      setTimeout(() => this.connect(), delay);
+    }
+
+    disconnect() {
+      if (this.eventSource) {
+        this.eventSource.close();
+        this.eventSource = null;
+      }
+    }
+  }
+
+  // Usage:
+  const stream = new TaskEventStream("task-8f92a1");
+  stream.connect();
+  ```
+
 ---
 
 ### 3.4 Network Stats & Reconciliation (`/api/v1/stats`, `/api/v1/reconciliation`)

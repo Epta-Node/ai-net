@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { useTranslation, Trans } from 'react-i18next'
 import { QRCodeSVG } from 'qrcode.react'
-import { Wallet, Copy, ExternalLink } from 'lucide-react'
+import { Wallet, ExternalLink } from 'lucide-react'
 import { useWallet } from '../context/WalletContext'
 import { useWalletBalance } from '../hooks/useWalletBalance'
 import { useToast } from '../hooks/useToast'
@@ -14,6 +14,7 @@ import { WalletWizard } from '../components/wallet/WalletWizard'
 import { WalletConnectPanel } from '../components/wallet/WalletConnectPanel'
 import { NetworkMismatchBanner } from '../components/wallet/NetworkMismatchBanner'
 import { Skeleton, SkeletonAvatar, SkeletonCard, SkeletonText } from '../components/common/Skeleton'
+import CopyButton from '../components/common/CopyButton'
 import styles from './WalletPage.module.css'
 
 const STELLAR_EXPLORER = 'https://stellar.expert/explorer/testnet'
@@ -77,28 +78,6 @@ function WalletPage() {
   const [connectError, setConnectError] = React.useState<string | null>(null)
   const [connecting, setConnecting] = React.useState(false)
   const { connectSecretKey } = useWallet()
-
-  const handleCopyAddress = async () => {
-    if (!publicKey) return
-    const fallbackCopy = () => {
-      const textArea = document.createElement('textarea')
-      textArea.value = publicKey!
-      document.body.appendChild(textArea)
-      textArea.select()
-      document.execCommand('copy')
-      document.body.removeChild(textArea)
-    }
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(publicKey)
-      } else {
-        fallbackCopy()
-      }
-    } catch {
-      fallbackCopy()
-    }
-    showToast(t('wallet.copyAddress'), 'success')
-  }
 
   const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -298,14 +277,15 @@ function WalletPage() {
               <code className={styles.address}>
                 {publicKey.slice(0, 8)}...{publicKey.slice(-8)}
               </code>
-              <button
-                className={styles.iconButton}
-                onClick={handleCopyAddress}
-                title={t('wallet.copyAddress')}
+              <CopyButton
+                text={publicKey}
+                label=""
+                copiedLabel=""
+                iconSize={16}
                 aria-label={t('a11y.copyPublicKey')}
-              >
-                <Copy size={16} />
-              </button>
+                style={{ background: 'var(--white-alpha-15)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 'var(--radius-md)', width: '32px', height: '32px', padding: '0', justifyContent: 'center' }}
+                onCopy={() => showToast(t('wallet.copyAddress'), 'success')}
+              />
               <a
                 href={`${STELLAR_EXPLORER}/account/${publicKey}`}
                 target="_blank"

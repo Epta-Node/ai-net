@@ -38,7 +38,7 @@ Tagging a release triggers the fully automated release workflow defined in
 `.github/workflows/release.yml`. The workflow:
 
 1. **Builds** all Soroban WASM artefacts (`cargo build --target wasm32-unknown-unknown --release`).
-2. **Signs** each WASM file by generating a SHA-256 sidecar (`.wasm.sha256`).
+2. **Checksums** each WASM file by generating a SHA-256 sidecar (`.wasm.sha256`).
 3. **Generates** a changelog from Conventional Commits using [git-cliff](https://git-cliff.org/) and the `cliff.toml` configuration at the repo root.
 4. **Creates** a GitHub Release with the generated changelog as the description and all WASM / SHA-256 files attached.
 
@@ -84,12 +84,12 @@ Add the output under the appropriate section in `CHANGELOG.md`.
 
 ### 1. Pre-release
 
-- [ ] All CI checks passing on `main`
+- [ ] Record the candidate commit SHA on `main` and the previous production tag and artifact digests. Confirm all required tests and CI checks passed for that exact SHA.
 - [ ] No open critical/blocking issues tagged for this release
 - [ ] Run the unified quality gate: `npm run gate` — must pass with zero errors
 - [ ] Verify gas baselines have not regressed: `cd smart-contracts && cargo test -- --nocapture 2>&1 | grep gas`
 - [ ] Version bumped in relevant files (`package.json`, `Cargo.toml`)
-- [ ] `CHANGELOG.md` heading updated if a manual entry is needed (automated pipeline handles this on tag push)
+- [ ] Review the changelog from the previous tag through the candidate. Check breaking changes, migrations and operator actions against the merged PRs. Update any missing release notes before tagging. The workflow generates `CHANGELOG.md` for publication.
 
 ### 2. Backend
 
@@ -110,33 +110,36 @@ Add the output under the appropriate section in `CHANGELOG.md`.
 
 ### 5. Tag & Release (automated)
 
-- [ ] Create annotated tag: `git tag -a v<VERSION> -m "Release v<VERSION>"`
-- [ ] Push tag: `git push origin v<VERSION>`
+- [ ] Set `TAG` to the new SemVer tag and `RELEASE_SHA` to the reviewed commit. Confirm that the tag is unused. Create the annotated tag with `git tag -a "$TAG" "$RELEASE_SHA" -m "Release $TAG"`
+- [ ] Verify `git rev-parse "$TAG^{}"` matches the candidate SHA, then push with `git push origin "$TAG"`
 - [ ] Confirm the `Release` GitHub Actions workflow starts (Actions tab)
-- [ ] Verify the GitHub Release is created with WASM artefacts and SHA-256 sidecars attached
+- [ ] Open the published GitHub Release. Check that its tag matches the candidate, its notes cover the intended changes, and each expected WASM has a matching SHA-256 sidecar. Verify the downloaded artifacts before deployment.
 
 ### 6. Post-release
 
 - [ ] Deploy contracts to testnet (verify)
 - [ ] Deploy contracts to mainnet (if applicable)
 - [ ] Update deployment JSON with new contract addresses
-- [ ] Monitor for 24h after mainnet deploy
+- [ ] Update operator documentation with the released version, migration steps and configuration changes. Announce the release with a link to its notes and any required operator action.
+- [ ] Monitor readiness, queue failures and payment reconciliation for 24h after mainnet deployment. Record the release owner and the last healthy version in the incident handoff.
+
+### Rollback procedure
+
+1. Stop the rollout on the affected track. Record the network, affected instances, release SHA, artifact digests and first failing health or reconciliation check. Preserve the published tag for audit.
+2. **Backend or frontend:** redeploy the previous verified artifact by digest with its compatible configuration. Before routing traffic, confirm that the previous backend can read the current database schema. If migrations are incompatible, keep writes paused and use a tested recovery migration or forward fix.
+3. **Contracts:** identify the affected contract and executed proposal. For a manager-controlled executable, check `get_rollback_info(proposal_id)` and `can_rollback(proposal_id)`. Within the ledger deadline, an authorized governance member can invoke `rollback_upgrade(executor, proposal_id)` once. This restores that executable's previous WASM. Check storage compatibility separately. If the window has expired or the target uses another upgrade path, follow its governed upgrade procedure with a compatible WASM. [Upgrade manager](../smart-contracts/contracts/upgrade-manager/src/lib.rs)
+4. Confirm the running versions, readiness and ledger reconciliation before resuming traffic. Document the affected versions and recovery steps on the release, notify operators, and publish any corrected build under a fresh tag.
 
 ---
 
-## Artifact Signing & Verification
+## Artifact Integrity Verification
 
-### SHA256SUMS
-
-Every release includes a `SHA256SUMS` file for integrity verification:
+The release workflow publishes one `.wasm.sha256` sidecar per WASM. Its recorded path is relative to the workflow workspace. For files downloaded into one directory, compare the local digest with the first field in the matching sidecar. Replace `contract.wasm` with the downloaded filename. [Release workflow](../.github/workflows/release.yml)
 
 ```bash
-# Generate checksums for all Wasm artifacts
-cd smart-contracts/contracts
-find . -name "*.wasm" -exec sha256sum {} \; > SHA256SUMS
-
-# Verify a downloaded artifact
-sha256sum -c SHA256SUMS
+artifact=contract.wasm
+expected=$(awk 'NR == 1 {print $1}' "$artifact.sha256")
+printf '%s  %s\n' "$expected" "$artifact" | sha256sum --check -
 ```
 
 ### Wasm Artifact Verification
@@ -144,8 +147,7 @@ sha256sum -c SHA256SUMS
 After downloading a release artifact:
 
 ```bash
-# 1. Verify checksum
-sha256sum -c SHA256SUMS
+# 1. Verify the matching sidecar using the command above.
 
 # 2. Verify the Wasm module has correct imports
 stellar contract inspect <artifact.wasm>
@@ -185,7 +187,7 @@ When upgrading deployed contracts:
 
 | Track | Cadence | Artifacts |
 |-------|---------|-----------|
-| Smart Contracts | On-demand (after audit or feature milestone) | `.wasm` files, SHA256SUMS |
+| Smart Contracts | On-demand (after audit or feature milestone) | `.wasm` files and matching `.sha256` sidecars |
 | Backend | Bi-weekly or on critical fix | Docker image, npm package |
 | Frontend | Bi-weekly or on critical fix | Static build, Docker image |
 

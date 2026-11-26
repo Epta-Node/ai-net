@@ -1,7 +1,13 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render as rtlRender, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { TransactionTable } from './TransactionTable'
 import type { TransactionEvent } from '../../hooks/useTransactionHistory'
+import { transactionsToCSV } from '../../utils/transactionCsv'
+
+function render(ui: React.ReactElement) {
+  return rtlRender(<MemoryRouter>{ui}</MemoryRouter>)
+}
 
 function makeTx(overrides: Partial<TransactionEvent> = {}): TransactionEvent {
   return {
@@ -16,6 +22,10 @@ function makeTx(overrides: Partial<TransactionEvent> = {}): TransactionEvent {
 }
 
 describe('TransactionTable', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('prompts to connect when no wallet is connected', () => {
     render(<TransactionTable transactions={[]} loading={false} publicKey={null} />)
     expect(screen.getByText('Connect your wallet to view transaction history.')).toBeInTheDocument()
@@ -71,5 +81,97 @@ describe('TransactionTable', () => {
     ]
     render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
     expect(screen.getByText('+6.0000000 XLM')).toBeInTheDocument()
+  })
+
+  it('renders pending status badge with spinner and tooltip', () => {
+    const transactions = [
+      makeTx({ txHash: 'pending-tx-1', memo: 'escrow pending', status: 'pending' }),
+    ]
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+    const pendingBadge = screen.getByTestId('tx-status-pending')
+    expect(pendingBadge).toBeInTheDocument()
+    expect(pendingBadge).toHaveTextContent('Pending')
+    expect(pendingBadge).toHaveAttribute('title', 'Transaction is pending confirmation on the Stellar network')
+    expect(pendingBadge.querySelector('svg')).toBeInTheDocument()
+  })
+
+  it('renders completed status badge by default or when specified', () => {
+    const transactions = [
+      makeTx({ txHash: 'completed-tx-1', memo: 'standard tx', status: 'completed' }),
+      makeTx({ txHash: 'completed-tx-2', memo: 'default status tx' }),
+    ]
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+    const badges = screen.getAllByTestId('tx-status-completed')
+    expect(badges.length).toBe(2)
+    expect(badges[0]).toHaveTextContent('Completed')
+    expect(badges[0]).toHaveAttribute('title', 'Transaction completed')
+  })
+
+  it('renders failed status badge when transaction failed', () => {
+    const transactions = [
+      makeTx({ txHash: 'failed-tx-1', memo: 'failed tx', status: 'failed' }),
+    ]
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+    const failedBadge = screen.getByTestId('tx-status-failed')
+    expect(failedBadge).toBeInTheDocument()
+    expect(failedBadge).toHaveTextContent('Failed')
+    expect(failedBadge).toHaveAttribute('title', 'Transaction failed')
+  })
+
+  it('exports transactions as CSV with correct content when Export CSV → All time is clicked', async () => {
+    const transactions = [
+      makeTx({
+        txHash: 'txhash-aaa',
+        direction: 'in',
+        amount: '25.5',
+        counterparty: 'GSENDER1234567890ABCDEFGHIJKLMN',
+        memo: 'payment for research',
+        timestamp: '2026-06-01T12:00:00.000Z',
+      }),
+      makeTx({
+        txHash: 'txhash-bbb',
+        direction: 'out',
+        amount: '10',
+        counterparty: 'GRECEIVER9876543210ABCDEFGHIJK',
+        memo: 'coding task',
+        timestamp: '2026-06-02T08:00:00.000Z',
+      }),
+    ]
+
+    render(<TransactionTable transactions={transactions} loading={false} publicKey="GPUBKEY" />)
+
+    // Click the main Export CSV button to open the preset menu
+    fireEvent.click(screen.getByTestId('export-csv-btn'))
+
+    // Click "All time" to export all transactions
+    fireEvent.click(screen.getByRole('menuitem', { name: 'All time' }))
+
+    // The download utility should be called with valid CSV content
+    await waitFor(() => {
+      expect(downloadTextFile).toHaveBeenCalledOnce()
+    })
+
+    const [csvContent, filename, mimeType] = downloadTextFile.mock.calls[0] as [string, string, string]
+
+    // Verify file metadata
+    expect(filename).toMatch(/^transactions-\d{4}-\d{2}-\d{2}\.csv$/)
+    expect(mimeType).toBe('text/csv;charset=utf-8')
+
+    // Verify the CSV structure matches transactionsToCSV output
+    const expected = transactionsToCSV(transactions)
+    expect(csvContent).toBe(expected)
+
+    // Verify the header row is present
+    const lines = csvContent.split('\r\n')
+    expect(lines[0]).toBe('date,type,from_wallet,to_wallet,amount_xlm,task_id,status,stellar_tx_hash')
+
+    // Verify both transaction rows exist in the CSV
+    expect(lines).toHaveLength(3) // header + 2 rows
+    expect(lines[1]).toContain('2026-06-01')
+    expect(lines[1]).toContain('"25.5"')
+    expect(lines[1]).toContain('"payment for research"')
+    expect(lines[2]).toContain('2026-06-02')
+    expect(lines[2]).toContain('"10"')
+    expect(lines[2]).toContain('"coding task"')
   })
 })

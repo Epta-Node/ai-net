@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { tracingService } from '../../services/tracing';
 import { runWithTraceContext } from '../../services/traceContext';
+import { runWithLogContext } from '../../utils/logger';
 
 /**
  * Parse a W3C Trace Context `traceparent` header value.
@@ -103,15 +104,22 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
   if (typeof res.on === "function") {
     res.on("finish", () => {
       const status = res.statusCode < 400 ? "completed" : "failed";
-      tracingService.endSpan(span.spanId, status, { statusCode: res.statusCode });
+      tracingService.endSpan(span.spanId, status, { statusCode: res.statusCode, requestId: id });
     });
   }
 
   // ── AsyncLocalStorage context ─────────────────────────────────────────────
   // Enter the trace context so every downstream call (route handlers,
   // coordinator, payment, logger) can access traceId/spanId implicitly.
-  runWithTraceContext(
-    { traceId, spanId: span.spanId, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) },
-    () => next(),
+  // Seed both AsyncLocalStorage contexts here, before any other middleware or
+  // route runs, so every log line and outbound call made during the request
+  // inherits the request ID even if `requestLogger` is not mounted.
+  runWithLogContext(
+    { requestId: id, traceId, correlationId: traceId, route: req.path },
+    () =>
+      runWithTraceContext(
+        { traceId, spanId: span.spanId, requestId: id, ...(parentSpanId ? { parentSpanId } : {}) },
+        () => next(),
+      ),
   );
 }
