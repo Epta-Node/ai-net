@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ExternalLink } from 'lucide-react'
 import type { AgentRecord } from '../../types/api'
@@ -19,15 +18,6 @@ export function AgentDetailModal({ agent, onClose }: AgentDetailModalProps) {
   const { t } = useTranslation()
   // Fetch reputation history for this agent (Issue #629)
   const { data: reputation } = useAgentReputation(agent?.id ?? '')
-
-  useEffect(() => {
-    if (!agent) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [agent, onClose])
 
   if (!agent) return null
 

@@ -3,7 +3,7 @@ import React from 'react';
 import type { AgentRecord } from '../../types/api';
 import type { SortDir, SortKey } from '../../utils/agentRegistry';
 import { ReputationStars } from './ReputationStars';
-import { DataTable, type DataTableColumn } from '../common/DataTable';
+import { DataTable, type DataTableColumn, type SortDirection } from '../common/DataTable';
 import { EmptyState } from '../common/EmptyState';
 import { Users, Plus } from 'lucide-react';
 import styles from './AgentTable.module.css';
@@ -32,8 +32,8 @@ function truncateId(id: string): string {
 export function AgentTable({
   agents,
   loading,
-  sortKey: _sortKey,
-  sortDir: _sortDir,
+  sortKey,
+  sortDir,
   onSort,
   onRowClick,
   pageSize = 25,
@@ -42,8 +42,14 @@ export function AgentTable({
   // #877: pagination state
   const [page, setPage] = React.useState(0);
   const [size, setSize] = React.useState(pageSize);
-  const paged = agents.slice(page * size, (page + 1) * size);
   const totalPages = Math.max(1, Math.ceil(agents.length / size));
+
+  // Keep the page index valid when filtering or fresh data shrinks the list.
+  React.useEffect(() => {
+    setPage((current) => Math.min(current, totalPages - 1));
+  }, [totalPages]);
+
+  const paged = agents.slice(page * size, (page + 1) * size);
 
   const columns: DataTableColumn<AgentRecord>[] = [
     {
@@ -103,6 +109,9 @@ export function AgentTable({
         <button
           type="button"
           className={styles.detailsButton}
+          // Redundant with the focusable row's Enter/Space action; keeping it out
+          // of the tab sequence gives the table a single row stop (#884).
+          tabIndex={-1}
           onClick={(e) => {
             e.stopPropagation();
             onRowClick(agent);
