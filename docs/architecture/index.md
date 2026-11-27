@@ -137,6 +137,99 @@ sequenceDiagram
     FE-->>User: Display Audit Report & Verification Tx
 ```
 
+---
+
+## 3.1 Coordinator Task Decomposition Flow
+
+The sequence below zooms in on the coordinator's internal decomposition step and
+shows how sub-tasks fan out to specialized agents, results aggregate back, and
+Stellar payments settle at each hand-off.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / Client
+    participant API as Backend API
+    participant Coord as Coordinator Agent
+    participant Registry as Agent Registry
+    participant Research as Research Agent
+    participant Risk as Risk Agent
+    participant Report as Report Agent
+    participant Venice as Venice AI / LLM
+    participant Payment as Stellar Payment Layer
+    participant Escrow as Soroban Escrow Contract
+
+    %% ── Task submission & budget lock ──────────────────────────────────────
+    User->>API: POST /api/v1/tasks { prompt, budget }
+    API->>Escrow: Lock full budget in escrow (XLM/USDC)
+    Escrow-->>API: Escrow confirmed (tx hash)
+    API->>Coord: Dispatch task (task_id, escrow_ref)
+
+    %% ── DAG decomposition ──────────────────────────────────────────────────
+    rect rgb(240, 248, 255)
+        Note over Coord: Task Decomposition
+        Coord->>Venice: Decompose prompt into sub-task DAG
+        Venice-->>Coord: DAG: [research, risk, report]
+        Coord->>Coord: Build DAG (research → risk → report)
+    end
+
+    %% ── Agent discovery ────────────────────────────────────────────────────
+    rect rgb(245, 255, 245)
+        Note over Coord,Registry: Agent Discovery
+        Coord->>Registry: Discover agents(capability="research")
+        Registry-->>Coord: Research Agent endpoint + price
+        Coord->>Registry: Discover agents(capability="risk")
+        Registry-->>Coord: Risk Agent endpoint + price
+        Coord->>Registry: Discover agents(capability="report")
+        Registry-->>Coord: Report Agent endpoint + price
+    end
+
+    %% ── Sub-task execution (DAG order) ─────────────────────────────────────
+    rect rgb(255, 253, 240)
+        Note over Coord,Payment: Sub-task Execution & Payment
+
+        Coord->>Research: Execute sub-task: gather market data
+        Research->>Venice: LLM inference (research prompt)
+        Venice-->>Research: Market data results
+        Research-->>Coord: Sub-task output
+
+        Coord->>Payment: Release payment → Research Agent (XLM)
+        Payment->>Escrow: Partial release to Research Agent
+        Escrow-->>Payment: Settlement confirmed on-chain
+        Payment-->>Coord: Payment receipt (tx hash)
+
+        Coord->>Risk: Execute sub-task: analyze risks (input: research output)
+        Risk->>Venice: LLM inference (risk analysis prompt)
+        Venice-->>Risk: Risk assessment
+        Risk-->>Coord: Sub-task output
+
+        Coord->>Payment: Release payment → Risk Agent (XLM)
+        Payment->>Escrow: Partial release to Risk Agent
+        Escrow-->>Payment: Settlement confirmed on-chain
+        Payment-->>Coord: Payment receipt (tx hash)
+    end
+
+    %% ── Result aggregation ─────────────────────────────────────────────────
+    rect rgb(255, 245, 255)
+        Note over Coord,Report: Result Aggregation
+
+        Coord->>Report: Execute sub-task: compile final report
+        Note right of Report: Receives outputs from<br/>Research + Risk agents
+        Report->>Venice: LLM inference (report compilation)
+        Venice-->>Report: Formatted report
+        Report-->>Coord: Final report artifact
+
+        Coord->>Payment: Release payment → Report Agent (XLM)
+        Payment->>Escrow: Final release to Report Agent
+        Escrow-->>Payment: Settlement confirmed on-chain
+        Payment-->>Coord: Payment receipt (tx hash)
+    end
+
+    %% ── Completion ─────────────────────────────────────────────────────────
+    Coord->>API: Task complete (artifacts + payment receipts)
+    API-->>User: Final report + on-chain verification txs
+```
+
 ### 3.1 Payment Flows & Escrow Lifecycle Architecture
 
 For detailed sequence diagrams, contract state machine matrices, dispute filing flows, and reconciliation audit loops, see the standalone [Payment Flows & Escrow Lifecycle Specification](file:///Users/apple/Documents/GitHub/ai-net/docs/architecture/payment-escrow-lifecycle.md).

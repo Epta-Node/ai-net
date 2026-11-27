@@ -502,7 +502,151 @@ When a breaking change is required:
 
 ---
 
-## 6. On-Chain Event Versioning (Soroban Smart Contracts)
+## 6. Event Store Retention & Archival Policy
+
+The event store uses a three-tier pipeline to keep the live SQLite database
+small while preserving a full audit trail indefinitely.
+
+```
+task_events  ──(compaction)──►  task_event_archive  ──(cold cycle)──►  YYYY/MM/DD/events.jsonl.gz
+  (hot)                            (warm SQLite)                           (cold files)
+```
+
+### 6.1 Tier Overview
+
+| Tier | Storage | Contents | Default window |
+|---|---|---|---|
+| **Hot** | `task_events` SQLite table | Live, queryable events for in-flight and recently finished tasks | Active until compacted (≥ 30 days after task finishes) |
+| **Warm** | `task_event_archive` SQLite table | Compacted events, still queryable by SQL | 7 days after compaction |
+| **Cold** | `<EVENT_ARCHIVE_DIR>/YYYY/MM/DD/events.jsonl.gz` | Gzip-compressed JSONL day files with SHA-256 sidecars | 90 days after cold promotion |
+| **Purged** | — | Deleted once the cold window expires | — |
+
+### 6.2 Hot-Tier Compaction (Retention Pass)
+
+**What it does:** The `EventRetentionService` runs a periodic pass that finds
+finished tasks whose last event is older than `EVENT_RETENTION_DAYS`. For each
+candidate it:
+
+1. Confirms the task is finished — both the event stream (last event must be
+   `TaskCompleted` or `TaskFailed`) and the `tasks` table (status must be
+   `completed`, `failed`, `cancelled`, or `payment_failed`) must agree.
+2. Copies every event for that task into `task_event_archive` and writes a
+   summary row into `task_event_summary`.
+3. Deletes the live rows from `task_events` — only after a read-back confirms
+   the archive is complete, all inside one transaction.
+
+A failure on a single task rolls back that task's transaction; the pass
+continues with the next candidate. Passes are idempotent: a second run over
+already-compacted data is a no-op.
+
+**Default retention period:** `30 days` after a task last received an event.
+
+**Pruning schedule:** The pass runs once immediately on startup, then every
+hour (`EVENT_COMPACTION_INTERVAL_MS`). It processes at most
+`EVENT_COMPACTION_BATCH_TASKS` tasks per pass to bound write-lock hold time.
+
+### 6.3 Cold Archive
+
+**What it does:** The `EventColdArchive` service, triggered daily by
+`DbMaintenanceService`, ages rows out of the warm `task_event_archive` SQLite
+table into gzip-compressed JSONL files on disk.
+
+**File layout:**
+
+```
+<EVENT_ARCHIVE_DIR>/
+  YYYY/
+    MM/
+      DD/
+        events.jsonl.gz       # one JSON object per line
+        events.jsonl.gz.sha256  # SHA-256 checksum sidecar
+```
+
+Each day file is written atomically (via a `.tmp` rename), and its checksum is
+verified on every read. A missing or mismatched checksum causes the restore to
+throw rather than silently returning corrupt data.
+
+**Hot window:** `EVENT_HOT_RETENTION_DAYS` (default: 7). A day's rows remain
+in the warm SQLite table for this many days after their `occurred_at` timestamp
+before they are eligible for cold promotion. This ensures a full UTC day is
+always promoted as a unit — no day is ever split across tiers.
+
+**Cold window:** `EVENT_COLD_RETENTION_DAYS` (default: 90). Cold day files are
+kept for this many days before being purged. Purging is irreversible.
+
+**Schedule:** The cold cycle runs once a day at `02:00 UTC`, re-arming itself
+after each run so a slow run never causes a double-fire.
+
+### 6.4 Environment Variables
+
+All variables are set in `backend/.env` (copy from `backend/.env.example`).
+
+| Variable | Default | Description |
+|---|---|---|
+| `EVENT_STORE_PATH` | `./data/events.db` | Path to the live event store SQLite file. |
+| `EVENT_RETENTION_DAYS` | `30` | Days after a task's last event before it becomes a compaction candidate. |
+| `EVENT_COMPACTION_INTERVAL_MS` | `3600000` (1 hour) | How often the compaction pass runs. |
+| `EVENT_COMPACTION_BATCH_TASKS` | `50` | Max tasks compacted per pass. Lower this to reduce write-lock hold time under load. |
+| `EVENT_COMPACTION_ENABLED` | `true` | Master switch. Set to `false` to disable compaction entirely (e.g. during migrations). |
+| `EVENT_HOT_RETENTION_DAYS` | `7` | Days a row stays in the warm SQLite archive table before its day moves to cold storage. |
+| `EVENT_ARCHIVE_DIR` | `./data/archive` | Root directory for cold day files. Must be on a persistent volume in production. |
+| `EVENT_COLD_RETENTION_DAYS` | `90` | Days a cold day file is kept before it is permanently deleted. |
+
+**Example — longer retention for a compliance environment:**
+
+```bash
+# backend/.env
+EVENT_RETENTION_DAYS=90
+EVENT_HOT_RETENTION_DAYS=30
+EVENT_COLD_RETENTION_DAYS=365
+EVENT_ARCHIVE_DIR=/mnt/event-archive
+```
+
+**Example — disable compaction during a migration:**
+
+```bash
+EVENT_COMPACTION_ENABLED=false
+```
+
+### 6.5 Restoring Cold Data
+
+To bring a date range back into the queryable warm tier (for incident analysis,
+audits, etc.), call `EventColdArchive.restoreRange(fromDay, toDay)` where both
+arguments are `YYYY-MM-DD` strings. Rows are inserted into `task_event_archive`
+using `INSERT OR IGNORE`, so a restore is safe to repeat without duplicating data.
+
+```typescript
+import { EventColdArchive } from "../src/events/eventColdArchive";
+
+const archive = new EventColdArchive(db, {
+  archiveDir: process.env.EVENT_ARCHIVE_DIR ?? "./data/archive",
+  hotRetentionDays: 7,
+  coldRetentionDays: 90,
+});
+
+// Restore November 2026 into the warm SQLite table
+const inserted = archive.restoreRange("2026-11-01", "2026-11-30");
+console.log(`Restored ${inserted} events`);
+```
+
+### 6.6 Safety Properties
+
+- **Never purge without a confirmed archive.** The count read-back inside the
+  compaction transaction throws and rolls everything back if the archive row
+  count is short.
+- **Never compact an unfinished task.** Two independent checks (event stream
+  and `tasks` table) must both show a terminal state. The status is re-read
+  inside the transaction immediately before the purge to close the
+  time-of-check/time-of-use window.
+- **Fail closed on read.** A cold file with a missing or mismatched SHA-256
+  sidecar throws rather than returning potentially corrupt data.
+- **Idempotent.** Repeated compaction and cold-archive runs are safe; duplicate
+  rows are absorbed by `INSERT OR IGNORE` and existing day files are merged by
+  `(task_id, task_seq)` key.
+
+---
+
+## 7. On-Chain Event Versioning (Soroban Smart Contracts)
 
 ### Workspace contract event convention
 
