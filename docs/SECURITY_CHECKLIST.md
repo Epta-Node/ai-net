@@ -122,6 +122,196 @@ any contract release, a human must confirm **every** invariant:
 - [ ] **M12** — Tests cover the failure paths (see Fault Injection list),
       not only happy paths; every `Err(...)` variant has at least one test.
 
+---
+
+## Smart Contract Deployment Security
+
+The checklists below are **mandatory gates** at each phase of a Soroban contract
+deployment or upgrade. They complement the automated CI controls and the manual
+Soroban invariants (M1–M12) already defined above.
+
+> **Reference docs:**
+> - Deployment workflow — [`smart-contracts/docs/DEPLOYMENT_GUIDE.md`](../smart-contracts/docs/DEPLOYMENT_GUIDE.md)
+> - Upgrade workflow — [`smart-contracts/docs/UPGRADE_GUIDE.md`](../smart-contracts/docs/UPGRADE_GUIDE.md)
+> - Storage migration — [`smart-contracts/docs/STORAGE_MIGRATION.md`](../smart-contracts/docs/STORAGE_MIGRATION.md)
+> - Threat model — [`docs/THREAT_MODEL.md`](THREAT_MODEL.md)
+
+---
+
+### D1 — Pre-Deployment Checklist
+
+Complete these before running `deploy.sh` against any network.
+
+#### Code Audit
+- [ ] **D1.1** — An independent reviewer (not the author) has read every
+      state-mutating entry point and confirmed `require_auth()` is called for
+      the correct address on each one (see M1).
+- [ ] **D1.2** — No `unwrap()` or `expect()` on external input anywhere in the
+      contract under deployment; all arithmetic uses checked ops (see M2).
+- [ ] **D1.3** — `cargo clippy --all-targets -- -D warnings` passes with zero
+      warnings on the release commit.
+- [ ] **D1.4** — `cargo fmt --check` passes (no unformatted code).
+- [ ] **D1.5** — `cargo audit --locked` and `cargo deny check` show no
+      HIGH/CRITICAL advisories (run via `smart-contracts.yml` CI job or locally).
+- [ ] **D1.6** — Wasm binary size is within the budget tracked in
+      `smart-contracts/wasm-sizes.json`; `scripts/check-wasm-size.mjs` passes.
+- [ ] **D1.7** — `scripts/check_upgrade_paths.sh` passes — confirms no contract
+      calls `update_current_contract_wasm` outside the canonical upgrade path.
+
+#### Gas Limits
+- [ ] **D1.8** — Gas cost estimates for every entry point have been checked
+      against `smart-contracts/gas-baselines.json`; `scripts/check-gas-baselines.mjs`
+      passes.
+- [ ] **D1.9** — No entry point iterates an unbounded collection in a single
+      transaction; pagination cursors cap all reads at ≤ 100 items and writes at
+      ≤ 50 items (see M6).
+- [ ] **D1.10** — TTL `extend_ttl` calls are present on every access path for
+      Persistent and Temporary storage; no key can silently expire mid-operation
+      (see M7).
+
+#### Access Control
+- [ ] **D1.11** — Admin address is a multisig (governance contract or hardware
+      wallet), not a single developer key (see M11).
+- [ ] **D1.12** — The upgrade authority has been connected to the `UpgradeManager`
+      contract; no contract exposes a direct `update_current_contract_wasm` path
+      outside the canonical `Upgradeable` trait.
+- [ ] **D1.13** — Every config setter validates its input before persisting:
+      limits > 0, addresses non-zero, no self-transfer where forbidden (see M10).
+- [ ] **D1.14** — The full contract test suite (`cargo test`) passes, including
+      all failure-path tests for every `Err(...)` variant (see M12).
+
+---
+
+### D2 — Deployment Checklist
+
+Complete these during and immediately after running `deploy.sh`.
+
+#### Key Management
+- [ ] **D2.1** — `STELLAR_SECRET_KEY` is loaded from an environment variable or
+      secrets manager — never from a checked-in file or hardcoded string.
+- [ ] **D2.2** — The deploying keypair is network-specific (a testnet key is
+      never reused on mainnet and vice versa).
+- [ ] **D2.3** — After deployment, the deploying keypair's on-chain authority is
+      transferred to the multisig admin; the deployment key is rotated or retired.
+- [ ] **D2.4** — All contract IDs, Wasm hashes and deployment timestamps are
+      recorded in the versioned metadata file
+      (`smart-contracts/deployments/<network>.json`) and committed to the repository.
+- [ ] **D2.5** — Private keys and seed phrases are absent from deployment metadata
+      files, CI logs, and any artifact published during this workflow.
+
+#### Network Verification
+- [ ] **D2.6** — `scripts/verify.sh --network <network> --strict` exits zero; the
+      on-chain Wasm hash and admin address match the deployment metadata.
+- [ ] **D2.7** — The correct network passphrase was used during deployment
+      (testnet / futurenet / mainnet — see `DEPLOYMENT_GUIDE.md`).
+- [ ] **D2.8** — The deploying account has sufficient XLM to cover all contract
+      storage rent for the expected operation period; balance checked via Horizon.
+- [ ] **D2.9** — A dry-run (`./scripts/upgrade.sh --dry-run`) was executed before
+      any upgrade to confirm exactly which contracts will be modified.
+- [ ] **D2.10** — For mainnet: the deployment transaction hash has been recorded
+      and the deployment confirmed in Stellar Explorer before proceeding.
+
+---
+
+### D3 — Post-Deployment Checklist
+
+Complete these within 24 hours of a successful deployment or upgrade.
+
+#### Event Monitoring
+- [ ] **D3.1** — An event subscription (via Horizon streaming or a backend worker)
+      is active for every state-transition event emitted by the deployed contracts;
+      see `smart-contracts/docs/TASK_STORE_EVENTS.md` and
+      `smart-contracts/docs/events.md` for the event catalogue.
+- [ ] **D3.2** — Alerts are configured to fire when any contract emits an
+      error-level event (e.g. bond slashed, dispute filed, escrow expired).
+- [ ] **D3.3** — The reconciliation service (`EventRetentionService` / payment
+      reconciliation) has been restarted and confirmed healthy against the new
+      contract addresses.
+- [ ] **D3.4** — Gas baseline snapshots have been updated (`cargo test` for gas
+      tests, then commit updated `gas-baselines.json`) so regressions are caught
+      on the next change.
+
+#### Upgrade Plan
+- [ ] **D3.5** — A rollback plan is documented: the previous Wasm hash is recorded
+      in the deployment metadata and a `rollback_upgrade` command is known to the
+      on-call operator. The 48-hour rollback window is tracked.
+- [ ] **D3.6** — The next scheduled upgrade version and migration plan have been
+      drafted (or explicitly marked "no upgrade planned") so the team is not
+      surprised by storage-layout constraints later.
+- [ ] **D3.7** — Deployment metadata (`deployments/<network>.json`) and
+      `DEPLOYMENT_GUIDE.md` are up to date; a PR with these changes has been merged.
+- [ ] **D3.8** — A post-deployment smoke test has run against the live contract
+      (at minimum: register a test agent, submit a test task, verify payment flow
+      end-to-end on testnet).
+
+---
+
+### D4 — Emergency Response Procedures
+
+Use these procedures when a deployed contract exhibits unexpected behaviour, a
+security vulnerability is discovered, or an upgrade must be reversed.
+
+#### Immediate triage (< 1 hour)
+1. **Pause the contract** (if the contract supports a pause entry point) to
+   prevent further state mutations while the incident is assessed:
+   ```bash
+   stellar contract invoke --network <network> \
+     --source-account $STELLAR_SECRET_KEY \
+     --id $CONTRACT_ID -- pause
+   ```
+2. **Freeze affected agent(s)** via the registry admin if the incident involves
+   a rogue or compromised agent:
+   ```bash
+   stellar contract invoke --network <network> \
+     --source-account $STELLAR_SECRET_KEY \
+     --id $REGISTRY_ID -- freeze_agent --agent_id <AGENT_ADDRESS>
+   ```
+3. **Capture on-chain state** — record the current ledger sequence, event log
+   cursor, and any affected balance IDs before any recovery action modifies them.
+
+#### Rollback (within 48-hour window)
+4. Confirm the rollback window is still open:
+   ```bash
+   stellar contract invoke --network <network> \
+     --source-account $STELLAR_SECRET_KEY \
+     --id $UPGRADE_MANAGER_ID -- can_rollback
+   ```
+5. Execute rollback via the `UpgradeManager`:
+   ```bash
+   stellar contract invoke --network <network> \
+     --source-account $STELLAR_SECRET_KEY \
+     --id $UPGRADE_MANAGER_ID -- rollback_upgrade
+   ```
+6. Run `scripts/verify.sh --network <network> --strict` to confirm the rollback
+   restored the previous Wasm hash and admin address.
+7. Resume the contract (if it was paused in step 1) only after the rollback is
+   verified.
+
+#### Rollback window expired
+8. If the 48-hour window has closed, prepare a **recovery upgrade** that patches
+   the vulnerability, test it on testnet against a copy of production state, then
+   execute the full D1 → D2 → D3 workflow again.
+9. Do **not** use `--force` to bypass safety checks during a recovery upgrade;
+   the forced path skips pre-upgrade hooks and version compatibility checks.
+
+#### Escrow / payment incident
+10. For a payment contract incident, do not attempt manual claimable-balance
+    operations against active task escrows without first halting the coordinator.
+    Incorrect manual claims are irreversible on Stellar.
+11. Contact the reconciliation team to run a full drift scan
+    (`npm run reconcile` or the admin API endpoint) before and after any
+    manual recovery action to establish a clear before/after record.
+
+#### Post-incident
+12. File a post-mortem issue within 48 hours covering: timeline, root cause,
+    affected contracts/users, recovery actions taken, and preventive measures.
+13. Update the threat model (`docs/THREAT_MODEL.md`) if the incident revealed a
+    previously unmodelled attack surface.
+14. Add a regression test (`cargo test`) that would have caught the issue, and
+    verify it fails on the vulnerable code before merging the fix.
+
+---
+
 ## Pre-Mainnet Security Gate
 
 A mainnet release additionally requires:
